@@ -45,3 +45,4 @@ storage/logs/
 coverage/
 lcov.info
 *.profraw
+.security-audit/

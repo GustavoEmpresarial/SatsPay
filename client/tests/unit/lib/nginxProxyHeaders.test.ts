@@ -54,4 +54,9 @@ describe('nginx SPA shell cache', () => {
     expect(nginxConf).toMatch(/location\s*=\s*\/index\.html/);
     expect(nginxConf).toMatch(/Cache-Control "no-store, no-cache, must-revalidate"/);
   });
+
+  it('listens on 8080 for non-root nginx', () => {
+    expect(nginxConf).toMatch(/listen\s+8080\s*;/);
+    expect(nginxConf).not.toMatch(/listen\s+80\s*;/);
+  });
 });

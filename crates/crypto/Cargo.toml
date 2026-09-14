@@ -11,7 +11,9 @@ hkdf = "0.12"
 sha2 = "0.10"
 hmac = "0.12"
 argon2 = "0.5"
-jsonwebtoken = "9"
+# ≥10.3.0: CVE-2026-25537 (type confusion on malformed exp/nbf).
+# rust_crypto: HS256 without aws-lc native build.
+jsonwebtoken = { version = "10.3", default-features = false, features = ["rust_crypto"] }
 serde.workspace = true
 thiserror = "1"
 rand = "0.8"
