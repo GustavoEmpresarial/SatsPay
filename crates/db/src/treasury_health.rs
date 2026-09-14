@@ -115,14 +115,18 @@ pub struct TreasuryHealth {
     pub unswept_deposits: Vec<UnsweptCoin>,
 }
 
-fn hard_block_enabled() -> bool {
-    match std::env::var("FEE_MARGIN_HARD_BLOCK") {
-        Ok(v) => {
+pub fn hard_block_enabled() -> bool {
+    hard_block_from_env_value(std::env::var("FEE_MARGIN_HARD_BLOCK").ok().as_deref())
+}
+
+/// `None` (unset) → ON. Explicit `0`/`false`/`off`/`no` → OFF.
+pub fn hard_block_from_env_value(raw: Option<&str>) -> bool {
+    match raw {
+        Some(v) => {
             let t = v.trim().to_ascii_lowercase();
             !(t == "0" || t == "false" || t == "off" || t == "no")
         }
-        // Default ON — never spend more network than we earn.
-        Err(_) => true,
+        None => true,
     }
 }
 
@@ -580,4 +584,20 @@ async fn fee_series(
         });
     }
     Ok(out)
+}
+
+#[cfg(test)]
+mod hard_block_tests {
+    use super::hard_block_from_env_value;
+
+    #[test]
+    fn fee_margin_hard_block_defaults_on() {
+        assert!(hard_block_from_env_value(None));
+        assert!(hard_block_from_env_value(Some("true")));
+        assert!(hard_block_from_env_value(Some("1")));
+        assert!(!hard_block_from_env_value(Some("false")));
+        assert!(!hard_block_from_env_value(Some("0")));
+        assert!(!hard_block_from_env_value(Some("OFF")));
+        assert!(!hard_block_from_env_value(Some("no")));
+    }
 }

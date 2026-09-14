@@ -48,7 +48,7 @@ fn classify(method: &axum::http::Method, path: &str) -> (&'static str, Limit) {
 }
 
 fn uses_shared_store(class: &str) -> bool {
-    matches!(class, "auth-credentials" | "faucet-claim" | "telemetry-ingest")
+    matches!(class, "auth-credentials" | "faucet-claim" | "telemetry-ingest" | "withdrawals-post")
 }
 
 struct Counters {
@@ -206,7 +206,7 @@ mod tests {
     fn classify_withdrawals_and_generic_api() {
         let (class, _) = classify(&Method::POST, "/v1/withdrawals");
         assert_eq!(class, "withdrawals-post");
-        assert!(!uses_shared_store(class));
+        assert!(uses_shared_store(class));
         let (class, _) = classify(&Method::GET, "/v1/withdrawals");
         assert_eq!(class, "withdrawals-get");
         let (class, _) = classify(&Method::GET, "/v1/wallet");

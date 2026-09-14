@@ -134,6 +134,7 @@ async fn main() {
         lend_close_factor_bps: required_env("LEND_CLOSE_FACTOR_BPS"),
         price_max_stale: std::time::Duration::from_secs(required_env("PRICE_MAX_STALE_SECS")),
         public_api_signature_max_skew: std::time::Duration::from_secs(required_env("PUBLIC_API_SIGNATURE_MAX_SKEW_SECS")),
+        smtp_enabled: std::env::var("SMTP_ENABLED").map(|v| v == "true").unwrap_or(false),
     };
 
     let state = api_http::AppState {

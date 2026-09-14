@@ -18,7 +18,7 @@
 
 ## Hard block
 
-Env `FEE_MARGIN_HARD_BLOCK` (default ON): bloqueia faucet/saque se margem taxas−rede negativa → código `FEE_MARGIN_NEGATIVE`.
+Env `FEE_MARGIN_HARD_BLOCK` (default ON): bloqueia faucet/saque se margem taxas−rede negativa → código `FEE_MARGIN_NEGATIVE`. Se a consulta falhar com o hard block ON → **503** `FEE_MARGIN_CHECK_UNAVAILABLE` (fail-closed). Hard block OFF (`false`/`0`/`off`/`no`) continua permitindo o gasto quando a query falha.
 
 ## UI
 

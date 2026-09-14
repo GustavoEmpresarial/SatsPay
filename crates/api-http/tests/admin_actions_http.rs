@@ -342,6 +342,11 @@ async fn admin_withdrawal_approve_reject(pool: PgPool) {
     );
     let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
     let wd_id = v["id"].as_str().unwrap();
+    sqlx::query("UPDATE withdrawals SET status = 'PENDING', requires_approval = true WHERE id = $1")
+        .bind(Uuid::parse_str(wd_id).unwrap())
+        .execute(&pool)
+        .await
+        .unwrap();
 
     let (_a, admin_token) = common::admin_login(pool.clone()).await;
 
@@ -371,6 +376,11 @@ async fn admin_withdrawal_approve_reject(pool: PgPool) {
     let bytes = wd2.into_body().collect().await.unwrap().to_bytes();
     let v2: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
     let wd2_id = v2["id"].as_str().expect("wd2 id");
+    sqlx::query("UPDATE withdrawals SET status = 'PENDING', requires_approval = true WHERE id = $1")
+        .bind(Uuid::parse_str(wd2_id).unwrap())
+        .execute(&pool)
+        .await
+        .unwrap();
 
     let (st, body) = post_json(
         api_http::app_without_metrics(state.clone()),
@@ -389,4 +399,81 @@ async fn admin_withdrawal_approve_reject(pool: PgPool) {
     )
     .await;
     assert_eq!(st, axum::http::StatusCode::OK, "{body}");
+}
+
+#[sqlx::test(migrations = "../db/migrations")]
+async fn admin_approve_smtp_requires_otp(pool: PgPool) {
+    db::house::ensure_house_inventory(&pool).await.unwrap();
+    let (state, user_token, user_id, _) = common::register_user(pool.clone(), "wdotp2").await;
+    let uid = Uuid::parse_str(&user_id).unwrap();
+    common::credit_personal(&pool, uid, shared::Coin::Pol, 50_000_000).await;
+
+    let wd = api_http::app_without_metrics(state.clone())
+        .oneshot(
+            axum::http::Request::builder()
+                .method("POST")
+                .uri("/v1/withdrawals")
+                .header("authorization", format!("Bearer {user_token}"))
+                .header("content-type", "application/json")
+                .header("x-real-ip", "203.0.113.53")
+                .body(Body::from(
+                    serde_json::json!({
+                        "coin": "POL",
+                        "toAddress": "0x1111111111111111111111111111111111111111",
+                        "amount": "2000000"
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let st = wd.status();
+    let bytes = wd.into_body().collect().await.unwrap().to_bytes();
+    assert_eq!(st, axum::http::StatusCode::CREATED, "{}", String::from_utf8_lossy(&bytes));
+    let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    let wd_id = v["id"].as_str().unwrap();
+    sqlx::query("UPDATE withdrawals SET status = 'PENDING', requires_approval = true WHERE id = $1")
+        .bind(Uuid::parse_str(wd_id).unwrap())
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let (mut admin_state, admin_token) = common::admin_login(pool.clone()).await;
+    admin_state.settings.smtp_enabled = true;
+
+    let (st, body) = post_json(
+        api_http::app_without_metrics(admin_state.clone()),
+        &format!("/v1/admin/withdrawals/{wd_id}/approve"),
+        Some(&admin_token),
+        serde_json::json!({}),
+    )
+    .await;
+    assert_eq!(st, axum::http::StatusCode::OK, "{body}");
+    assert_eq!(body["codeSent"], true);
+
+    let admin_id: Uuid = sqlx::query_scalar("SELECT id FROM users WHERE lower(email) = 'admin@bitcosats.test'")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let hash = crypto::hash_password("123456").unwrap();
+    sqlx::query(
+        "INSERT INTO email_otps (user_id, purpose, code_hash, expires_at) \
+         VALUES ($1, 'LOGIN', $2, now() + interval '10 minutes')",
+    )
+    .bind(admin_id)
+    .bind(&hash)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let (st, body) = post_json(
+        api_http::app_without_metrics(admin_state),
+        &format!("/v1/admin/withdrawals/{wd_id}/approve"),
+        Some(&admin_token),
+        serde_json::json!({ "emailCode": "123456" }),
+    )
+    .await;
+    assert_eq!(st, axum::http::StatusCode::OK, "{body}");
+    assert_eq!(body["status"], "APPROVED");
 }

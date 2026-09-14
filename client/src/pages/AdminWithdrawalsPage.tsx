@@ -58,6 +58,8 @@ export function AdminWithdrawalsPage() {
   const queryClient = useQueryClient();
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
   const [actionError, setActionError] = useState<string | null>(null);
+  const [pendingApproveId, setPendingApproveId] = useState<string | null>(null);
+  const [approveCode, setApproveCode] = useState('');
 
   const { data: withdrawalsData, isLoading, isError, error, refetch } = useQuery<{ withdrawals: WithdrawalItem[] }>({
     queryKey: ['admin-withdrawals', statusFilter],
@@ -70,8 +72,20 @@ export function AdminWithdrawalsPage() {
   });
 
   const approveMutation = useMutation({
-    mutationFn: (id: string) => api(`/admin/withdrawals/${id}/approve`, { method: 'POST' }),
-    onSuccess: () => {
+    mutationFn: ({ id, emailCode }: { id: string; emailCode?: string }) =>
+      api<{ codeSent?: boolean }>(`/admin/withdrawals/${id}/approve`, {
+        method: 'POST',
+        json: { emailCode: emailCode || undefined },
+      }),
+    onSuccess: (res, vars) => {
+      if (res && typeof res === 'object' && res.codeSent) {
+        setPendingApproveId(vars.id);
+        setApproveCode('');
+        setActionError(null);
+        return;
+      }
+      setPendingApproveId(null);
+      setApproveCode('');
       setActionError(null);
       queryClient.invalidateQueries({ queryKey: ['admin-withdrawals'] });
       queryClient.invalidateQueries({ queryKey: ['admin-stats'] });
@@ -200,14 +214,38 @@ export function AdminWithdrawalsPage() {
                       <td className="p-4 text-right whitespace-nowrap">
                         {isPending ? (
                           <div className="flex items-center justify-end gap-2">
-                            <button
-                              type="button"
-                              onClick={() => approveMutation.mutate(w.id)}
-                              disabled={approveMutation.isPending}
-                              className="rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-700 px-3 py-1.5 text-xs font-black transition-all disabled:opacity-50"
-                            >
-                              Aprovar
-                            </button>
+                            {pendingApproveId === w.id ? (
+                              <div className="flex items-center justify-end gap-2">
+                                <input
+                                  type="text"
+                                  inputMode="numeric"
+                                  maxLength={6}
+                                  value={approveCode}
+                                  onChange={(e) => setApproveCode(e.target.value.replace(/\D/g, ''))}
+                                  placeholder="Código e-mail"
+                                  className="w-28 rounded-lg border border-border bg-surface px-2 py-1 font-mono text-xs tracking-widest text-ink"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    approveMutation.mutate({ id: w.id, emailCode: approveCode })
+                                  }
+                                  disabled={approveMutation.isPending || approveCode.length < 6}
+                                  className="rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-700 px-3 py-1.5 text-xs font-black transition-all disabled:opacity-50"
+                                >
+                                  Confirmar
+                                </button>
+                              </div>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => approveMutation.mutate({ id: w.id })}
+                                disabled={approveMutation.isPending}
+                                className="rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-700 px-3 py-1.5 text-xs font-black transition-all disabled:opacity-50"
+                              >
+                                Aprovar
+                              </button>
+                            )}
                             <button
                               type="button"
                               onClick={() => rejectMutation.mutate(w.id)}

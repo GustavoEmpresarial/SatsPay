@@ -386,9 +386,32 @@ async fn pending_withdrawals<R: AuthRepo>(State(state): State<AppState<R>>, user
     }
 }
 
-async fn approve_withdrawal<R: AuthRepo>(State(state): State<AppState<R>>, user: AuthUser, Path(id): Path<Uuid>, ClientIp(ip): ClientIp) -> Response {
+#[derive(Deserialize, Default)]
+struct ApproveWithdrawalReq {
+    #[serde(rename = "emailCode")]
+    email_code: Option<String>,
+}
+
+async fn approve_withdrawal<R: AuthRepo>(
+    State(state): State<AppState<R>>,
+    user: AuthUser,
+    Path(id): Path<Uuid>,
+    ClientIp(ip): ClientIp,
+    body: Option<Json<ApproveWithdrawalReq>>,
+) -> Response {
     if let Err(r) = require_admin(&user) {
         return *r;
+    }
+    let account = match state.auth.get_user_by_id(user.id).await {
+        Ok(Some(u)) => u,
+        Ok(None) => return (StatusCode::NOT_FOUND, Json(json!({ "error": "user not found" }))).into_response(),
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e.to_string() }))).into_response(),
+    };
+    if state.settings.smtp_enabled || account.two_factor_enabled {
+        let code = body.as_ref().and_then(|j| j.email_code.as_deref());
+        if let Err(resp) = crate::auth::require_step_up_otp(&state.auth, user.id, "LOGIN", code).await {
+            return resp;
+        }
     }
     if let Err(e) = db::admin::approve_withdrawal(&state.pool, id, user.id, Some(&ip)).await {
         return (StatusCode::CONFLICT, Json(json!({ "error": e.to_string() }))).into_response();

@@ -21,4 +21,11 @@ describe('Withdraw — structure', () => {
     const src = readFileSync(pagePath, 'utf8');
     expect(src).toMatch(/export function \w+/);
   });
+
+  it('sends email OTP on withdraw, not TOTP', () => {
+    const src = readFileSync(pagePath, 'utf8');
+    expect(src).toContain('emailCode');
+    expect(src).toContain('codeSent');
+    expect(src).not.toContain('totpCode');
+  });
 });

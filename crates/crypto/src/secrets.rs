@@ -67,6 +67,12 @@ impl SecretsService {
     }
 
     pub fn encrypt(&self, plaintext: &str) -> String {
+        self.encrypt_with_aad(plaintext, &[])
+    }
+
+    /// AES-GCM seal bound to `aad` (e.g. `api_key:{id}`). New writes should
+    /// always pass a context string so ciphertexts cannot be swapped across rows.
+    pub fn encrypt_with_aad(&self, plaintext: &str, aad: &[u8]) -> String {
         let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(&self.aes_key));
         let mut iv = [0u8; IV_LEN];
         rand::thread_rng().fill_bytes(&mut iv);
@@ -74,7 +80,7 @@ impl SecretsService {
         // aes-gcm returns ciphertext with the tag appended; legacy format is
         // iv || tag || ct, so split and reorder to match exactly.
         let ct_with_tag = cipher
-            .encrypt(nonce, Payload { msg: plaintext.as_bytes(), aad: &[] })
+            .encrypt(nonce, Payload { msg: plaintext.as_bytes(), aad })
             .expect("AES-GCM encryption is infallible for valid key/nonce sizes");
         let (ct, tag) = ct_with_tag.split_at(ct_with_tag.len() - TAG_LEN);
 
@@ -86,6 +92,21 @@ impl SecretsService {
     }
 
     pub fn decrypt(&self, payload_b64: &str) -> Result<String, CryptoError> {
+        self.open(payload_b64, &[])
+    }
+
+    /// Open a ciphertext with `aad`. If that fails and `aad` is non-empty,
+    /// retry with empty AAD so pre-AAD rows (`HOT_MNEMONIC_ENC`, old `key_enc`)
+    /// still decrypt.
+    pub fn decrypt_with_aad(&self, payload_b64: &str, aad: &[u8]) -> Result<String, CryptoError> {
+        match self.open(payload_b64, aad) {
+            Ok(plain) => Ok(plain),
+            Err(_) if !aad.is_empty() => self.open(payload_b64, &[]),
+            Err(e) => Err(e),
+        }
+    }
+
+    fn open(&self, payload_b64: &str, aad: &[u8]) -> Result<String, CryptoError> {
         let buf = base64::engine::general_purpose::STANDARD
             .decode(payload_b64)
             .map_err(|_| CryptoError::InvalidBase64)?;
@@ -103,7 +124,7 @@ impl SecretsService {
         let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(&self.aes_key));
         let nonce = Nonce::from_slice(iv);
         let plaintext = cipher
-            .decrypt(nonce, Payload { msg: &ct_with_tag, aad: &[] })
+            .decrypt(nonce, Payload { msg: &ct_with_tag, aad })
             .map_err(|_| CryptoError::DecryptionFailed)?;
         String::from_utf8(plaintext).map_err(|_| CryptoError::DecryptionFailed)
     }

@@ -68,12 +68,10 @@ async fn request_withdrawal<R: AuthRepo>(State(state): State<AppState<R>>, user:
         Ok(None) => return (StatusCode::NOT_FOUND, Json(json!({ "error": "user not found" }))).into_response(),
         Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e.to_string() }))).into_response(),
     };
-    if account.two_factor_enabled {
-        let code = body.email_code.as_deref().or(body.totp_code.as_deref()).unwrap_or("");
-        match state.auth.verify_withdrawal_otp(user.id, code).await {
-            Ok(true) => {}
-            Ok(false) => return (StatusCode::UNAUTHORIZED, Json(json!({ "error": "invalid or expired 2FA code" }))).into_response(),
-            Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e.to_string() }))).into_response(),
+    if state.settings.smtp_enabled || account.two_factor_enabled {
+        let code = body.email_code.as_deref().or(body.totp_code.as_deref());
+        if let Err(resp) = crate::auth::require_step_up_otp(&state.auth, user.id, "WITHDRAWAL", code).await {
+            return resp;
         }
     }
 
@@ -93,7 +91,19 @@ async fn request_withdrawal<R: AuthRepo>(State(state): State<AppState<R>>, user:
         }
         Ok(false) => {}
         Err(e) => {
-            tracing::warn!(error = %e, coin = %coin.as_str(), "fee margin check failed; allowing withdrawal");
+            if db::treasury_health::hard_block_enabled() {
+                tracing::error!(error = %e, coin = %coin.as_str(), "fee margin check failed; blocking withdrawal");
+                return (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    Json(json!({
+                        "error": "fee margin check unavailable",
+                        "code": "FEE_MARGIN_CHECK_UNAVAILABLE",
+                        "coin": coin.as_str(),
+                    })),
+                )
+                    .into_response();
+            }
+            tracing::warn!(error = %e, coin = %coin.as_str(), "fee margin check failed; hard block off, allowing withdrawal");
         }
     }
 

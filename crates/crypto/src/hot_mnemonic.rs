@@ -11,6 +11,10 @@
 use crate::secrets::{CryptoError, SecretsService};
 use thiserror::Error;
 
+/// AAD for newly encrypted hot mnemonics. Decrypt still accepts empty-AAD
+/// legacy `HOT_MNEMONIC_ENC` via [`SecretsService::decrypt_with_aad`].
+pub const HOT_MNEMONIC_AAD: &[u8] = b"bitcosats:hot_mnemonic:v1";
+
 #[derive(Debug, Error)]
 pub enum HotMnemonicError {
     #[error("HOT_MNEMONIC plaintext is forbidden when NODE_ENV=production; set HOT_MNEMONIC_ENC")]
@@ -40,7 +44,7 @@ pub fn bootstrap_hot_mnemonic(secrets: &SecretsService) -> Result<Option<String>
             std::env::remove_var("HOT_MNEMONIC");
             tracing::warn!("HOT_MNEMONIC plaintext ignored — using HOT_MNEMONIC_ENC only");
         }
-        let mnemonic = secrets.decrypt(&ct)?;
+        let mnemonic = secrets.decrypt_with_aad(&ct, HOT_MNEMONIC_AAD)?;
         if mnemonic.split_whitespace().count() < 12 {
             tracing::warn!("HOT_MNEMONIC_ENC decrypted but word count looks short");
         }
@@ -62,5 +66,5 @@ pub fn bootstrap_hot_mnemonic(secrets: &SecretsService) -> Result<Option<String>
 
 /// Encrypt a mnemonic for storage as `HOT_MNEMONIC_ENC` (ops helper / tests).
 pub fn encrypt_hot_mnemonic(secrets: &SecretsService, mnemonic: &str) -> String {
-    secrets.encrypt(mnemonic.trim())
+    secrets.encrypt_with_aad(mnemonic.trim(), HOT_MNEMONIC_AAD)
 }

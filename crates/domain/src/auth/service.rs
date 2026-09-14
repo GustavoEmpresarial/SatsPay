@@ -304,6 +304,17 @@ impl<R: AuthRepo> AuthService<R> {
         self.verify_email_otp(user_id, "WITHDRAWAL", code).await
     }
 
+    /// Send a fresh email OTP. Used by HTTP step-up (withdraw / admin approve).
+    pub async fn request_otp(&self, user_id: uuid::Uuid, purpose: &str) -> Result<(), AuthError> {
+        self.request_email_otp(user_id, purpose).await?;
+        Ok(())
+    }
+
+    /// Verify an email OTP for an arbitrary purpose (`LOGIN`, `WITHDRAWAL`, …).
+    pub async fn verify_otp(&self, user_id: uuid::Uuid, purpose: &str, code: &str) -> Result<bool, AuthError> {
+        self.verify_email_otp(user_id, purpose, code).await
+    }
+
     pub async fn enable_2fa(&self, user_id: uuid::Uuid, code: &str) -> Result<(), AuthError> {
         if !self.verify_email_otp(user_id, "ENABLE_2FA", code).await? {
             return Err(AuthError::Invalid2fa);

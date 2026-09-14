@@ -15,6 +15,10 @@ use std::time::Duration;
 use subtle::ConstantTimeEq;
 use uuid::Uuid;
 
+fn api_key_aad(id: Uuid) -> String {
+    format!("api_key:{id}")
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum PublicApiError {
     #[error(transparent)]
@@ -118,13 +122,15 @@ pub async fn issue_api_key(pool: &PgPool, secrets: &SecretsService, user_id: Uui
     let raw = crypto::random_token(32);
     let key_hash = secrets.hmac_hex(&raw);
     let key_prefix = raw[..8].to_string();
-    let key_enc = secrets.encrypt(&raw);
+    let id = Uuid::new_v4();
+    let key_enc = secrets.encrypt_with_aad(&raw, api_key_aad(id).as_bytes());
     let expires_at = expires_in_days.map(|d| Utc::now() + chrono::Duration::days(d));
 
-    let id: Uuid = sqlx::query_scalar(
-        "INSERT INTO api_keys (user_id, label, key_hash, key_prefix, key_enc, scopes, allowed_ips, expires_at, require_signature) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id",
+    sqlx::query(
+        "INSERT INTO api_keys (id, user_id, label, key_hash, key_prefix, key_enc, scopes, allowed_ips, expires_at, require_signature) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
     )
+    .bind(id)
     .bind(user_id)
     .bind(label)
     .bind(&key_hash)
@@ -134,7 +140,7 @@ pub async fn issue_api_key(pool: &PgPool, secrets: &SecretsService, user_id: Uui
     .bind(allowed_ips)
     .bind(expires_at)
     .bind(require_signature)
-    .fetch_one(pool)
+    .execute(pool)
     .await?;
 
     Ok(IssuedKey { id, key: raw, prefix: key_prefix })
@@ -149,7 +155,7 @@ pub async fn rotate_api_key(pool: &PgPool, secrets: &SecretsService, user_id: Uu
     let raw = crypto::random_token(32);
     let key_hash = secrets.hmac_hex(&raw);
     let key_prefix = raw[..8].to_string();
-    let key_enc = secrets.encrypt(&raw);
+    let key_enc = secrets.encrypt_with_aad(&raw, api_key_aad(id).as_bytes());
     sqlx::query("UPDATE api_keys SET key_hash = $2, key_prefix = $3, key_enc = $4 WHERE id = $1").bind(id).bind(&key_hash).bind(&key_prefix).bind(&key_enc).execute(pool).await?;
     Ok(IssuedKey { id, key: raw, prefix: key_prefix })
 }
@@ -255,7 +261,9 @@ pub async fn verify_signed_request(pool: &PgPool, secrets: &SecretsService, inpu
     let record = row_to_record(row);
     check_usable(&record, input.source_ip)?;
 
-    let raw_key = secrets.decrypt(&key_enc).map_err(|_| PublicApiError::InvalidKey)?;
+    let raw_key = secrets
+        .decrypt_with_aad(&key_enc, api_key_aad(record.id).as_bytes())
+        .map_err(|_| PublicApiError::InvalidKey)?;
     let expected = sign_request(&raw_key, input.timestamp, input.method, input.path, input.raw_body);
     if expected.len() != input.signature.len() || expected.as_bytes().ct_eq(input.signature.as_bytes()).unwrap_u8() != 1 {
         return Err(PublicApiError::SignatureMismatch);

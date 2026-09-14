@@ -607,7 +607,7 @@ async fn security_logs<R: AuthRepo>(
     }
 }
 
-fn auth_error_response(err: AuthError) -> Response {
+pub(crate) fn auth_error_response(err: AuthError) -> Response {
     let status = match &err {
         AuthError::Forbidden => StatusCode::FORBIDDEN,
         AuthError::Conflict => StatusCode::CONFLICT,
@@ -638,6 +638,31 @@ fn auth_error_response(err: AuthError) -> Response {
         Json(serde_json::json!({ "error": { "code": code, "message": message } })),
     )
         .into_response()
+}
+
+/// Step-up email OTP. Empty code → send + `{ codeSent: true }`; bad code → `INVALID_2FA`.
+pub(crate) async fn require_step_up_otp<R: AuthRepo>(
+    auth: &domain::auth::AuthService<R>,
+    user_id: uuid::Uuid,
+    purpose: &str,
+    code: Option<&str>,
+) -> Result<(), Response> {
+    let code = code.map(str::trim).filter(|c| !c.is_empty());
+    match code {
+        None => match auth.request_otp(user_id, purpose).await {
+            Ok(()) => Err((
+                StatusCode::OK,
+                Json(serde_json::json!({ "codeSent": true })),
+            )
+                .into_response()),
+            Err(err) => Err(auth_error_response(err)),
+        },
+        Some(code) => match auth.verify_otp(user_id, purpose, code).await {
+            Ok(true) => Ok(()),
+            Ok(false) => Err(auth_error_response(AuthError::Invalid2fa)),
+            Err(err) => Err(auth_error_response(err)),
+        },
+    }
 }
 
 #[cfg(test)]

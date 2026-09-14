@@ -67,7 +67,8 @@ export function WithdrawPage() {
 
   const [address, setAddress] = useState('');
   const [inputVal, setInputVal] = useState('');
-  const [totp, setTotp] = useState('');
+  const [emailCode, setEmailCode] = useState('');
+  const [needsEmailCode, setNeedsEmailCode] = useState(false);
   const [msg, setMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [showAllFeesModal, setShowAllFeesModal] = useState(false);
 
@@ -185,22 +186,31 @@ export function WithdrawPage() {
 
   const withdrawMut = useMutation({
     mutationFn: () =>
-      api('/withdrawals', {
+      api<{ codeSent?: boolean }>('/withdrawals', {
         method: 'POST',
         json: {
           coin,
           toAddress: address.trim(),
           amount: smallestAmount.toString(),
-          ...(totp ? { totpCode: totp.trim() } : {}),
+          ...(emailCode ? { emailCode: emailCode.trim() } : {}),
         },
       }),
-    onSuccess: () => {
+    onSuccess: (res) => {
+      if (res && typeof res === 'object' && res.codeSent) {
+        setNeedsEmailCode(true);
+        setMsg({
+          type: 'success',
+          text: 'Enviamos um código para o seu e-mail. Informe-o para confirmar o saque.',
+        });
+        return;
+      }
       qc.invalidateQueries({ queryKey: ['wallets'] });
       qc.invalidateQueries({ queryKey: ['ledger'] });
       qc.invalidateQueries({ queryKey: ['withdrawals-history'] });
       setAddress('');
       setInputVal('');
-      setTotp('');
+      setEmailCode('');
+      setNeedsEmailCode(false);
       setMsg({
         type: 'success',
         text: `Saque de ${formatAmount(smallestAmount, coin)} ${coin} solicitado com sucesso!`,
@@ -612,11 +622,11 @@ export function WithdrawPage() {
                   </div>
                 </div>
 
-                {/* 2FA TOTP INPUT */}
-                {user?.twoFactorEnabled ? (
+                {/* Email OTP (SMTP step-up or 2FA enabled) */}
+                {needsEmailCode || user?.twoFactorEnabled ? (
                   <div className="space-y-1.5">
                     <label className="block text-xs font-bold uppercase tracking-wider text-ink-muted flex items-center justify-between">
-                      <span>Código de Autenticação 2FA</span>
+                      <span>Código de autenticação (e-mail)</span>
                       <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
                         <i className="bi bi-shield-check mr-1" /> Proteção Ativa
                       </span>
@@ -624,8 +634,8 @@ export function WithdrawPage() {
                     <input
                       type="text"
                       required
-                      value={totp}
-                      onChange={(e) => setTotp(e.target.value.replace(/\D/g, ''))}
+                      value={emailCode}
+                      onChange={(e) => setEmailCode(e.target.value.replace(/\D/g, ''))}
                       maxLength={6}
                       className="input w-full font-mono text-base tracking-widest text-center py-2.5"
                       placeholder="000000"

@@ -90,6 +90,7 @@ pub fn test_state(pool: PgPool) -> AppState<PgAuthRepo> {
             lend_close_factor_bps: 5000,
             price_max_stale: Duration::from_secs(86_400),
             public_api_signature_max_skew: Duration::from_secs(300),
+            smtp_enabled: false,
         },
         swapkit: Arc::new(SwapKitClient::from_env()),
     }

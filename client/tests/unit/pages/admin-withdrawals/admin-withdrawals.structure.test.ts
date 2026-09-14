@@ -21,4 +21,11 @@ describe('Admin Withdrawals — structure', () => {
     const src = readFileSync(pagePath, 'utf8');
     expect(src).toMatch(/export function \w+/);
   });
+
+  it('approve step-up sends emailCode', () => {
+    const src = readFileSync(pagePath, 'utf8');
+    expect(src).toContain('emailCode');
+    expect(src).toContain('codeSent');
+    expect(src).toContain('Código e-mail');
+  });
 });

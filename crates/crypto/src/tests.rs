@@ -55,6 +55,22 @@ fn refresh_token_hash_is_keyed_and_prefixed() {
 }
 
 #[test]
+fn aad_binds_ciphertext_and_legacy_empty_still_opens() {
+    let svc = SecretsService::from_hex(test_key()).unwrap();
+    let a = b"api_key:11111111-1111-1111-1111-111111111111";
+    let b = b"api_key:22222222-2222-2222-2222-222222222222";
+    let bound = svc.encrypt_with_aad("raw-secret", a);
+    assert_eq!(svc.decrypt_with_aad(&bound, a).unwrap(), "raw-secret");
+    assert!(svc.decrypt_with_aad(&bound, b).is_err());
+    // New ciphertext must not open with empty AAD via decrypt() (no fallback).
+    assert!(svc.decrypt(&bound).is_err());
+
+    let legacy = svc.encrypt("legacy-secret");
+    assert_eq!(svc.decrypt(&legacy).unwrap(), "legacy-secret");
+    assert_eq!(svc.decrypt_with_aad(&legacy, a).unwrap(), "legacy-secret");
+}
+
+#[test]
 fn webhook_signing_secret_is_stable_per_merchant() {
     let svc = SecretsService::from_hex(test_key()).unwrap();
     let a = "11111111-1111-1111-1111-111111111111";

@@ -112,7 +112,19 @@ async fn execute_claim<R: AuthRepo>(
         }
         Ok(false) => {}
         Err(e) => {
-            tracing::warn!(error = %e, coin = %coin.as_str(), "fee margin check failed; allowing claim");
+            if db::treasury_health::hard_block_enabled() {
+                tracing::error!(error = %e, coin = %coin.as_str(), "fee margin check failed; blocking claim");
+                return (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    Json(json!({
+                        "error": "fee margin check unavailable",
+                        "code": "FEE_MARGIN_CHECK_UNAVAILABLE",
+                        "coin": coin.as_str(),
+                    })),
+                )
+                    .into_response();
+            }
+            tracing::warn!(error = %e, coin = %coin.as_str(), "fee margin check failed; hard block off, allowing claim");
         }
     }
 

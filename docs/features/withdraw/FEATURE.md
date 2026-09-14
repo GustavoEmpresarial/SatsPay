@@ -40,6 +40,8 @@
 
 Página React `WithdrawPage`. Chama 3 endpoint(s) via `api()`. 2FA / fee / min withdrawal; status PENDING→BROADCAST→CONFIRMED.
 
+OTP de saque: se `SMTP_ENABLED=true` **ou** `two_factor_enabled`, `POST /v1/withdrawals` exige código e-mail (`emailCode`). Sem código → `{ "codeSent": true }` e envio OTP `WITHDRAWAL`. Sem SMTP e sem 2FA, o saque segue sem step-up.
+
 **Pausa temporária:** `BTC` / `LTC` / `DOGE` / `DGB` — `POST /v1/withdrawals` → `503` `WITHDRAWAL_PAUSED` (mesma lista `DEPOSIT_WITHDRAW_PAUSED_COINS`).
 
 ## Notas de overview legado
