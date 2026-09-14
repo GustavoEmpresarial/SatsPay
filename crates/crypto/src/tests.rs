@@ -55,6 +55,31 @@ fn refresh_token_hash_is_keyed_and_prefixed() {
 }
 
 #[test]
+fn webhook_signing_secret_is_stable_per_merchant() {
+    let svc = SecretsService::from_hex(test_key()).unwrap();
+    let a = "11111111-1111-1111-1111-111111111111";
+    let b = "22222222-2222-2222-2222-222222222222";
+    assert_eq!(svc.webhook_signing_secret(a), svc.webhook_signing_secret(a));
+    assert_ne!(svc.webhook_signing_secret(a), svc.webhook_signing_secret(b));
+    assert_ne!(svc.webhook_signing_secret(a), svc.hmac_hex(&format!("merchant:{a}")));
+}
+
+#[test]
+fn webhook_payload_verify_rejects_tamper() {
+    let svc = SecretsService::from_hex(test_key()).unwrap();
+    let merchant = "11111111-1111-1111-1111-111111111111";
+    let payload = r#"{"event":"deposit.confirmed","invoiceId":"inv-1"}"#;
+    let sig = svc.sign_webhook_payload(merchant, payload);
+    assert!(svc.verify_webhook_payload(merchant, payload, &sig));
+    assert!(!svc.verify_webhook_payload(merchant, r#"{"event":"tampered"}"#, &sig));
+    assert!(!svc.verify_webhook_payload(
+        "22222222-2222-2222-2222-222222222222",
+        payload,
+        &sig
+    ));
+}
+
+#[test]
 fn password_hash_uses_production_argon2id_params() {
     let hash = hash_password("correct horse battery staple").unwrap();
     assert!(hash.starts_with("$argon2id$"));

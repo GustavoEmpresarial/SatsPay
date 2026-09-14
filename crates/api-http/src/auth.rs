@@ -20,9 +20,10 @@ const REFRESH_COOKIE_HOST: &str = "__Host-refresh_token";
 /// 30 days — mirrors a typical refresh TTL; the DB row is the real authority.
 const REFRESH_COOKIE_MAX_AGE_SECS: i64 = 60 * 60 * 24 * 30;
 
-/// Must match the Turnstile widget `action` on LoginPage / RegisterPage.
+/// Must match the Turnstile widget `action` on LoginPage / RegisterPage / AdminLoginPage.
 pub const LOGIN_TURNSTILE_ACTION: &str = "login";
 pub const REGISTER_TURNSTILE_ACTION: &str = "register";
+pub const ADMIN_LOGIN_TURNSTILE_ACTION: &str = "admin_login";
 
 pub fn routes<R: AuthRepo + 'static>() -> Router<AppState<R>> {
     Router::new()
@@ -399,6 +400,45 @@ async fn admin_login<R: AuthRepo>(
     Json(body): Json<LoginRequest>,
 ) -> Response {
     let ua = extract_user_agent(&headers);
+
+    let captcha_token = body.captcha_token.as_deref().unwrap_or("");
+    let captcha_result = state
+        .captcha
+        .verify(
+            &state.pool,
+            captcha_token,
+            Some(&ip),
+            captcha::VerifyOptions {
+                expected_action: Some(ADMIN_LOGIN_TURNSTILE_ACTION),
+                expected_hostnames: &state.settings.captcha_expected_hostnames,
+            },
+        )
+        .await;
+    let captcha_ok = match captcha_result {
+        Ok(v) => v,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "code": "CAPTCHA_MISCONFIGURED",
+                    "message": e.to_string()
+                })),
+            )
+                .into_response();
+        }
+    };
+
+    if !captcha_ok {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "code": "CAPTCHA_REQUIRED",
+                "message": "Falha na verificação de segurança (Cloudflare Turnstile). Por favor, tente novamente."
+            })),
+        )
+            .into_response();
+    }
+
     match state.auth.login(&body.email, &body.password, body.email_code.as_deref(), true).await {
         Ok(LoginResult::Ok { user, tokens }) => {
             db::audit::record_log_spawned(
@@ -611,6 +651,7 @@ mod tests {
     fn turnstile_actions_match_frontend_widgets() {
         assert_eq!(LOGIN_TURNSTILE_ACTION, "login");
         assert_eq!(REGISTER_TURNSTILE_ACTION, "register");
+        assert_eq!(ADMIN_LOGIN_TURNSTILE_ACTION, "admin_login");
     }
 
     #[test]

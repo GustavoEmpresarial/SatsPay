@@ -21,4 +21,10 @@ describe('Admin Login — structure', () => {
     const src = readFileSync(pagePath, 'utf8');
     expect(src).toMatch(/export function \w+/);
   });
+
+  it('pins Turnstile to admin_login action', () => {
+    const src = readFileSync(pagePath, 'utf8');
+    expect(src).toContain('ADMIN_LOGIN_CAPTCHA_ACTION');
+    expect(src).toContain('captchaToken');
+  });
 });

@@ -25,7 +25,7 @@ struct Limit {
 
 fn classify(method: &axum::http::Method, path: &str) -> (&'static str, Limit) {
     const MIN: u64 = 60;
-    if path == "/v1/auth/login" || path == "/v1/auth/register" {
+    if path == "/v1/auth/login" || path == "/v1/auth/register" || path == "/v1/auth/admin/login" {
         ("auth-credentials", Limit { max: 10, window: Duration::from_secs(5 * MIN) })
     } else if path.starts_with("/v1/faucet") && method == axum::http::Method::POST {
         ("faucet-claim", Limit { max: 20, window: Duration::from_secs(5 * MIN) })
@@ -175,6 +175,10 @@ mod tests {
         assert_eq!(class, "auth-credentials");
         assert_eq!(limit.max, 10);
         assert!(uses_shared_store(class));
+        let (admin, admin_limit) = classify(&Method::POST, "/v1/auth/admin/login");
+        assert_eq!(admin, "auth-credentials");
+        assert_eq!(admin_limit.max, 10);
+        assert!(uses_shared_store(admin));
     }
 
     #[test]

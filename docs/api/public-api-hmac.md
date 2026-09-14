@@ -150,3 +150,28 @@ headers = {
 response = requests.post(f"{BASE_URL}{PATH}", data=body_json, headers=headers)
 print(response.status_code, response.json())
 ```
+
+---
+
+## 6. Webhooks de invoice (`X-SatsPay-Signature`)
+
+Quando uma invoice é confirmada, o gateway POSTa o JSON em `callback_url` com:
+
+```http
+X-SatsPay-Signature: sha256=<hex>
+```
+
+A chave **não** é `satspay_secret_default`. Cada merchant tem um segredo hex estável derivado de `ENCRYPTION_KEY` (HKDF `bitcosats:webhook:v1`). Obtenha o valor autenticado:
+
+```http
+GET /v1/merchant/webhook-signing-secret
+Authorization: Bearer <accessToken>
+```
+
+Verificação (mesmo algoritmo da API pública, chave diferente):
+
+```text
+HMAC-SHA256(key = signing_secret, data = raw_request_body)
+```
+
+Compare o hex com o valor após `sha256=` no header (comparação em tempo constante). Invoices do mesmo merchant compartilham a chave; merchants diferentes têm chaves diferentes.

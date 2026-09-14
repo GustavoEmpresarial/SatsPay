@@ -1,4 +1,4 @@
-//! Merchant pay-with-balance, simulate, test-webhook, x-api-key create.
+//! Merchant pay-with-balance, removed simulate-payment (404), test-webhook, x-api-key create.
 
 mod common;
 
@@ -111,14 +111,29 @@ async fn merchant_pay_simulate_webhook_apikey(pool: PgPool) {
         )
         .await
         .unwrap();
-    let st = sim.status();
-    let bytes = sim.into_body().collect().await.unwrap().to_bytes();
-    assert!(
-        st.is_success(),
-        "simulate={} {}",
-        st,
-        String::from_utf8_lossy(&bytes)
+    assert_eq!(
+        sim.status(),
+        axum::http::StatusCode::NOT_FOUND,
+        "public simulate-payment must be gone"
     );
+
+    let secret = api_http::app_without_metrics(state.clone())
+        .oneshot(
+            axum::http::Request::builder()
+                .method("GET")
+                .uri("/v1/merchant/webhook-signing-secret")
+                .header("authorization", format!("Bearer {merch_token}"))
+                .header("x-real-ip", "203.0.113.86")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert!(secret.status().is_success(), "signing secret={}", secret.status());
+    let secret_bytes = secret.into_body().collect().await.unwrap().to_bytes();
+    let secret_json: serde_json::Value = serde_json::from_slice(&secret_bytes).unwrap();
+    assert!(secret_json["secret"].as_str().unwrap().len() >= 32);
+    assert_eq!(secret_json["header"].as_str().unwrap(), "X-SatsPay-Signature");
 
     let inv3 = create(state.clone(), merch_token.clone(), format!("o-{}", Uuid::new_v4())).await;
     let hook = api_http::app_without_metrics(state.clone())

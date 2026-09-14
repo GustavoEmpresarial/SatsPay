@@ -2,3 +2,4 @@
 export const FAUCET_CAPTCHA_ACTION = 'faucet_claim';
 export const LOGIN_CAPTCHA_ACTION = 'login';
 export const REGISTER_CAPTCHA_ACTION = 'register';
+export const ADMIN_LOGIN_CAPTCHA_ACTION = 'admin_login';

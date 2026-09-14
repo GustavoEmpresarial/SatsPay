@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { Link, Navigate, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { api } from '../lib/api.js';
@@ -6,6 +6,8 @@ import { formatApiError } from '../lib/formatError.js';
 import { useAdminStore } from '../stores/admin.js';
 import { useAuthStore } from '../stores/auth.js';
 import { ThemeToggle } from '../components/ThemeToggle.js';
+import { Turnstile, type TurnstileRef } from '../components/Turnstile.js';
+import { ADMIN_LOGIN_CAPTCHA_ACTION } from '../lib/captchaActions.js';
 
 interface AdminLoginResp {
   user: { id: string; email: string; role: string };
@@ -24,6 +26,8 @@ export function AdminLoginPage() {
   const [codeSent, setCodeSent] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [captchaToken, setCaptchaToken] = useState<string | null>(null);
+  const turnstileRef = useRef<TurnstileRef>(null);
 
   if (admin) return <Navigate to="/admin" replace />;
 
@@ -35,7 +39,12 @@ export function AdminLoginPage() {
       const res = await api<AdminLoginResp | { codeSent: true }>('/auth/admin/login', {
         method: 'POST',
         skipAuth: true,
-        json: { email, password, emailCode: emailCode || undefined },
+        json: {
+          email,
+          password,
+          emailCode: emailCode || undefined,
+          ...(captchaToken ? { captchaToken } : {}),
+        },
       });
       if ('codeSent' in res) {
         setCodeSent(true);
@@ -59,6 +68,8 @@ export function AdminLoginPage() {
       }
     } catch (err) {
       setError(formatApiError(err));
+      setCaptchaToken(null);
+      turnstileRef.current?.reset();
     } finally {
       setLoading(false);
     }
@@ -143,6 +154,15 @@ export function AdminLoginPage() {
                   <i className="bi bi-exclamation-triangle-fill mr-1" />
                   {error}
                 </div>
+              )}
+
+              {!codeSent && (
+                <Turnstile
+                  ref={turnstileRef}
+                  action={ADMIN_LOGIN_CAPTCHA_ACTION}
+                  onVerify={(token) => setCaptchaToken(token)}
+                  onReset={() => setCaptchaToken(null)}
+                />
               )}
 
               <button

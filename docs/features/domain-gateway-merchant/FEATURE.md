@@ -8,8 +8,8 @@
 
 1. Merchant APPROVED cria API key  
 2. `POST /v1/public/…` (HMAC) cria invoice → endereço depósito  
-3. User paga on-chain → worker confirma → ledger DEVELOPER + fee plataforma  
-4. Webhook `callback_url` (retry/attempts)  
+3. User paga on-chain (ou saldo autenticado) → worker / `pay_invoice_with_balance` confirma → ledger DEVELOPER + fee plataforma  
+4. Webhook `callback_url` assinado com HMAC-SHA256 por merchant (`X-SatsPay-Signature: sha256=…`). Segredo derivado de `ENCRYPTION_KEY` (HKDF `bitcosats:webhook:v1`) — `GET /v1/merchant/webhook-signing-secret`. **Não** usar `satspay_secret_default`. Sem sandbox público `simulate-payment`.
 
 ## Admin
 

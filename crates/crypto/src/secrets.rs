@@ -20,6 +20,8 @@ const HMAC_INFO: &[u8] = b"bitcosats:hmac-sha256:v1";
 /// Dedicated HKDF info for refresh-token fingerprints — never reuse the
 /// general API-key HMAC subkey for session tokens.
 const REFRESH_HMAC_INFO: &[u8] = b"bitcosats:refresh-token-hmac:v1";
+/// Dedicated HKDF info for merchant webhook HMAC — never reuse API-key HMAC.
+const WEBHOOK_HMAC_INFO: &[u8] = b"bitcosats:webhook:v1";
 const REFRESH_HASH_PREFIX: &str = "v2:";
 
 #[derive(Debug, Error)]
@@ -41,6 +43,7 @@ pub struct SecretsService {
     aes_key: [u8; 32],
     hmac_key: [u8; 32],
     refresh_hmac_key: [u8; 32],
+    webhook_hmac_key: [u8; 32],
 }
 
 impl SecretsService {
@@ -54,10 +57,12 @@ impl SecretsService {
         let aes_key = derive_key(&master, AES_INFO);
         let hmac_key = derive_key(&master, HMAC_INFO);
         let refresh_hmac_key = derive_key(&master, REFRESH_HMAC_INFO);
+        let webhook_hmac_key = derive_key(&master, WEBHOOK_HMAC_INFO);
         Ok(Self {
             aes_key,
             hmac_key,
             refresh_hmac_key,
+            webhook_hmac_key,
         })
     }
 
@@ -133,6 +138,27 @@ impl SecretsService {
             self.refresh_token_hash(refresh_token),
             sha256_hex(refresh_token),
         ]
+    }
+
+    /// Per-merchant webhook signing secret (hex). Same merchant → same secret;
+    /// different merchants → different secrets. Not persisted — derived from
+    /// `ENCRYPTION_KEY`.
+    pub fn webhook_signing_secret(&self, merchant_id: &str) -> String {
+        Self::hmac_hex_with_key(&self.webhook_hmac_key, &format!("merchant:{merchant_id}"))
+    }
+
+    /// HMAC-SHA256 hex of `payload` keyed by the merchant's webhook secret.
+    pub fn sign_webhook_payload(&self, merchant_id: &str, payload: &str) -> String {
+        let secret = self.webhook_signing_secret(merchant_id);
+        let mut mac = <Hmac<Sha256> as Mac>::new_from_slice(secret.as_bytes())
+            .expect("HMAC accepts any key length");
+        mac.update(payload.as_bytes());
+        hex::encode(mac.finalize().into_bytes())
+    }
+
+    /// Constant-time check that `payload` matches `expected_hex` for this merchant.
+    pub fn verify_webhook_payload(&self, merchant_id: &str, payload: &str, expected_hex: &str) -> bool {
+        crate::ct::ct_eq_str(&self.sign_webhook_payload(merchant_id, payload), expected_hex)
     }
 
     fn hmac_hex_with_key(key: &[u8; 32], input: &str) -> String {

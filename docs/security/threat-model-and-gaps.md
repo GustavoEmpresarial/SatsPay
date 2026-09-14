@@ -12,7 +12,7 @@ Este documento descreve a análise de vetores de ataque, as defesas implementada
 | **T2** | Ataque de repetição (*Replay Attack*) na API Pública | `/v1/public/*` | Janela de expiração de timestamp (300s) + cache atômico de nonces em Postgres (`public_api_signature_nonces`). |
 | **T3** | Reuso ou roubo de Refresh Token | Autenticação / Sessão | Rotação automática de tokens a cada uso. Detecção de reuso revoga imediatamente toda a família de sessões do usuário. |
 | **T4** | Drenagem do Faucet por Bots / Sybil | `/v1/faucet/claim` | Validação de Cloudflare Turnstile com hash de token único (`captcha_seen_tokens`) + cooldown de IP via advisory lock. |
-| **T5** | Forjamento de IP (`X-Forwarded-For` spoofing) | Rate Limit / Audit / API Keys | Resolução de IP confiando apenas no proxy reverso interno / `X-Real-IP`. |
+| **T5** | Forjamento de IP (`X-Forwarded-For` / `CF-Connecting-IP` spoofing) | Rate Limit / Audit / API Keys | Nginx interno copia só `$remote_addr` para `X-Real-IP`. Caddy na borda deve setar `X-Real-IP` a partir do `CF-Connecting-IP` do Cloudflare (peer real). A API só usa `CF-Connecting-IP` se `X-Real-IP` for privado. `API_HOST_BIND` default `127.0.0.1`. |
 | **T6** | Ataques de Força Bruta em Login/Registro | `/v1/auth/*` | Middleware de Rate Limiting por IP e conta + hashing Argon2id com parâmetros seguros. |
 | **T7** | Comprometimento de Chaves Quentes (*Hot Wallet*) | Saques On-chain | Chave pública (`xpub`) no `api-server` (apenas leitura). Chave privada de broadcast no `worker` com limites e aprovação manual do admin para valores altos. |
 | **T8** | Vazamento de Segredos e Chaves | Configurações / Banco | Variáveis sensíveis gerenciadas via External Secrets Operator / Vault; dados no banco criptografados com AES-256-GCM. |

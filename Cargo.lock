@@ -89,7 +89,6 @@ dependencies = [
  "db",
  "domain",
  "hex",
- "hmac",
  "http-body-util",
  "queue",
  "reqwest",

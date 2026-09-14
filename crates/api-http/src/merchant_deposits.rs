@@ -8,21 +8,18 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use bigdecimal::BigDecimal;
 use chrono::Utc;
+use crypto::SecretsService;
 use db::merchant_deposits::{
     create_invoice, get_invoice_by_id, list_invoices_by_merchant,
     pay_invoice_with_balance, record_webhook_delivery, CreateDepositInvoiceInput,
     MerchantDepositInvoice,
 };
 use domain::auth::AuthRepo;
-use hmac::{Hmac, Mac};
 use serde::Deserialize;
 use serde_json::json;
-use sha2::Sha256;
 use std::str::FromStr;
 use std::time::Duration;
 use uuid::Uuid;
-
-type HmacSha256 = Hmac<Sha256>;
 
 pub fn routes<R: AuthRepo + 'static>() -> Router<AppState<R>> {
     Router::new()
@@ -34,13 +31,12 @@ pub fn routes<R: AuthRepo + 'static>() -> Router<AppState<R>> {
         // Aliases for invoices
         .route("/v1/merchant/invoices", get(list_deposits_handler::<R>).post(create_deposit_handler::<R>))
         .route("/v1/merchant/invoices/:id", get(get_deposit_handler::<R>))
+        .route("/v1/merchant/webhook-signing-secret", get(webhook_signing_secret_handler::<R>))
         // Public checkout routes (/pay/:id)
         .route("/v1/public/pay/:id", get(get_public_invoice_handler::<R>))
         .route("/v1/public/pay/:id/balance", post(pay_with_balance_handler::<R>))
-        .route("/v1/public/pay/:id/simulate-payment", post(simulate_demo_payment_handler::<R>))
         .route("/public/pay/:id", get(get_public_invoice_handler::<R>))
         .route("/public/pay/:id/balance", post(pay_with_balance_handler::<R>))
-        .route("/public/pay/:id/simulate-payment", post(simulate_demo_payment_handler::<R>))
 }
 
 #[derive(Deserialize)]
@@ -276,8 +272,9 @@ async fn pay_with_balance_handler<R: AuthRepo>(
             // Dispatch webhook in background
             let pool_clone = state.pool.clone();
             let inv_clone = inv.clone();
+            let secrets = state.secrets.clone();
             tokio::spawn(async move {
-                dispatch_webhook(&pool_clone, &inv_clone).await;
+                dispatch_webhook(&pool_clone, &inv_clone, &secrets).await;
             });
 
             // Send notification email to customer if provided
@@ -315,7 +312,7 @@ async fn test_webhook_handler<R: AuthRepo>(
         return (StatusCode::FORBIDDEN, Json(json!({ "error": "forbidden" }))).into_response();
     }
 
-    let (delivered, status_code, err_msg) = dispatch_webhook(&state.pool, &inv).await;
+    let (delivered, status_code, err_msg) = dispatch_webhook(&state.pool, &inv, &state.secrets).await;
     Json(json!({
         "delivered": delivered,
         "statusCode": status_code,
@@ -324,8 +321,27 @@ async fn test_webhook_handler<R: AuthRepo>(
     .into_response()
 }
 
+/// Hex HMAC key derived for this merchant (`ENCRYPTION_KEY` + HKDF `bitcosats:webhook:v1`).
+async fn webhook_signing_secret_handler<R: AuthRepo>(
+    State(state): State<AppState<R>>,
+    user: AuthUser,
+) -> Response {
+    let secret = state.secrets.webhook_signing_secret(&user.id.to_string());
+    Json(json!({
+        "secret": secret,
+        "algorithm": "HMAC-SHA256",
+        "header": "X-SatsPay-Signature",
+        "format": "sha256=<hex>",
+    }))
+    .into_response()
+}
+
 /// Dispatch signed HTTP POST webhook to merchant's callback_url
-pub async fn dispatch_webhook(pool: &sqlx::PgPool, inv: &MerchantDepositInvoice) -> (bool, Option<i32>, Option<String>) {
+pub async fn dispatch_webhook(
+    pool: &sqlx::PgPool,
+    inv: &MerchantDepositInvoice,
+    secrets: &SecretsService,
+) -> (bool, Option<i32>, Option<String>) {
     let payload = json!({
         "event": "deposit.confirmed",
         "invoiceId": inv.id,
@@ -342,12 +358,7 @@ pub async fn dispatch_webhook(pool: &sqlx::PgPool, inv: &MerchantDepositInvoice)
     });
 
     let payload_str = payload.to_string();
-
-    // Create HMAC-SHA256 signature
-    let secret_key = "satspay_secret_default";
-    let mut mac = HmacSha256::new_from_slice(secret_key.as_bytes()).expect("HMAC can take key of any size");
-    mac.update(payload_str.as_bytes());
-    let signature = hex::encode(mac.finalize().into_bytes());
+    let signature = secrets.sign_webhook_payload(&inv.merchant_id.to_string(), &payload_str);
 
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(8))
@@ -382,30 +393,5 @@ pub async fn dispatch_webhook(pool: &sqlx::PgPool, inv: &MerchantDepositInvoice)
             record_webhook_delivery(pool, inv.id, false, None, Some(&err)).await.ok();
             (false, None, Some(err))
         }
-    }
-}
-
-/// Simulate blockchain payment reception for demo / sandbox
-async fn simulate_demo_payment_handler<R: AuthRepo>(
-    State(state): State<AppState<R>>,
-    Path(id): Path<Uuid>,
-) -> Response {
-    let tx_hash = format!("0x{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
-    match db::merchant_deposits::confirm_invoice(&state.pool, id, Some(&tx_hash)).await {
-        Ok(inv) => {
-            let pool_clone = state.pool.clone();
-            let inv_clone = inv.clone();
-            tokio::spawn(async move {
-                dispatch_webhook(&pool_clone, &inv_clone).await;
-            });
-            Json(json!({
-                "success": true,
-                "message": "Pagamento simulado com sucesso na blockchain!",
-                "txHash": tx_hash,
-                "invoice": inv,
-            }))
-            .into_response()
-        }
-        Err(e) => (StatusCode::BAD_REQUEST, Json(json!({ "error": e.to_string() }))).into_response(),
     }
 }

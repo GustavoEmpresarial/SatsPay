@@ -9,9 +9,10 @@ const nginxConf = readFileSync(
 );
 
 describe('nginx reverse-proxy IP headers', () => {
-  it('forwards a resolved client IP (CF-Connecting-IP preferred over docker $remote_addr)', () => {
+  it('forwards $remote_addr as X-Real-IP (never a client-supplied CF-Connecting-IP)', () => {
     expect(nginxConf).toContain('proxy_set_header X-Forwarded-For $client_ip;');
-    expect(nginxConf).toContain('$http_cf_connecting_ip');
+    expect(nginxConf).toContain('set $client_ip $remote_addr;');
+    expect(nginxConf).not.toContain('$http_cf_connecting_ip');
     expect(nginxConf).not.toContain('$proxy_add_x_forwarded_for');
   });
 

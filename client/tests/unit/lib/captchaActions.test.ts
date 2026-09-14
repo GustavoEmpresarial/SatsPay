@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  ADMIN_LOGIN_CAPTCHA_ACTION,
   FAUCET_CAPTCHA_ACTION,
   LOGIN_CAPTCHA_ACTION,
   REGISTER_CAPTCHA_ACTION,
@@ -10,5 +11,6 @@ describe('captchaActions', () => {
     expect(FAUCET_CAPTCHA_ACTION).toBe('faucet_claim');
     expect(LOGIN_CAPTCHA_ACTION).toBe('login');
     expect(REGISTER_CAPTCHA_ACTION).toBe('register');
+    expect(ADMIN_LOGIN_CAPTCHA_ACTION).toBe('admin_login');
   });
 });

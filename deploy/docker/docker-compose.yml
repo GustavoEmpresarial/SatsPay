@@ -93,7 +93,7 @@ services:
       WITHDRAWAL_APPROVAL_THRESHOLD_USDT: ${WITHDRAWAL_APPROVAL_THRESHOLD_USDT:-}
       WITHDRAWAL_APPROVAL_THRESHOLD_USDC: ${WITHDRAWAL_APPROVAL_THRESHOLD_USDC:-}
     ports:
-      - "${API_HOST_BIND:-0.0.0.0}:${API_HOST_PORT:-4500}:4000"
+      - "${API_HOST_BIND:-127.0.0.1}:${API_HOST_PORT:-4500}:4000"
     networks:
       bitcosats-net:
         aliases: [api-server]
