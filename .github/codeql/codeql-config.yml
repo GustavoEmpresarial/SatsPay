@@ -1,0 +1,12 @@
+name: BitcoSats CodeQL config
+
+paths-ignore:
+  - "**/node_modules/**"
+  - "**/target/**"
+  - "**/dist/**"
+  - "client/dist/**"
+  - "client/public/sdk/**"
+  - "client/coverage*/**"
+  - ".security-audit/**"
+  - "docs/**"
+  - "**/*.min.js"

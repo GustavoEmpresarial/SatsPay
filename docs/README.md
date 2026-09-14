@@ -36,6 +36,7 @@ Bem-vindo à documentação técnica oficial do **BitcoSats**, uma plataforma fi
 ### 7. Segurança e Auditoria
 - [`security/BALANCE_SECURITY.md`](security/BALANCE_SECURITY.md): O modelo formal de segurança de saldo (por que não existem colunas mutáveis de saldo).
 - [`security/threat-model-and-gaps.md`](security/threat-model-and-gaps.md): Análise de vetores de ataque (T1 a T8) e checklist de pendências para lançamento em Mainnet.
+- [`security/SAST.md`](security/SAST.md): CodeQL CI + regras Semgrep de domínio (BitcoSats).
 - [`security/audit-2026-09-01.md`](security/audit-2026-09-01.md): Relatório de auditoria de segurança da infraestrutura e código-fonte.
 
 ### 8. Operações e DevOps

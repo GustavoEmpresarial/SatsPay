@@ -1,0 +1,141 @@
+# BitcoSats / SatsPay domain SAST — catch financial & auth footguns that
+# generic OWASP packs miss. Run: scripts/run_security_sast.sh
+#
+# Severity guide:
+#   ERROR   — known exploitable / must not regress
+#   WARNING — defense-in-depth / audit debt
+
+rules:
+  - id: bitcosats.rust.hardcoded-webhook-hmac-secret
+    message: Hardcoded webhook HMAC secret (e.g. satspay_secret_default). Derive per-merchant from ENCRYPTION_KEY instead.
+    languages: [rust]
+    severity: ERROR
+    metadata:
+      category: security
+      cwe: "CWE-798"
+    pattern-either:
+      - pattern: '"satspay_secret_default"'
+      - pattern: '"webhook_secret_default"'
+
+  - id: bitcosats.rust.public-simulate-payment-route
+    message: Public simulate-payment route credits merchant ledger without an on-chain payer. Must not exist.
+    languages: [rust]
+    severity: ERROR
+    metadata:
+      category: security
+      cwe: "CWE-862"
+    paths:
+      include:
+        - "**/crates/api-http/src/**"
+    pattern-regex: (?i)simulate-payment
+
+  - id: bitcosats.rust.confirm-invoice-in-http-handler
+    message: confirm_invoice in an HTTP module can credit ledger from a request path. Prefer watcher/pay_invoice_with_balance only.
+    languages: [rust]
+    severity: ERROR
+    metadata:
+      category: security
+      cwe: "CWE-862"
+    paths:
+      include:
+        - "**/crates/api-http/src/**"
+      exclude:
+        - "**/tests.rs"
+    pattern-regex: \bconfirm_invoice\s*\(
+
+  - id: bitcosats.rust.trust-cf-connecting-ip
+    message: Reading CF-Connecting-IP in the API trusts a client-spoofable header when not behind Cloudflare. Prefer edge-set X-Real-IP only, or gate behind TRUST_CF_CONNECTING_IP + proxy allowlist.
+    languages: [rust]
+    severity: ERROR
+    metadata:
+      category: security
+      cwe: "CWE-290"
+    paths:
+      include:
+        - "**/crates/api-http/src/client_ip.rs"
+    # Production header read only (avoids comment/test string noise).
+    pattern-regex: \.get\(\s*"cf-connecting-ip"\s*\)|\.get\(\s*"true-client-ip"\s*\)
+
+  - id: bitcosats.rust.fee-margin-fail-open
+    message: Fee-margin check failed open (allowing spend when check errors). With FEE_MARGIN_HARD_BLOCK on, this must return 503 FEE_MARGIN_CHECK_UNAVAILABLE.
+    languages: [rust]
+    severity: ERROR
+    metadata:
+      category: security
+      cwe: "CWE-754"
+    paths:
+      include:
+        - "**/crates/api-http/src/**"
+    # Old fail-open log line (regression). "hard block off, allowing" is intentional when flag is off.
+    pattern-regex: fee margin check failed; allowing
+
+  - id: bitcosats.rust.admin-approve-otp-conditional
+    message: Admin withdrawal approve only requires OTP when smtp_enabled || two_factor_enabled. Stolen admin JWT can approve when SMTP is off and 2FA is disabled. Prefer unconditional require_step_up_otp.
+    languages: [rust]
+    severity: ERROR
+    metadata:
+      category: security
+      cwe: "CWE-308"
+    paths:
+      include:
+        - "**/crates/api-http/src/admin.rs"
+    pattern-regex: smtp_enabled\s*\|\|\s*account\.two_factor_enabled
+
+  - id: bitcosats.rust.http-error-leaks-debug
+    message: HTTP JSON error body includes e.to_string() — may leak sqlx/internal details. Map to stable codes instead.
+    languages: [rust]
+    severity: WARNING
+    metadata:
+      category: security
+      cwe: "CWE-209"
+    paths:
+      include:
+        - "**/crates/api-http/src/**"
+      exclude:
+        - "**/tests.rs"
+    pattern-regex: '"error"\s*:\s*e\.to_string\(\)'
+
+  - id: bitcosats.rust.aes-gcm-empty-aad-literal
+    message: "AES-GCM Payload with empty aad (&[]) allows ciphertext swap across rows. Prefer encrypt_with_aad / decrypt_with_aad with context."
+    languages: [rust]
+    severity: WARNING
+    metadata:
+      category: security
+      cwe: "CWE-354"
+    paths:
+      include:
+        - "**/crates/**"
+      exclude:
+        - "**/crates/crypto/src/secrets.rs"
+        - "**/tests.rs"
+        - "**/tests/**"
+    pattern-regex: aad:\s*&\[\]
+
+  - id: bitcosats.rust.encrypt-without-aad-call
+    message: secrets.encrypt(...) writes empty-AAD ciphertext. New persisted secrets should use encrypt_with_aad.
+    languages: [rust]
+    severity: WARNING
+    metadata:
+      category: security
+      cwe: "CWE-354"
+    paths:
+      include:
+        - "**/crates/db/src/**"
+        - "**/crates/api-http/src/**"
+        - "**/crates/api-server/src/**"
+        - "**/crates/worker/src/**"
+    pattern-regex: \.encrypt\s*\(
+
+  - id: bitcosats.ts.react-store-or-shortcircuit
+    message: "Never short-circuit React hooks (useA() || useB()) — React #311 and can skip auth gates."
+    languages: [typescript]
+    severity: ERROR
+    metadata:
+      category: correctness
+      cwe: "CWE-670"
+    paths:
+      include:
+        - "**/client/src/**"
+    pattern-either:
+      - pattern: "use$A(...) || use$B(...)"
+      - pattern: "use$A(...) && use$B(...)"

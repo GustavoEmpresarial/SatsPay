@@ -402,16 +402,11 @@ async fn approve_withdrawal<R: AuthRepo>(
     if let Err(r) = require_admin(&user) {
         return *r;
     }
-    let account = match state.auth.get_user_by_id(user.id).await {
-        Ok(Some(u)) => u,
-        Ok(None) => return (StatusCode::NOT_FOUND, Json(json!({ "error": "user not found" }))).into_response(),
-        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e.to_string() }))).into_response(),
-    };
-    if state.settings.smtp_enabled || account.two_factor_enabled {
-        let code = body.as_ref().and_then(|j| j.email_code.as_deref());
-        if let Err(resp) = crate::auth::require_step_up_otp(&state.auth, user.id, "LOGIN", code).await {
-            return resp;
-        }
+    // Always step-up: stolen admin JWT alone must not approve withdrawals
+    // (even when SMTP is off / 2FA disabled — NoopEmailSender still rotates OTP).
+    let code = body.as_ref().and_then(|j| j.email_code.as_deref());
+    if let Err(resp) = crate::auth::require_step_up_otp(&state.auth, user.id, "LOGIN", code).await {
+        return resp;
     }
     if let Err(e) = db::admin::approve_withdrawal(&state.pool, id, user.id, Some(&ip)).await {
         return (StatusCode::CONFLICT, Json(json!({ "error": e.to_string() }))).into_response();

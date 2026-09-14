@@ -382,11 +382,26 @@ async fn admin_withdrawal_approve_reject(pool: PgPool) {
         .await
         .unwrap();
 
+    let admin_id: Uuid = sqlx::query_scalar("SELECT id FROM users WHERE lower(email) = 'admin@bitcosats.test'")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let hash = crypto::hash_password("123456").unwrap();
+    sqlx::query(
+        "INSERT INTO email_otps (user_id, purpose, code_hash, expires_at) \
+         VALUES ($1, 'LOGIN', $2, now() + interval '10 minutes')",
+    )
+    .bind(admin_id)
+    .bind(&hash)
+    .execute(&pool)
+    .await
+    .unwrap();
+
     let (st, body) = post_json(
         api_http::app_without_metrics(state.clone()),
         &format!("/v1/admin/withdrawals/{wd_id}/approve"),
         Some(&admin_token),
-        serde_json::json!({}),
+        serde_json::json!({ "emailCode": "123456" }),
     )
     .await;
     assert_eq!(st, axum::http::StatusCode::OK, "{body}");
@@ -402,7 +417,7 @@ async fn admin_withdrawal_approve_reject(pool: PgPool) {
 }
 
 #[sqlx::test(migrations = "../db/migrations")]
-async fn admin_approve_smtp_requires_otp(pool: PgPool) {
+async fn admin_approve_always_requires_otp(pool: PgPool) {
     db::house::ensure_house_inventory(&pool).await.unwrap();
     let (state, user_token, user_id, _) = common::register_user(pool.clone(), "wdotp2").await;
     let uid = Uuid::parse_str(&user_id).unwrap();
@@ -439,8 +454,9 @@ async fn admin_approve_smtp_requires_otp(pool: PgPool) {
         .await
         .unwrap();
 
-    let (mut admin_state, admin_token) = common::admin_login(pool.clone()).await;
-    admin_state.settings.smtp_enabled = true;
+    // SMTP off + no 2FA — approve must still step-up (no silent JWT-only approve).
+    let (admin_state, admin_token) = common::admin_login(pool.clone()).await;
+    assert!(!admin_state.settings.smtp_enabled);
 
     let (st, body) = post_json(
         api_http::app_without_metrics(admin_state.clone()),

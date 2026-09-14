@@ -1,13 +1,16 @@
 //! Resolve the real client IP for audit / captcha / API-key IP allowlists.
 //!
 //! Trust order (nginx must **overwrite** forwarding headers — see `client/nginx.conf`):
-//! 1. `X-Real-IP` (set by our reverse proxy to `$remote_addr`)
+//! 1. `X-Real-IP` (set by our reverse proxy to `$remote_addr`, or by the edge
+//!    from Cloudflare's real client IP — never copied from a client header here)
 //! 2. **Last** non-private hop of `X-Forwarded-For` (closest proxy)
 //! 3. TCP peer from axum `ConnectInfo<SocketAddr>`
 //!
-//! We deliberately do **not** trust `CF-Connecting-IP` / `True-Client-IP` from the
-//! client: when nginx is not behind Cloudflare those headers are attacker-controlled
-//! and would bypass faucet per-IP Sybil cooldown, API-key allowlists, and rate limits.
+//! We deliberately do **not** read `CF-Connecting-IP` / `True-Client-IP` in the
+//! API: when the container is not behind Cloudflare those headers are
+//! attacker-controlled and would bypass faucet per-IP Sybil cooldown, API-key
+//! allowlists, and rate limits. The edge (Caddy/CF) must materialize the real
+//! client into `X-Real-IP` before traffic reaches this process.
 
 use axum::async_trait;
 use axum::extract::connect_info::ConnectInfo;
@@ -47,17 +50,6 @@ pub fn resolve_client_ip(parts: &Parts) -> Option<String> {
                 return Some(hop.to_string());
             }
         }
-    }
-    // Behind Cloudflare → Caddy → docker nginx, X-Real-IP is often a private hop.
-    // Prefer CF-Connecting-IP only as a last resort before ConnectInfo (still private).
-    if let Some(cf) = parts
-        .headers
-        .get("cf-connecting-ip")
-        .and_then(|v| v.to_str().ok())
-        .map(str::trim)
-        .filter(|s| !s.is_empty() && !is_internal_or_private(s))
-    {
-        return Some(cf.to_string());
     }
     parts
         .extensions
@@ -120,26 +112,30 @@ mod tests {
     }
 
     #[test]
-    fn cf_connecting_ip_used_when_x_real_ip_is_private() {
+    fn private_x_real_ip_falls_through_to_xff_not_cf() {
         let mut h = HeaderMap::new();
         hdr(&mut h, "x-real-ip", "172.27.0.4");
-        hdr(&mut h, "cf-connecting-ip", "203.0.113.77");
+        hdr(&mut h, "cf-connecting-ip", "198.51.100.99");
+        hdr(&mut h, "x-forwarded-for", "203.0.113.77");
         assert_eq!(resolve_client_ip(&parts_with(h)).as_deref(), Some("203.0.113.77"));
     }
 
     #[test]
-    fn cf_connecting_ip_is_not_trusted_when_public_x_real_ip_present() {
+    fn cf_connecting_ip_is_never_trusted() {
         let mut h = HeaderMap::new();
         hdr(&mut h, "cf-connecting-ip", "198.51.100.99");
-        hdr(&mut h, "x-real-ip", "203.0.113.77");
-        assert_eq!(resolve_client_ip(&parts_with(h)).as_deref(), Some("203.0.113.77"));
+        assert_eq!(resolve_client_ip(&parts_with(h)), None);
     }
 
     #[test]
-    fn cf_connecting_ip_alone_is_accepted_as_last_resort() {
-        let mut h = HeaderMap::new();
-        hdr(&mut h, "cf-connecting-ip", "198.51.100.99");
-        assert_eq!(resolve_client_ip(&parts_with(h)).as_deref(), Some("198.51.100.99"));
+    fn private_x_real_ip_and_spoofed_cf_fall_to_connect_info() {
+        let mut req = Request::builder().body(()).unwrap();
+        hdr(req.headers_mut(), "x-real-ip", "172.27.0.4");
+        hdr(req.headers_mut(), "cf-connecting-ip", "198.51.100.99");
+        req.extensions_mut()
+            .insert(ConnectInfo(SocketAddr::from(([203, 0, 113, 44], 443))));
+        let (parts, _) = req.into_parts();
+        assert_eq!(resolve_client_ip(&parts).as_deref(), Some("203.0.113.44"));
     }
 
     #[test]

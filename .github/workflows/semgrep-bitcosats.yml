@@ -1,0 +1,39 @@
+# BitcoSats Semgrep domain rules (local CI-friendly)
+name: semgrep-bitcosats
+
+on:
+  push:
+    branches: [main, master, develop, security/**]
+  pull_request:
+
+jobs:
+  semgrep:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Semgrep
+        run: pip install --quiet semgrep
+      - name: Domain Semgrep
+        run: |
+          set -euo pipefail
+          mkdir -p .security-audit
+          semgrep scan \
+            --config .semgrep/bitcosats.yml \
+            --exclude=target --exclude=node_modules \
+            --json -o .security-audit/semgrep-bitcosats.json \
+            .
+          # Informational: print ERROR findings. Enable hard fail later with --error.
+          python3 - <<'PY'
+          import json, sys
+          from pathlib import Path
+          rows = json.loads(Path(".security-audit/semgrep-bitcosats.json").read_text()).get("results") or []
+          errs = [r for r in rows if (r.get("extra") or {}).get("severity") == "ERROR"]
+          warns = [r for r in rows if (r.get("extra") or {}).get("severity") == "WARNING"]
+          print(f"BitcoSats Semgrep: {len(errs)} ERROR, {len(warns)} WARNING")
+          for r in errs:
+              print(f"  ERROR {r['path']}:{r['start']['line']}  {r.get('check_id')}")
+          sys.exit(0)
+          PY

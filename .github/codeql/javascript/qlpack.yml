@@ -1,0 +1,5 @@
+# BitcoSats custom CodeQL queries (JavaScript / TypeScript)
+name: bitcosats-javascript
+version: 0.0.1
+dependencies:
+  codeql/javascript-all: "*"

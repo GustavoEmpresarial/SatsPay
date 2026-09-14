@@ -24,8 +24,9 @@ pub struct AppSettings {
     /// Max clock skew accepted between an HMAC-signed public API request's
     /// `x-timestamp` and server time — legacy fixed 5 minutes, kept tunable.
     pub public_api_signature_max_skew: Duration,
-    /// `SMTP_ENABLED=true` — when set, withdrawals and admin approve require
-    /// a fresh email OTP even if the account has not enabled 2FA.
+    /// `SMTP_ENABLED=true` — when set, user withdrawals require a fresh email
+    /// OTP even if the account has not enabled 2FA. Admin withdrawal approve
+    /// always requires step-up OTP regardless of this flag.
     pub smtp_enabled: bool,
 }
 
