@@ -1,0 +1,985 @@
+{
+  "analytics": {
+    "title": "Análises",
+    "subtitle": "Portfólio e atividade dos últimos 30 dias.",
+    "empty": "Sem dados ainda — use o faucet ou faça um swap para ver os gráficos.",
+    "totalUsd": "Valor do portfólio",
+    "inflow30d": "Entradas (30d)",
+    "inflowHint": "depósitos + faucet + swap-in",
+    "outflow30d": "Saídas (30d)",
+    "outflowHint": "saques + swap-out + stake-lock",
+    "net30d": "Líquido (30d)",
+    "entries": "lançamentos",
+    "coins": "moedas",
+    "allocation": "Alocação",
+    "netTrend": "Fluxo líquido acumulado",
+    "dailyFlow": "Entradas vs saídas por dia",
+    "in": "entrada",
+    "out": "saída",
+    "byType": "Por operação"
+  },
+  "merchant": {
+    "title": "Acesso de comerciante",
+    "subtitle": "A área de comerciante (chaves de API, carteiras de desenvolvedor e a faucetlist) exige aprovação.",
+    "statusLabel": "Status",
+    "statusNONE": "Não é comerciante",
+    "statusPENDING": "Em análise",
+    "statusAPPROVED": "Aprovado",
+    "statusREJECTED": "Recusado",
+    "pending": "Sua solicitação{{name}} está em análise. Você terá acesso assim que um admin aprovar.",
+    "pendingName": " para “{{name}}”",
+    "rejected": "Recusado: {{reason}}. Ajuste os dados e solicite novamente abaixo.",
+    "approvedMsg": "Você é um comerciante aprovado. Entre no modo comerciante para gerenciar chaves e sites.",
+    "enter": "Entrar no modo comerciante",
+    "projectName": "Nome do projeto",
+    "projectPlaceholder": "ex.: CoolFaucet Ltda",
+    "website": "URL do site",
+    "description": "Descrição",
+    "descPlaceholder": "Conte sobre seu projeto (mín. 10 caracteres)",
+    "submit": "Solicitar acesso",
+    "submitting": "Enviando..."
+  },
+  "merchantSites": {
+    "badge": "Comerciante",
+    "title": "Meus sites faucet",
+    "subtitle": "Envie seu faucet para revisão. Sites aprovados entram na faucetlist pública.",
+    "submitTitle": "Cadastrar faucet",
+    "siteName": "Nome do site",
+    "siteNamePlaceholder": "Ex: CoolFaucet",
+    "url": "URL",
+    "urlPlaceholder": "https://coolfaucet.com",
+    "description": "Descrição",
+    "descPlaceholder": "O que seu faucet oferece (mín. 10 caracteres)",
+    "rewardInfo": "Informações de recompensa (opcional)",
+    "rewardPlaceholder": "ex.: até 100 sats / 5min",
+    "coins": "Moedas suportadas",
+    "submit": "Enviar para revisão",
+    "submitting": "Enviando...",
+    "mySubmissions": "Meus envios",
+    "empty": "Nenhum site faucet enviado ainda.",
+    "visits": "visitas",
+    "rejected": "Recusado",
+    "delete": "Excluir",
+    "submitCta": "Cadastrar site",
+    "submitNew": "Cadastrar novo site",
+    "submitMine": "Cadastrar meu faucet",
+    "visit": "Visitar",
+    "liveBadge": "Ativo na lista pública"
+  },
+  "common": {
+    "signIn": "Entrar",
+    "signUp": "Criar conta",
+    "signOut": "Sair",
+    "getStartedFree": "Criar conta grátis",
+    "haveAccount": "Já tenho conta",
+    "noAccount": "Não tenho conta",
+    "loading": "Carregando...",
+    "language": "Idioma",
+    "theme": "Tema",
+    "themeLight": "Claro",
+    "themeDark": "Escuro",
+    "themeBlack": "Preto",
+    "copy": "Copiar",
+    "showPassword": "Mostrar senha",
+    "hidePassword": "Ocultar senha",
+    "menu": "Menu",
+    "home": "Início",
+    "selectCoin": "Selecionar moeda",
+    "cryptoPlatform": "Plataforma cripto",
+    "twoFactorOn": "2FA ON",
+    "twoFactorOff": "2FA OFF",
+    "available": "Disponível",
+    "personalToDeveloper": "Pessoal → Comerciante",
+    "developerToPersonal": "Comerciante → Pessoal"
+  },
+  "nav": {
+    "dashboard": "Painel",
+    "wallets": "Carteira",
+    "faucet": "Faucet",
+    "faucetlist": "Faucetlist",
+    "faucetSites": "Meus sites",
+    "deposit": "Depositar",
+    "withdraw": "Sacar",
+    "settings": "Configurações",
+    "stake": "Stake",
+    "lend": "Empréstimos",
+    "swap": "Swap",
+    "analytics": "Análises",
+    "docs": "Docs da API",
+    "apiKeys": "API Keys",
+    "devWallets": "Saldo do comerciante",
+    "sectionAccount": "Conta",
+    "sectionDeveloper": "Desenvolvedor",
+    "sectionPersonal": "Pessoal",
+    "sectionMerchant": "Comerciante",
+    "sectionInfraDocs": "Infra e documentação",
+    "uptime": "Uptime",
+    "siteDocs": "Docs do Site",
+    "apiDocs": "Docs da API",
+    "live": "Live",
+    "support": "Suporte",
+    "comingSoon": "Em breve"
+  },
+  "lend": {
+    "title": "Empréstimos",
+    "subtitle": "Forneça ativos para render juros ou tome emprestado usando seu colateral.",
+    "healthFactor": "Fator de saúde",
+    "totalDebt": "Dívida total",
+    "borrowPower": "Poder de empréstimo",
+    "available": "Disponível para emprestar",
+    "yourPositions": "Suas posições",
+    "markets": "Mercados",
+    "coin": "Moeda",
+    "supplied": "Fornecido",
+    "debt": "Dívida",
+    "collateral": "Colateral",
+    "supplyApy": "APY fornecimento",
+    "borrowApy": "APY empréstimo",
+    "utilization": "Utilização",
+    "maxLtv": "LTV máx",
+    "liquidity": "Liquidez",
+    "amountSmallestUnit": "Valor (unidade mínima)",
+    "walletBalance": "Saldo na carteira",
+    "invalidAmount": "Informe um valor válido",
+    "success": "Operação concluída.",
+    "rewards": "Recompensas",
+    "rewardsAutoHint": "Distribuídas automaticamente 24h na sua carteira — sem precisar resgatar. Peso = saldo + stake + empréstimos.",
+    "received": "Recebido",
+    "action": {
+      "supply": "Fornecer",
+      "withdraw": "Resgatar",
+      "borrow": "Tomar emprestado",
+      "repay": "Pagar"
+    }
+  },
+  "swap": {
+    "title": "Swap",
+    "subtitle": "DEX na Polygon (POL, USDT, USDC) via SwapKit — sem liquidez interna.",
+    "from": "Você envia",
+    "to": "Você recebe",
+    "flip": "Inverter moedas",
+    "rate": "Taxa de câmbio",
+    "fee": "Taxa do protocolo (0,25%)",
+    "receive": "Você recebe (líquido)",
+    "confirm": "Confirmar swap",
+    "confirming": "Executando swap…",
+    "success": "Swap concluído.",
+    "insufficient": "Saldo insuficiente para este valor.",
+    "history": "Histórico de swaps",
+    "empty": "Nenhum swap ainda.",
+    "poweredBy": "DEX SwapKit · Taxa SatsPay 0,25% (afiliado)",
+    "trustLine": "Custodial · Rota DEX (SwapKit) · Taxa transparente"
+  },
+  "stake": {
+    "title": "Staking",
+    "subtitle": "Bloqueie fundos e receba recompensas ao longo do tempo.",
+    "plans": "Planos disponíveis",
+    "planApy": "{{apy}}% APY",
+    "planDuration": "{{days}} dias",
+    "chooseCoin": "Moeda",
+    "amount": "Quantia para stake (unidade mínima)",
+    "available": "Disponível: {{amount}}",
+    "expectedReward": "Recompensa esperada",
+    "startStake": "Iniciar stake",
+    "starting": "Iniciando...",
+    "activeStakes": "Stakes ativos",
+    "history": "Histórico",
+    "noStakes": "Nenhum stake ainda. Escolha um plano acima para começar.",
+    "principal": "Principal",
+    "reward": "Recompensa",
+    "matures": "Vence em",
+    "mature": "Pronto para resgatar",
+    "flexible": "Flexível",
+    "flexibleHint": "Resgate a qualquer momento · recompensa proporcional",
+    "claim": "Resgatar principal + recompensa",
+    "cancel": "Cancelar antecipadamente (perde a recompensa)",
+    "cancelConfirm": "Cancelar este stake? Você recebe o principal de volta, mas perde a recompensa.",
+    "startedAt": "Iniciado em",
+    "status": {
+      "ACTIVE": "Ativo",
+      "COMPLETED": "Concluído",
+      "CANCELED": "Cancelado"
+    }
+  },
+  "developer": {
+    "balances": "Saldos do comerciante e da API",
+    "balancesHint": "Estes saldos alimentam sua API e seus pagamentos. Ficam separados e protegidos da carteira pessoal.",
+    "topUp": "Adicionar saldo",
+    "withdrawToPersonal": "Mover para pessoal",
+    "personalBalance": "Saldo Pessoal",
+    "developerBalance": "Saldo Comerciante",
+    "amount": "Valor a transferir",
+    "transfer": "Transferir",
+    "transferring": "Transferindo...",
+    "transferOk": "Transferência concluída.",
+    "close": "Fechar"
+  },
+  "docs": {
+    "title": "Documentação da API",
+    "subtitle": "Integre o SatsPay ao seu faucet ou app em minutos.",
+    "toc": "Nesta página",
+    "sections": {
+      "quickstart": "Início rápido",
+      "auth": "Autenticação",
+      "send": "Enviar pagamento",
+      "balance": "Consultar saldo",
+      "errors": "Tratamento de erros",
+      "limits": "Rate limits",
+      "keys": "API keys"
+    },
+    "baseUrl": "URL base",
+    "quickstart": {
+      "text": "1. Gere uma chave de API em Configurações → API Keys. 2. Copie a chave (só aparece uma vez). 3. Use o header x-api-key em toda requisição. 4. Todo /send precisa de uma idempotencyKey única para evitar cobrança duplicada em novas tentativas."
+    },
+    "auth": {
+      "text": "Todas as chamadas da API pública exigem o header x-api-key. A chave é uma string hex de 64 caracteres; os 8 primeiros caracteres aparecem na lista para você identificar a chave ativa sem expor o segredo."
+    },
+    "send": {
+      "desc": "Envia um micropagamento interno do seu saldo SatsPay para outro usuário SatsPay, identificado pelo e-mail.",
+      "scope": "Scope obrigatório: send",
+      "idempotencyNote": "O campo idempotencyKey garante semântica at-most-once. Repetir a requisição com a mesma chave retorna { status: \"idempotent\" } sem transferir de novo."
+    },
+    "balance": {
+      "desc": "Retorna os saldos de todas as moedas vinculadas ao dono da chave de API.",
+      "scope": "Scope obrigatório: balance"
+    },
+    "errors": {
+      "text": "Erros seguem um formato consistente: { error: { code, message, details? } }. Códigos comuns: UNAUTHORIZED, VALIDATION_ERROR, RATE_LIMITED, INSUFFICIENT_BALANCE, NOT_FOUND."
+    },
+    "limits": {
+      "text": "A API pública tem limite de 60 requisições por minuto por chave. Endpoints de autenticação (/auth/login, /auth/register) ficam limitados a 10 requisições a cada 15 minutos por IP."
+    },
+    "keys": {
+      "text": "Gerencie suas chaves em Configurações. Você pode criar chaves com escopos específicos (send, balance, history, *) e desativá-las a qualquer momento. As chaves são armazenadas com hash — o valor bruto só aparece uma vez, na geração.",
+      "manage": "Gerenciar chaves em Configurações"
+    },
+    "copy": "Copiar",
+    "copied": "Copiado"
+  },
+  "wallets": {
+    "title": "Carteira",
+    "subtitle": "Saldos, depósito e saque por moeda.",
+    "backToWallets": "Voltar para a Carteira",
+    "balance": "Saldo",
+    "smallestUnit": "unidade mínima",
+    "address": "Endereço de depósito",
+    "addressHint": "Envie apenas {{coin}} para este endereço. Creditado após {{n}} confirmações.",
+    "copyAddress": "Copiar endereço",
+    "copied": "Copiado!",
+    "totalReceived": "Total recebido",
+    "confirmationsBadge": "{{n}} conf.",
+    "receivedHistory": "Transações recebidas",
+    "empty": "Nenhuma transação de entrada em {{coin}} ainda.",
+    "tabs": {
+      "overview": "Visão geral",
+      "deposit": "Depositar",
+      "withdraw": "Sacar"
+    },
+    "withdraw": {
+      "title": "Sacar {{coin}}",
+      "need2fa": "Ative o 2FA em Configurações para sacar.",
+      "toSettings": "Ir para Configurações",
+      "toAddress": "Endereço de destino",
+      "amount": "Quantia (unidade mínima)",
+      "amountHint": "Mín: {{min}} · Disponível: {{available}}",
+      "totp": "Código 2FA",
+      "submit": "Solicitar saque",
+      "submitting": "Enviando...",
+      "success": "Saque enviado para processamento",
+      "max": "Máx"
+    }
+  },
+  "landing": {
+    "nav": {
+      "features": "Recursos",
+      "coins": "Moedas",
+      "api": "API",
+      "faq": "FAQ"
+    },
+    "hero": {
+      "badge": "Sua carteira multi-moeda",
+      "title1": "Guarde e envie",
+      "titleAccent": "cripto",
+      "title2": "sem complicação.",
+      "subtitle": "Uma conta para <b>receber, guardar e sacar</b> BTC, LTC, DOGE e outras moedas — simples, rápida e no seu controle.",
+      "ctaPrimary": "Criar conta grátis",
+      "ctaSecondary": "Já tenho conta",
+      "bulletFree": "Cadastro grátis",
+      "bulletFast": "Depósito e saque on-chain",
+      "bulletMulti": "Várias moedas numa conta",
+      "mockTotalBalance": "Saldo total",
+      "mockDeposit": "Depositar",
+      "mockWithdraw": "Sacar",
+      "mockSend": "Enviar",
+      "badgeDepositConfirmed": "Depósito confirmado",
+      "badgeSendOk": "Envio concluído",
+      "badgeAccountReady": "Carteira pronta"
+    },
+    "features": {
+      "kicker": "Para você",
+      "title": "Carteira simples. Controle total.",
+      "subtitle": "Feita para o dia a dia — depositar, sacar e acompanhar seus saldos sem burocracia.",
+      "deposit": {
+        "title": "Depositar fácil",
+        "desc": "Gere um endereço e receba. O crédito entra automaticamente após as confirmações da rede."
+      },
+      "withdraw": {
+        "title": "Sacar quando quiser",
+        "desc": "Envie para o endereço que você escolher, com confirmação clara a cada passo."
+      },
+      "multi": {
+        "title": "Tudo em um lugar",
+        "desc": "Bitcoin, Litecoin, Dogecoin e outras moedas na mesma conta — sem vários apps."
+      },
+      "send": {
+        "title": "Envio direto",
+        "desc": "Mova valor entre contas ou para a blockchain quando precisar, sem rodeios."
+      },
+      "clarity": {
+        "title": "Saldos claros",
+        "desc": "Veja o que você tem em cada moeda de forma direta — sem planilhas nem surpresas."
+      },
+      "history": {
+        "title": "Histórico completo",
+        "desc": "Depósitos, saques e movimentos em um só lugar, sempre que precisar."
+      }
+    },
+    "how": {
+      "kicker": "Como funciona",
+      "title": "Três passos e pronto",
+      "subtitle": "Do zero à sua primeira carteira em menos de um minuto.",
+      "s1Title": "Crie sua conta",
+      "s1Desc": "Email e senha. Sem KYC no cadastro.",
+      "s2Title": "Deposite suas moedas",
+      "s2Desc": "Receba na rede e acompanhe o crédito na carteira.",
+      "s3Title": "Guarde ou saque",
+      "s3Desc": "Acompanhe o saldo e envie quando precisar."
+    },
+    "coins": {
+      "kicker": "Moedas na sua carteira",
+      "title": "Uma conta, várias criptomoedas",
+      "trio": "Depósito · Saque · Saldo"
+    },
+    "devsNote": {
+      "text": "Precisa integrar pagamentos no seu app?",
+      "link": "Documentação da API"
+    },
+    "faq": {
+      "kicker": "FAQ",
+      "title": "Perguntas frequentes",
+      "items": [
+        {
+          "q": "SatsPay cobra alguma taxa?",
+          "a": "O cadastro é grátis. Nos saques on-chain você paga só a taxa de rede da blockchain."
+        },
+        {
+          "q": "Quanto tempo demora um depósito?",
+          "a": "Depende das confirmações de cada moeda (ex.: BTC/BCH 2, LTC 6, DOGE 20). Depois disso, o crédito é automático."
+        },
+        {
+          "q": "Posso ter várias moedas na mesma conta?",
+          "a": "Sim. Você vê e move BTC, LTC, DOGE e outras na mesma carteira SatsPay."
+        },
+        {
+          "q": "Como funcionam os saques?",
+          "a": "Você informa o endereço e o valor. Pedidos grandes podem passar por revisão antes do envio à rede."
+        },
+        {
+          "q": "Meu dinheiro fica seguro?",
+          "a": "Operamos com o mínimo em hot wallet. Movimentações grandes passam por revisão; o restante fica em cold storage."
+        }
+      ]
+    },
+    "cta": {
+      "title": "Sua carteira em menos de 30 segundos",
+      "subtitle": "Várias moedas prontas ao criar a conta. Sem burocracia no cadastro.",
+      "primary": "Criar conta grátis",
+      "secondary": "Entrar"
+    },
+    "footer": {
+      "tagline": "Carteira multi-moeda para o dia a dia — BTC, LTC, DOGE e mais.",
+      "product": "Produto",
+      "account": "Conta",
+      "community": "Comunidade"
+    }
+  },
+  "auth": {
+    "login": {
+      "title": "Entrar",
+      "subtitle": "Acesse sua carteira SatsPay.",
+      "email": "Email",
+      "password": "Senha",
+      "totp": "Código 2FA",
+      "emailCode": "Código de verificação por email",
+      "submit": "Entrar",
+      "submitting": "Entrando..."
+    },
+    "register": {
+      "title": "Criar conta",
+      "subtitle": "Uma carteira (BTC, LTC, DOGE, BCH) criada automaticamente.",
+      "username": "Nome de usuário",
+      "usernameHint": "3–24 caracteres; começa com letra; só letras, números e _",
+      "passwordHint": "Mín. 10 caracteres, com maiúsculas, minúsculas e dígitos.",
+      "confirmPassword": "Confirmar senha",
+      "acceptTerms": "Concordo com os <terms>Termos e Condições</terms> e com a <privacy>Política de Privacidade</privacy>.",
+      "submit": "Criar conta",
+      "submitting": "Criando...",
+      "errors": {
+        "mismatch": "As senhas não coincidem.",
+        "minLength": "A senha deve ter pelo menos 10 caracteres.",
+        "maxLength": "A senha é longa demais.",
+        "uppercase": "A senha deve conter uma letra maiúscula.",
+        "lowercase": "A senha deve conter uma letra minúscula.",
+        "digit": "A senha deve conter um dígito.",
+        "terms": "Você precisa aceitar os termos e condições.",
+        "usernameLength": "O nome de usuário deve ter entre 3 e 24 caracteres",
+        "usernameFormat": "Começa com letra; só letras, números e underscore"
+      }
+    },
+    "layout": {
+      "backHome": "Voltar ao início",
+      "loginHeadline": "Bem-vindo de volta — seus satoshis estão à sua espera.",
+      "registerHeadline": "Uma conta, várias moedas, micropagamentos sem limite.",
+      "loginBody": "Carteira pessoal, faucet, staking e ferramentas de comerciante — tudo com um login.",
+      "registerBody": "Cadastro grátis. Sem KYC. Faucet, staking e API pública na mesma carteira.",
+      "bulletMulti": "Multi-moeda: {{n}} blockchains em uma conta",
+      "bulletProducts": "Faucet · Stake · Swap · Saque",
+      "bulletApi": "API pública para faucets externos",
+      "securityStrip": "2FA por email · Senhas Argon2id · Ledger auditável",
+      "adminLink": "Entrar como admin"
+    }
+  },
+  "admin": {
+    "brand": "Admin",
+    "internal": "SatsPay interno",
+    "signedInAs": "Conectado como",
+    "userApp": "App do usuário",
+    "nav": {
+      "overview": "Visão geral",
+      "telemetry": "Telemetria",
+      "withdrawals": "Saques",
+      "merchants": "Comerciantes",
+      "faucetSites": "Faucetlist",
+      "stake": "Tesouraria"
+    },
+    "login": {
+      "title": "Painel Admin",
+      "subtitle": "SatsPay interno",
+      "email": "E-mail do admin",
+      "emailPlaceholder": "admin@empresa.com",
+      "checkInbox": "Confira sua caixa de entrada",
+      "submit": "Entrar no admin",
+      "submitting": "Autenticando...",
+      "notAdmin": "Não é admin?",
+      "userLogin": "Ir para login de usuário",
+      "restricted": "Acesso restrito · Todas as ações são registradas"
+    },
+    "overview": {
+      "title": "Visão geral",
+      "subtitle": "Métricas do sistema em tempo real",
+      "users": "Usuários",
+      "wallets": "Carteiras",
+      "pendingWithdrawals": "Saques pendentes",
+      "totalWithdrawals": "Total de saques",
+      "faucetClaims": "Resgates do faucet",
+      "apiKeys": "Chaves de API ativas",
+      "activeStakes": "Stakes ativos"
+    }
+  },
+  "dashboard": {
+    "title": "Painel",
+    "subtitle": "Saldos da sua carteira.",
+    "smallestUnit": "unidade mínima",
+    "greetingMorning": "Bom dia",
+    "greetingAfternoon": "Boa tarde",
+    "greetingEvening": "Boa noite",
+    "welcomeBack": "Bem-vindo de volta",
+    "yourWallet": "Sua carteira",
+    "emptyWallet": "Sem saldo ainda — resgate no faucet para começar.",
+    "fundedCoins": "{{n}} moedas com saldo",
+    "balances": "Saldos",
+    "totalAssets": "Total em ativos",
+    "acrossWallets": "Em {{n}} carteiras",
+    "quickActions": "Ações rápidas",
+    "yourWallets": "Suas carteiras",
+    "recentActivity": "Atividade recente",
+    "noActivity": "Nenhuma atividade ainda. Resgate no faucet para começar.",
+    "viewAll": "Ver tudo",
+    "deposit": "Depositar",
+    "withdraw": "Sacar",
+    "claimFaucet": "Resgatar faucet",
+    "balance": "Saldo",
+    "actionDeposit": "Receber",
+    "actionSend": "Enviar",
+    "twoFaOn": "2FA ativo",
+    "twoFaOff": "2FA desligado",
+    "hints": {
+      "deposit": "QR + endereço",
+      "withdraw": "2FA obrigatório",
+      "faucet": "A cada 11h"
+    },
+    "type": {
+      "DEPOSIT": "Depósito",
+      "WITHDRAWAL": "Saque",
+      "WITHDRAWAL_FEE": "Taxa de rede",
+      "WITHDRAWAL_REVERSAL": "Estorno de saque",
+      "FAUCET": "Faucet",
+      "TRANSFER_IN": "Recebido",
+      "TRANSFER_OUT": "Enviado",
+      "ADJUSTMENT": "Ajuste"
+    }
+  },
+  "faucet": {
+    "title": "Faucet",
+    "subtitle": "Pequenas quantias a cada 11 horas.",
+    "claimAmount": "Valor",
+    "claim": "Resgatar",
+    "claiming": "Processando...",
+    "received": "Recebido",
+    "cooldown": "Tempo restante",
+    "available": "Disponível",
+    "antiBot": "Verificação",
+    "antiBotPrompt": "Confirme que você é humano:",
+    "solveCaptcha": "Verificar",
+    "captchaVerified": "Verificado",
+    "cooldownActive": "Aguarde o intervalo de 11 horas.",
+    "securityCheck": "Verificação"
+  },
+  "deposit": {
+    "title": "Depositar",
+    "subtitle": "Envie {{coin}} para o endereço abaixo. O crédito entra após {{n}} confirmações.",
+    "generating": "Gerando endereço...",
+    "addressFor": "Endereço {{coin}}",
+    "pausedBadge": "Pausado",
+    "pausedTitle": "Depósitos de {{coin}} temporariamente pausados",
+    "pausedHint": "A moeda continua listada. Novos endereços e créditos por esta rede estão desabilitados por enquanto."
+  },
+  "withdraw": {
+    "title": "Sacar",
+    "min": "Mínimo: {{amount}} unidade mínima ({{coin}})",
+    "need2fa": "Ative o 2FA para solicitar saques.",
+    "toSettings": "Ir para configurações",
+    "coin": "Moeda",
+    "toAddress": "Endereço de destino",
+    "amount": "Quantia (unidade mínima)",
+    "totp": "Código 2FA",
+    "submit": "Solicitar saque",
+    "submitting": "Enviando...",
+    "success": "Saque enviado para processamento.",
+    "pausedBadge": "Pausado",
+    "pausedTitle": "Saques de {{coin}} temporariamente pausados",
+    "pausedHint": "A moeda continua listada. Saques desta rede estão desabilitados por enquanto."
+  },
+  "settings": {
+    "title": "Configurações",
+    "account": "Conta",
+    "modes": {
+      "title": "Modo da conta",
+      "user": "Pessoal",
+      "merchant": "Comerciante",
+      "userDesc": "Carteira pessoal, faucet, staking",
+      "merchantDesc": "Saldos de desenvolvedor, chaves de API e documentação"
+    },
+    "twofa": {
+      "title": "Autenticação em 2 fatores (email)",
+      "statusOn": "Ativado",
+      "statusOff": "Desativado — obrigatório para saques",
+      "status": "Status: {{status}}",
+      "enable": "Ativar 2FA por email",
+      "disable": "Desativar 2FA por email",
+      "sendCode": "Enviar código para meu email",
+      "codeSentTo": "Enviamos um código de 6 dígitos para {{email}}. Expira em 10 minutos.",
+      "codePlaceholder": "Código 6 dígitos",
+      "confirm": "Confirmar",
+      "resend": "Reenviar código",
+      "enabled": "2FA ativado com sucesso",
+      "disabled": "2FA desativado"
+    },
+    "apiKeys": {
+      "title": "Chaves de API (para faucets externos)",
+      "generate": "Gerar nova chave",
+      "saveNow": "Salve esta chave agora. Ela não será exibida novamente:",
+      "empty": "Nenhuma chave criada ainda.",
+      "active": "ativa",
+      "disabled": "desativada"
+    },
+    "username": {
+      "title": "Nome de usuário",
+      "label": "Nome de usuário",
+      "hint": "3–24 caracteres; começa com letra; só letras, números e _",
+      "save": "Salvar",
+      "saving": "Salvando…",
+      "saved": "Nome de usuário atualizado",
+      "unchanged": "Esse já é o seu nome de usuário",
+      "taken": "Esse nome de usuário já está em uso",
+      "error": "Não foi possível atualizar o nome de usuário",
+      "errors": {
+        "usernameLength": "O nome de usuário deve ter entre 3 e 24 caracteres",
+        "usernameFormat": "Começa com letra; só letras, números e underscore"
+      }
+    }
+  },
+  "footer": {
+    "tagline": "Carteira multi-moeda para o dia a dia — BTC, LTC, DOGE e mais.",
+    "product": "Produto",
+    "account": "Conta",
+    "legal": "Legal",
+    "developers": "Desenvolvedores",
+    "rights": "Todos os direitos reservados.",
+    "compliance": "Isto não é aconselhamento financeiro. Criptoativos envolvem risco.",
+    "links": {
+      "features": "Recursos",
+      "coins": "Moedas suportadas",
+      "api": "API",
+      "docs": "Documentação",
+      "faq": "FAQ",
+      "privacy": "Política de Privacidade",
+      "terms": "Termos e Condições",
+      "cookies": "Política de Cookies",
+      "security": "Segurança",
+      "apiRef": "Referência da API",
+      "guides": "Guias",
+      "sitemap": "Sitemap",
+      "llm": "llm.txt",
+      "support": "Suporte"
+    },
+    "backHome": "Voltar ao início"
+  },
+  "pages": {
+    "coins": {
+      "subtitle": "Depósito, saque e faucet nas 9 criptomoedas suportadas."
+    },
+    "faq": {
+      "subtitle": "Respostas rápidas sobre taxas, depósitos, 2FA e a API pública."
+    },
+    "security": {
+      "title": "Segurança",
+      "subtitle": "Como reportar vulnerabilidades e como protegemos contas e fundos.",
+      "sections": [
+        {
+          "title": "Reportar vulnerabilidade",
+          "body": "Envie os detalhes para security@bitcosats.com. Não explore vulnerabilidades em produção além do necessário para demonstrar o problema."
+        },
+        {
+          "title": "Contas e autenticação",
+          "body": "Senhas com hash, sessões com refresh token HttpOnly e 2FA obrigatório para saques."
+        },
+        {
+          "title": "Custódia",
+          "body": "Mantemos o mínimo em hot wallet para operação. Movimentações grandes passam por revisão operacional."
+        }
+      ]
+    },
+    "guides": {
+      "title": "Guias",
+      "subtitle": "Caminhos práticos para começar a usar o SatsPay e a API.",
+      "items": [
+        {
+          "title": "Login com SatsPay (OAuth 2.0 SSO)",
+          "desc": "Integre o botão oficial no seu site ou app e autentique usuários em 2 minutos.",
+          "to": "/developer/apps"
+        },
+        {
+          "title": "Criar conta e carteiras",
+          "desc": "Cadastro gratuito com BTC, LTC, DOGE e BCH.",
+          "to": "/register"
+        },
+        {
+          "title": "Referência da API",
+          "desc": "Endpoints públicos, x-api-key e idempotência.",
+          "to": "/api"
+        },
+        {
+          "title": "Hub de documentação",
+          "desc": "Políticas, quick start e arquivos para crawlers.",
+          "to": "/documentation"
+        },
+        {
+          "title": "FAQ",
+          "desc": "Perguntas frequentes de usuários e desenvolvedores.",
+          "to": "/faq"
+        }
+      ]
+    },
+    "sitemap": {
+      "eyebrow": "SEO",
+      "title": "Mapa do site",
+      "subtitle": "Todas as páginas públicas do SatsPay em um só lugar.",
+      "xmlHint": "Versão XML para buscadores:"
+    },
+    "llm": {
+      "eyebrow": "AI / LLM",
+      "title": "Resumo para LLMs",
+      "subtitle": "Contexto curto e confiável sobre o SatsPay para assistentes de IA.",
+      "intro": "O SatsPay é uma carteira de micropagamentos multi-moeda (BTC, LTC, DOGE, BCH) com API pública para comerciantes e faucets.",
+      "productTitle": "Produto",
+      "devTitle": "Notas para desenvolvedores",
+      "dev1": "Autenticação da API pública: header x-api-key",
+      "dev2": "Todo /send exige uma idempotencyKey única.",
+      "dev3": "Não invente endpoints; use /documentation e /api",
+      "rawHint": "Arquivo cru:"
+    }
+  },
+  "cookies": {
+    "title": "Privacidade e cookies",
+    "banner": "Usamos apenas cookies essenciais para manter sua sessão segura e lembrar preferências — sem rastreamento de anúncios. Veja nossa",
+    "accept": "Aceitar",
+    "essential": "Apenas essenciais",
+    "points": {
+      "session": "Sessão e autenticação (obrigatório)",
+      "prefs": "Idioma e preferências da interface",
+      "ads": "Sem cookies de publicidade"
+    }
+  },
+  "documentation": {
+    "eyebrow": "Desenvolvedores",
+    "title": "Documentação",
+    "subtitle": "Integre micropagamentos SatsPay, gerencie chaves de API e consulte as políticas públicas.",
+    "machineReadable": "Legível por máquinas",
+    "cards": {
+      "api": {
+        "title": "Referência da API",
+        "desc": "Endpoints públicos, headers de autenticação, idempotência e rate limits."
+      },
+      "privacy": {
+        "title": "Política de Privacidade",
+        "desc": "Como coletamos, usamos e protegemos dados pessoais."
+      },
+      "terms": {
+        "title": "Termos e Condições",
+        "desc": "Regras de uso das carteiras e das APIs de desenvolvedor."
+      },
+      "cookies": {
+        "title": "Política de Cookies",
+        "desc": "Quais cookies usamos e por quê."
+      }
+    },
+    "quickstart": {
+      "title": "Início rápido",
+      "s1": "Crie uma conta gratuita e verifique o e-mail.",
+      "s2": "Mude para o modo Comerciante e gere uma API key com os scopes necessários.",
+      "s3": "Chame https://api.bitcosats.com/v1/public/* com o header x-api-key.",
+      "s4": "Sempre envie uma idempotencyKey única em cada requisição /send."
+    },
+    "cta": {
+      "api": "Abrir docs da API",
+      "account": "Criar conta"
+    }
+  },
+  "legal": {
+    "privacy": {
+      "title": "Política de Privacidade",
+      "updated": "Última atualização: 30 de agosto de 2026",
+      "sections": [
+        {
+          "title": "1. Quem somos",
+          "body": [
+            "A SatsPay opera uma carteira de micropagamentos multi-moeda e uma API para desenvolvedores. Esta política descreve quais dados processamos quando você usa bitcosats.com e serviços relacionados.",
+            "Para solicitações de privacidade, escreva para privacy@bitcosats.com."
+          ]
+        },
+        {
+          "title": "2. Dados que coletamos",
+          "body": [
+            "Dados de conta: e-mail, senha armazenada com hash, configurações opcionais de 2FA e preferências de modo da conta.",
+            "Atividade da carteira: depósitos, saques, transferências internas, eventos de stake, empréstimo e swap, além do uso da API vinculado às suas chaves.",
+            "Dados técnicos: endereço IP, tipo de navegador e identificadores necessários para segurança, controle de taxa de requisições e prevenção de fraude.",
+            "Não vendemos seus dados pessoais."
+          ]
+        },
+        {
+          "title": "3. Como usamos os dados",
+          "body": [
+            "Para oferecer carteiras, faucet, ferramentas de comerciante e acesso à API.",
+            "Para autenticar sessões, detectar abuso e cumprir obrigações legais aplicáveis.",
+            "Para enviar avisos do serviço (alertas de segurança, redefinição de senha e mudanças de produto)."
+          ]
+        },
+        {
+          "title": "4. Retenção e segurança",
+          "body": [
+            "Mantemos registros de conta e do ledger pelo tempo necessário para operar o serviço e cumprir obrigações legais.",
+            "Credenciais são armazenadas com hash; segredos de API são exibidos uma única vez na criação. Movimentações grandes de tesouraria podem exigir controles operacionais adicionais."
+          ]
+        },
+        {
+          "title": "5. Seus direitos",
+          "body": [
+            "Conforme a sua jurisdição, você pode solicitar acesso, correção, exportação ou exclusão de dados pessoais, sujeitos a requisitos de segurança e retenção legal.",
+            "Envie um e-mail para privacy@bitcosats.com com o assunto \"Solicitação de privacidade\"."
+          ]
+        },
+        {
+          "title": "6. Transferências internacionais",
+          "body": [
+            "A infraestrutura pode operar em várias regiões. Aplicamos salvaguardas adequadas à natureza dos dados transferidos."
+          ]
+        }
+      ]
+    },
+    "terms": {
+      "title": "Termos e Condições",
+      "updated": "Última atualização: 30 de agosto de 2026",
+      "sections": [
+        {
+          "title": "1. Aceitação",
+          "body": [
+            "Ao criar uma conta ou usar as APIs da SatsPay, você concorda com estes Termos. Se não concordar, não utilize o serviço."
+          ]
+        },
+        {
+          "title": "2. Elegibilidade e contas",
+          "body": [
+            "Você deve fornecer informações de cadastro corretas e manter suas credenciais em sigilo.",
+            "Você é responsável por toda atividade na sua conta e nas suas chaves de API."
+          ]
+        },
+        {
+          "title": "3. Descrição do serviço",
+          "body": [
+            "A SatsPay oferece carteiras custodiais de micropagamentos para moedas suportadas (BTC, LTC, DOGE, BCH) e ferramentas relacionadas, como faucet, stake, empréstimos, swap e APIs públicas.",
+            "As funcionalidades podem mudar. Módulos experimentais podem ser limitados ou pausados sem aviso quando a segurança exigir."
+          ]
+        },
+        {
+          "title": "4. Riscos e isenções",
+          "body": [
+            "Criptomoedas envolvem volatilidade e risco operacional. A SatsPay não é banco, corretora nem consultora de investimentos.",
+            "Taxas de rede, tempos de confirmação e reorganizações de cadeia estão fora do nosso controle."
+          ]
+        },
+        {
+          "title": "5. Uso aceitável",
+          "body": [
+            "Não use a SatsPay para atividade ilegal, evasão de sanções, phishing, spam de faucets que violem termos de terceiros ou tentativas de prejudicar a infraestrutura.",
+            "Podemos suspender contas que violem estes Termos ou criem risco material a outros usuários."
+          ]
+        },
+        {
+          "title": "6. Uso da API",
+          "body": [
+            "As chaves de API devem ser armazenadas com segurança. Há limites de taxa e escopos. Chaves de idempotência são obrigatórias em operações de envio.",
+            "O abuso de endpoints públicos pode resultar na revogação da chave."
+          ]
+        },
+        {
+          "title": "7. Limitação de responsabilidade",
+          "body": [
+            "Na máxima extensão permitida por lei, a SatsPay não responde por danos indiretos, incidentais ou consequenciais decorrentes do uso do serviço.",
+            "A responsabilidade total por qualquer reclamação relacionada ao serviço limita-se às taxas que você nos pagou nos três meses anteriores à reclamação (se houver)."
+          ]
+        },
+        {
+          "title": "8. Alterações",
+          "body": [
+            "Podemos atualizar estes Termos. Mudanças relevantes serão indicadas pela data de \"Última atualização\" nesta página."
+          ]
+        }
+      ]
+    },
+    "cookies": {
+      "title": "Política de Cookies",
+      "updated": "Última atualização: 30 de agosto de 2026",
+      "sections": [
+        {
+          "title": "1. O que são cookies?",
+          "body": [
+            "Cookies são pequenos arquivos de texto armazenados no seu dispositivo. Também podemos usar armazenamento local para fins semelhantes (preferências de sessão e consentimento)."
+          ]
+        },
+        {
+          "title": "2. Cookies que usamos",
+          "body": [
+            "Essenciais: cookies de autenticação e sessão (incluindo tokens de atualização HttpOnly) necessários para manter você autenticado com segurança.",
+            "Preferências: idioma e modo da interface no armazenamento local, para lembrar suas escolhas.",
+            "Consentimento: um indicador local registrando que você reconheceu esta política."
+          ]
+        },
+        {
+          "title": "3. Analytics e publicidade",
+          "body": [
+            "No momento não usamos cookies de publicidade de terceiros. Se adotarmos analytics com respeito à privacidade no futuro, esta página será atualizada antes da ativação."
+          ]
+        },
+        {
+          "title": "4. Como gerenciar cookies",
+          "body": [
+            "Você pode limpar cookies e dados do site nas configurações do navegador. Bloquear cookies essenciais pode impedir o login.",
+            "Dúvidas: privacy@bitcosats.com."
+          ]
+        }
+      ]
+    }
+  },
+  "faucetlist": {
+    "title": "Diretório de faucets",
+    "subtitle": "Descubra faucets verificados e ganhe cripto grátis.",
+    "docsCta": "Documentação da API",
+    "badge": "Diretório oficial",
+    "verifiedCount": "{{n}} faucets verificados",
+    "heroTitle": "Descubra os melhores faucets de criptomoedas",
+    "heroBody": "Ganhe <b>Bitcoin, Litecoin, Dogecoin, Solana, Polygon e USDT</b> de graça. Explore torneiras e parceiros auditados, com pagamentos instantâneos e sem taxas abusivas.",
+    "searchPlaceholder": "Buscar por nome, moeda ou descrição…"
+  },
+  "support": {
+    "title": "Suporte",
+    "subtitle": "Ajuda com depósitos, saques e sua conta — tudo dentro do app.",
+    "quickTitle": "Atalhos",
+    "links": {
+      "faq": "Perguntas frequentes",
+      "docs": "Guia da plataforma",
+      "settings": "Configurações da conta",
+      "status": "Status do sistema"
+    },
+    "contactTitle": "Abrir chamado",
+    "contactSubtitle": "Escolha o assunto, descreva o problema e envie. Nossa equipe responde por aqui.",
+    "topicLabel": "Assunto",
+    "topics": {
+      "deposit": "Depósito",
+      "withdraw": "Saque",
+      "account": "Conta",
+      "security": "Segurança",
+      "other": "Outro"
+    },
+    "messageLabel": "Mensagem",
+    "messagePlaceholder": "Conte o que aconteceu, a moeda e o horário aproximado…",
+    "send": "Enviar chamado",
+    "sending": "Enviando…",
+    "hint": "Respondemos em horário comercial, nesta página — sem e-mail.",
+    "myTickets": "Meus chamados",
+    "loading": "Carregando…",
+    "empty": "Nenhum chamado ainda.",
+    "messages": "mensagens",
+    "reply": "Responder",
+    "replyPlaceholder": "Escreva sua resposta…",
+    "closedHint": "Este chamado está encerrado. Abra um novo se ainda precisar de ajuda.",
+    "role": {
+      "you": "Você",
+      "staff": "Equipe SatsPay"
+    },
+    "status": {
+      "OPEN": "Aberto",
+      "WAITING_USER": "Aguardando você",
+      "WAITING_STAFF": "Aguardando equipe",
+      "RESOLVED": "Resolvido",
+      "CLOSED": "Fechado"
+    },
+    "errors": {
+      "generic": "Não foi possível enviar. Tente novamente.",
+      "empty_message": "Escreva uma mensagem.",
+      "invalid_topic": "Assunto inválido.",
+      "ticket_closed": "Chamado encerrado.",
+      "not_found": "Chamado não encontrado."
+    }
+  },
+  "oauth": {
+    "authorize": {
+      "needLogin": "Entre na sua conta SatsPay para autorizar este aplicativo.",
+      "permissions": "Permissões solicitadas",
+      "identityTitle": "Identidade e perfil básico",
+      "identityBody": "Acessar seu nome de usuário e ID de usuário SatsPay.",
+      "emailTitle": "Endereço de e-mail",
+      "emailBody": "Visualizar seu e-mail cadastrado ({{email}})."
+    }
+  }
+}

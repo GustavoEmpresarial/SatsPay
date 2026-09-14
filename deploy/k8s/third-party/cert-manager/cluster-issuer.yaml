@@ -1,0 +1,19 @@
+# cert-manager ClusterIssuer using Let's Encrypt HTTP-01 — requires
+# cert-manager installed via Helm (ver docs/operations/deployment.md) and
+# ingress-nginx already routing the domain's public DNS to the cluster.
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-prod
+spec:
+  acme:
+    server: https://acme-v02.api.letsencrypt.org/directory
+    # Real contact address is supplied per-environment (overlays/prod), not
+    # hardcoded here — see overlays/prod/cluster-issuer-patch.yaml.
+    email: PLACEHOLDER@example.com
+    privateKeySecretRef:
+      name: letsencrypt-prod-account-key
+    solvers:
+      - http01:
+          ingress:
+            ingressClassName: nginx

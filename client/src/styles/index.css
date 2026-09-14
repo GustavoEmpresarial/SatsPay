@@ -1,0 +1,63 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --c-bg: 248 249 250;       /* #f8f9fa - light canvas */
+  --c-paper: 255 255 255;    /* #ffffff - clean white card/dialog */
+  --c-surface: 243 244 246;  /* #f3f4f6 - subtle gray surface */
+  --c-border: 229 231 235;   /* #e5e7eb - light border */
+  --c-ink: 17 24 39;         /* #111827 - dark ink */
+  --c-ink-muted: 107 114 128;/* #6b7280 - muted text */
+  --c-shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 4px 12px rgba(0, 0, 0, 0.04);
+  color-scheme: light;
+}
+
+/* Charcoal dark (existing) */
+.dark {
+  --c-bg: 11 15 20;
+  --c-paper: 17 24 32;
+  --c-surface: 24 33 42;
+  --c-border: 38 50 62;
+  --c-ink: 241 245 249;
+  --c-ink-muted: 148 163 184;
+  --c-shadow: 0 1px 2px rgba(0, 0, 0, 0.35), 0 8px 24px rgba(0, 0, 0, 0.35);
+  color-scheme: dark;
+}
+
+/* Pure black OLED-style */
+.dark.theme-black {
+  --c-bg: 0 0 0;
+  --c-paper: 0 0 0;
+  --c-surface: 12 12 12;
+  --c-border: 38 38 38;
+  --c-ink: 245 245 245;
+  --c-ink-muted: 163 163 163;
+  --c-shadow: 0 0 0 transparent;
+  color-scheme: dark;
+}
+
+@layer base {
+  body {
+    @apply bg-canvas text-ink antialiased font-sans min-h-screen selection:bg-bitcoin/20 selection:text-bitcoin-dark;
+  }
+}
+
+@layer components {
+  .card {
+    @apply rounded-2xl border border-border bg-paper transition-all;
+    box-shadow: var(--c-shadow);
+  }
+  .label {
+    @apply block text-xs font-semibold uppercase tracking-wider text-ink-muted mb-1.5;
+  }
+  .input {
+    @apply block w-full rounded-xl border border-border bg-paper px-3.5 py-2.5 text-sm text-ink placeholder:text-ink-muted/50 focus:border-bitcoin focus:outline-none focus:ring-2 focus:ring-bitcoin/20 transition-all;
+  }
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl bg-bitcoin px-4 py-2.5 text-sm font-semibold text-white shadow-sm shadow-bitcoin/25 hover:bg-bitcoin-dark transition-all disabled:opacity-50 disabled:pointer-events-none;
+  }
+  .btn-secondary {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl border border-border bg-paper px-4 py-2.5 text-sm font-medium text-ink hover:bg-surface transition-all disabled:opacity-50 disabled:pointer-events-none;
+  }
+}

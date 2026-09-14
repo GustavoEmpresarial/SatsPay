@@ -1,0 +1,27 @@
+# Shared VM under real CPU/memory contention from other tenants' containers
+# — 1 replica each (not 2) and looser liveness timing so probe timeouts
+# under contention don't trigger unnecessary restarts. Not representative of
+# the prod overlay's sizing, just this smoke-test box's reality.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api-server
+spec:
+  replicas: 1
+  template:
+    spec:
+      containers:
+        - name: api-server
+          livenessProbe:
+            timeoutSeconds: 5
+            failureThreshold: 6
+          readinessProbe:
+            timeoutSeconds: 5
+            failureThreshold: 6
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker
+spec:
+  replicas: 1

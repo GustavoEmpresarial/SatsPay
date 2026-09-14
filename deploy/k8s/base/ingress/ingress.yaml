@@ -1,0 +1,30 @@
+# Real hostname/TLS secret name are supplied per-environment via
+# overlays/prod (this base has no working hostname on its own — matches
+# the rest of base/ being a template, not a deployable-as-is manifest).
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: bitcosats
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - PLACEHOLDER.example.com
+      secretName: bitcosats-tls
+  rules:
+    - host: PLACEHOLDER.example.com
+      http:
+        paths:
+          # `apps/web` (React) stays out of this repo's k8s scope by explicit
+          # decision (see plans/rosy-greeting-deer.md) — add a `frontend`
+          # Service + a `/` path here once it gets its own manifest.
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: api-server
+                port:
+                  name: http

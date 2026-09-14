@@ -1,0 +1,40 @@
+# Rendered by scripts/exercise-pitr-restore.sh via envsubst.
+# Pattern from docs/operations/backup-restore-postgres.md (PITR).
+# Does not reference or delete the live source cluster.
+#
+# Required substitutions (no invented defaults in the script):
+#   RESTORE_CLUSTER_NAME, KUBE_NAMESPACE, EXTERNAL_CLUSTER_NAME,
+#   PITR_TARGET_TIME, S3_BACKUP_URI, CRED_SECRET_NAME,
+#   S3_ENDPOINT_URL, EXTERNAL_SERVER_NAME,
+#   RESTORE_INSTANCES, RESTORE_STORAGE_SIZE
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: ${RESTORE_CLUSTER_NAME}
+  namespace: ${KUBE_NAMESPACE}
+spec:
+  instances: ${RESTORE_INSTANCES}
+  storage:
+    size: ${RESTORE_STORAGE_SIZE}
+  bootstrap:
+    recovery:
+      source: ${EXTERNAL_CLUSTER_NAME}
+      recoveryTarget:
+        targetTime: "${PITR_TARGET_TIME}"
+      database: bitcosats
+      owner: bitcosats
+  externalClusters:
+    - name: ${EXTERNAL_CLUSTER_NAME}
+      barmanObjectStore:
+        destinationPath: "${S3_BACKUP_URI}"
+        endpointURL: "${S3_ENDPOINT_URL}"
+        # Must match the source Cluster's Barman serverName (defaults to
+        # source Cluster metadata.name — NOT the ScheduledBackup name).
+        serverName: ${EXTERNAL_SERVER_NAME}
+        s3Credentials:
+          accessKeyId:
+            name: ${CRED_SECRET_NAME}
+            key: ACCESS_KEY_ID
+          secretAccessKey:
+            name: ${CRED_SECRET_NAME}
+            key: SECRET_ACCESS_KEY

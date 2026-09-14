@@ -1,0 +1,17 @@
+# Ignorar conteúdos temporários e grandes dumps binários, mantendo as pastas estruturadas
+*
+!.gitignore
+!README.md
+!images/
+!images/.gitkeep
+!images/*.png
+!images/*.jpg
+!images/*.jpeg
+!images/*.svg
+!images/*.webp
+!backups/
+!backups/.gitkeep
+!temp/
+!temp/.gitkeep
+!logs/
+!logs/.gitkeep

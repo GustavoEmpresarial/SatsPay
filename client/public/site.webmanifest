@@ -1,0 +1,18 @@
+{
+  "name": "SatsPay",
+  "short_name": "SatsPay",
+  "description": "Multi-coin micropayments wallet & developer platform.",
+  "start_url": "/welcome",
+  "display": "standalone",
+  "background_color": "#F8FAFC",
+  "theme_color": "#F7931A",
+  "lang": "pt-BR",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

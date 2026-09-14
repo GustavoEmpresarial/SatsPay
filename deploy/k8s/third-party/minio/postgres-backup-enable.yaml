@@ -1,0 +1,50 @@
+# Patch applied on the live bitcosats-postgres Cluster to enable Barman WAL
+# archiving + base backups against in-cluster MinIO.
+# destinationPath / endpointURL are explicit — not code defaults.
+#
+# Matches retentionPolicy / compression from cluster-prod.yaml (Barman/CNPG
+# documented fields). serverName defaults to Cluster metadata.name
+# (bitcosats-postgres) — restore must use that folder name.
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: bitcosats-postgres
+  namespace: bitcosats
+spec:
+  backup:
+    retentionPolicy: "30d"
+    barmanObjectStore:
+      destinationPath: "s3://bitcosats-postgres-wal/bitcosats-postgres"
+      endpointURL: "http://minio.bitcosats.svc:9000"
+      s3Credentials:
+        accessKeyId:
+          name: postgres-backup-credentials
+          key: ACCESS_KEY_ID
+        secretAccessKey:
+          name: postgres-backup-credentials
+          key: SECRET_ACCESS_KEY
+      wal:
+        compression: gzip
+      data:
+        compression: gzip
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Backup
+metadata:
+  name: bitcosats-postgres-pitr-smoke
+  namespace: bitcosats
+spec:
+  cluster:
+    name: bitcosats-postgres
+  method: barmanObjectStore
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: bitcosats-postgres-nightly
+  namespace: bitcosats
+spec:
+  schedule: "0 3 * * *"
+  backupOwnerReference: self
+  cluster:
+    name: bitcosats-postgres

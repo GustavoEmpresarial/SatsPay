@@ -1,0 +1,13 @@
+FROM rust:1-bookworm AS builder
+WORKDIR /build
+RUN apt-get update && apt-get install -y --no-install-recommends cmake build-essential pkg-config libssl-dev libsasl2-dev && rm -rf /var/lib/apt/lists/*
+COPY . .
+RUN cargo build --release -p api-server
+
+FROM debian:bookworm-slim
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates libsasl2-2 && rm -rf /var/lib/apt/lists/* \
+    && useradd --system --uid 10001 --create-home bitcosats
+COPY --from=builder /build/target/release/api-server /usr/local/bin/api-server
+USER bitcosats
+EXPOSE 4000
+ENTRYPOINT ["/usr/local/bin/api-server"]

@@ -1,0 +1,34 @@
+[package]
+name = "chain"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+shared.workspace = true
+sqlx.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+async-trait.workspace = true
+thiserror = "1"
+tokio = { version = "1", features = ["full"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+bitcoin = { version = "0.32", features = ["rand-std"] }
+secp256k1 = { version = "0.29", features = ["rand-std", "recovery"] }
+bech32 = "0.9"
+bs58 = { version = "0.5", features = ["check"] }
+ripemd = "0.1"
+sha2 = "0.10"
+sha3 = "0.10"
+hex = "0.4"
+rand = "0.8"
+regex = "1"
+hmac = "0.12"
+pbkdf2 = { version = "0.12", default-features = false, features = ["hmac"] }
+ed25519-dalek = { version = "2", features = ["std"] }
+base64 = "0.22"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

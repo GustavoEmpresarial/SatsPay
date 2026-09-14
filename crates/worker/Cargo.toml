@@ -1,0 +1,30 @@
+[package]
+name = "worker"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "worker"
+path = "src/main.rs"
+
+[dependencies]
+db.workspace = true
+events.workspace = true
+queue.workspace = true
+chain = { path = "../chain" }
+pricing.workspace = true
+swapkit = { path = "../swapkit" }
+shared.workspace = true
+chrono.workspace = true
+sqlx.workspace = true
+uuid.workspace = true
+bigdecimal.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+

@@ -1,0 +1,12 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: bitcosats
+resources:
+  - ../../base
+  - secrets.yaml
+  - ../../third-party/cloudnative-pg/cluster-dev.yaml
+  - ../../third-party/strimzi/kafka-dev.yaml
+  - ../../third-party/strimzi/topics.yaml
+# Operators themselves (CloudNativePG, Strimzi) are installed via Helm into
+# cnpg-system/strimzi-system, not via this overlay — see
+# docs/operations/local-dev-k8s.md for the full `k3d` + `helm install` flow.

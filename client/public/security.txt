@@ -1,0 +1,3 @@
+Contact: mailto:security@bitcosats.com
+Policy: /security
+Preferred-Languages: pt, en

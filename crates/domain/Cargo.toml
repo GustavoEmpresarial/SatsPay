@@ -1,0 +1,22 @@
+[package]
+name = "domain"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+shared.workspace = true
+events.workspace = true
+crypto = { path = "../crypto" }
+uuid.workspace = true
+chrono.workspace = true
+bigdecimal.workspace = true
+serde.workspace = true
+thiserror = "1"
+async-trait.workspace = true
+tracing.workspace = true
+rand = "0.8"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt"] }

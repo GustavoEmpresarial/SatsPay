@@ -1,0 +1,28 @@
+pub mod bch_sign;
+pub mod bitcore_client;
+pub mod btc_sign;
+pub mod dgb_client;
+pub mod encoding;
+pub mod evm_client;
+pub mod evm_sign;
+pub mod hd;
+pub mod hd_wallet;
+pub mod params;
+pub mod policy;
+pub mod real_client;
+pub mod registry;
+pub mod sol_client;
+pub mod rpc_client;
+pub mod stub;
+pub mod types;
+
+pub use params::{params, params_for, AddressKind, ChainNetwork, CoinParams};
+pub use policy::{assert_stub_client_allowed, StubPolicyError};
+pub use real_client::{hot_wallet_address, RealChainClient, RealClientConfig};
+pub use registry::ChainRegistry;
+pub use rpc_client::MultiChainRpcClient;
+pub use stub::StubClient;
+pub use types::{BroadcastError, BroadcastResult, ChainClient, ChainError, GeneratedAddress, OnchainTx};
+
+#[cfg(test)]
+mod tests;

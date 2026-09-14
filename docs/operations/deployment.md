@@ -1,0 +1,89 @@
+# Deploy — topologia k8s
+
+Ver também `deploy/k8s/README.md` para o passo a passo exato de subir o cluster de dev do zero.
+
+## Visão geral
+
+```
+namespace bitcosats:
+  bitcosats-postgres-*        (CloudNativePG, Cluster CR)
+  bitcosats-kafka-*            (Strimzi, Kafka + KafkaNodePool CRs)
+  bitcosats-{admin,faucet,...}-events  (KafkaTopic CRs, 1 por bounded context)
+  api-server        (Deployment, 2 réplicas, Service ClusterIP :4000)
+  worker            (Deployment, 2 réplicas — outbox_relay roda como task
+                     dentro do próprio binário, não é um Deployment separado)
+  # frontend, ingress — TODO: apps/web fica fora do escopo desta reescrita
+  # por decisão explícita (ver plans/rosy-greeting-deer.md); ingress base
+  # existe (base/ingress/) mas só roteia /api até o frontend ganhar manifest.
+
+namespace cnpg-system:     operator CloudNativePG
+namespace strimzi-system:  operator Strimzi (instalado com watchAnyNamespace=true)
+```
+
+`api-server`/`worker` não fazem eleição de líder — todo estado compartilhado já é protegido por lock de linha/CAS no Postgres (ver `docs/security/BALANCE_SECURITY.md`) ou por `SELECT ... FOR UPDATE SKIP LOCKED` na fila interna, então N réplicas nunca duplicam trabalho.
+
+## Build das imagens
+
+```bash
+docker build -f Dockerfile.api-server -t bitcosats/api-server:dev .
+docker build -f Dockerfile.worker -t bitcosats/worker:dev .
+
+# Import direto pro k3d (sem precisar de um registry) — dev local:
+k3d image import bitcosats/api-server:dev bitcosats/worker:dev -c bitcosats-dev
+```
+
+Em CI (`.github/workflows/ci.yml`), o job `docker-build` builda as duas imagens (sem push) como gate — o push real pra um registry e o rollout ficam para quando o ambiente prod tiver um registry definido (fora do escopo desta fase).
+
+## Aplicar no cluster dev
+
+```bash
+export PATH="$HOME/.local/bin:$PATH"
+kubectl kustomize --load-restrictor LoadRestrictionsNone deploy/k8s/overlays/dev | kubectl apply -f -
+kubectl -n bitcosats rollout status deployment/api-server
+kubectl -n bitcosats rollout status deployment/worker
+```
+
+`overlays/dev/secrets.yaml` traz um `Secret` literal só pra dev (chaves/`ENCRYPTION_KEY` de teste, nunca usar em prod). `DATABASE_URL` **não** está nesse Secret — `api-server`/`worker` leem direto do Secret `bitcosats-postgres-app` que o próprio CloudNativePG gera (chave `uri`), evitando duplicar a connection string à mão.
+
+Verificado ao vivo: as duas imagens buildadas e importadas no k3d real, `kubectl apply` do overlay dev aplicado contra o cluster real, `api-server` e `worker` subindo `2/2 Available`, `/healthz` respondendo via `Service` real (não só `cargo run` local), e `worker` conectando de verdade no Kafka real do cluster (Strimzi) sem erro de resolução de DNS.
+
+## Rodar localmente contra o cluster dev (sem Deployment, pra iteração rápida)
+
+```bash
+export PATH="$HOME/.local/bin:$PATH"
+kubectl port-forward -n bitcosats svc/bitcosats-postgres-rw 15432:5432 &
+
+export DATABASE_URL="postgresql://bitcosats:<senha>@127.0.0.1:15432/bitcosats"
+export JWT_ACCESS_SECRET="dev-secret"
+export ENCRYPTION_KEY="$(openssl rand -hex 32)"
+export ALLOW_STUB_CHAIN=true
+export BIND_ADDR="127.0.0.1:4000"
+
+cargo run -p api-server   # roda migrations automaticamente
+cargo run -p worker       # em outro terminal — precisa de KAFKA_BOOTSTRAP_SERVERS pro outbox_relay publicar de verdade
+```
+
+A senha do Postgres está no secret `bitcosats-postgres-app`:
+```bash
+kubectl get secret -n bitcosats bitcosats-postgres-app -o jsonpath='{.data.uri}' | base64 -d
+```
+
+## Produção (`overlays/prod`)
+
+```bash
+kubectl kustomize --load-restrictor LoadRestrictionsNone deploy/k8s/overlays/prod > /dev/null  # valida antes de aplicar
+```
+
+- **Postgres**: `third-party/cloudnative-pg/cluster-prod.yaml` — 3 instâncias (failover automático) + `barmanObjectStore` (WAL archiving contínuo pra S3-compatível) + `ScheduledBackup` diário. Ver `backup-restore-postgres.md` pro runbook de restore/PITR.
+- **TLS**: `third-party/cert-manager/cluster-issuer.yaml` (Let's Encrypt HTTP-01) + `base/ingress/ingress.yaml` — troque os `PLACEHOLDER` pelo hostname real antes de aplicar.
+- **Secrets**: `third-party/external-secrets/` — `SecretStore` (Vault) + `ExternalSecret`s que materializam `api-server-secrets`/`worker-secrets`/`postgres-backup-credentials` com rotação automática (`refreshInterval: 1h`), em vez do `Secret` literal usado em dev. Ver ADR de ESO vs Sealed Secrets em `docs/decisions/`.
+- **Imagens / hostname / Vault / S3 / ACME email**: `overlays/prod` fills these via
+  `configMapGenerator` + `replacements` from `prod.env.example` (copy to gitignored
+  `prod.env` for real deploys). See `deploy/k8s/overlays/prod/README.md`.
+- `overlays/staging` — dual-run namespace `bitcosats-staging` (1 replica, shared/dev
+  deps). See `deploy/k8s/overlays/staging/README.md`.
+
+
+## Variáveis de ambiente
+
+Ver `env-vars-reference.md`.

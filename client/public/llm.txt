@@ -1,0 +1,12 @@
+# SatsPay — machine-readable product brief
+# Also published at /ai.txt
+
+SatsPay is a multi-coin micropayments wallet & developer platform (BTC, LTC, DOGE, BCH, POL, SOL, USDT, USDC, DGB) with a public API.
+
+Primary docs: /documentation
+API UI: /api
+LLM page: /llm
+Privacy: /privacy
+Terms: /terms
+Cookies: /cookies
+Security: /security

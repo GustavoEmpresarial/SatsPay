@@ -1,0 +1,985 @@
+{
+  "analytics": {
+    "title": "Analytics",
+    "subtitle": "Portfolio and activity over the last 30 days.",
+    "empty": "No data yet — use the faucet or make a swap to see the charts.",
+    "totalUsd": "Portfolio value",
+    "inflow30d": "Inflow (30d)",
+    "inflowHint": "deposits + faucet + swap-in",
+    "outflow30d": "Outflow (30d)",
+    "outflowHint": "withdrawals + swap-out + stake-lock",
+    "net30d": "Net (30d)",
+    "entries": "entries",
+    "coins": "coins",
+    "allocation": "Allocation",
+    "netTrend": "Cumulative net flow",
+    "dailyFlow": "Daily inflow vs outflow",
+    "in": "in",
+    "out": "out",
+    "byType": "By operation"
+  },
+  "merchant": {
+    "title": "Merchant access",
+    "subtitle": "The merchant area (API keys, developer wallets, and the faucetlist) requires approval.",
+    "statusLabel": "Status",
+    "statusNONE": "Not a merchant",
+    "statusPENDING": "Under review",
+    "statusAPPROVED": "Approved",
+    "statusREJECTED": "Rejected",
+    "pending": "Your application{{name}} is being reviewed. You'll get access once an admin approves it.",
+    "pendingName": " for “{{name}}”",
+    "rejected": "Rejected: {{reason}}. Adjust the details and re-apply below.",
+    "approvedMsg": "You're an approved merchant. Enter merchant mode to manage keys and faucet sites.",
+    "enter": "Enter merchant mode",
+    "projectName": "Project name",
+    "projectPlaceholder": "e.g. CoolFaucet Ltd",
+    "website": "Site URL",
+    "description": "Description",
+    "descPlaceholder": "Tell us about your project (min 10 chars)",
+    "submit": "Request access",
+    "submitting": "Submitting..."
+  },
+  "merchantSites": {
+    "badge": "Merchant",
+    "title": "My faucet sites",
+    "subtitle": "Submit your faucet for review. Approved sites appear in the public faucetlist.",
+    "submitTitle": "Submit a faucet",
+    "siteName": "Site name",
+    "siteNamePlaceholder": "e.g. CoolFaucet",
+    "url": "URL",
+    "urlPlaceholder": "https://coolfaucet.com",
+    "description": "Description",
+    "descPlaceholder": "What your faucet offers (min 10 chars)",
+    "rewardInfo": "Reward info (optional)",
+    "rewardPlaceholder": "e.g. up to 100 sats / 5min",
+    "coins": "Supported coins",
+    "submit": "Submit for review",
+    "submitting": "Submitting...",
+    "mySubmissions": "My submissions",
+    "empty": "No faucet sites submitted yet.",
+    "visits": "visits",
+    "rejected": "Rejected",
+    "delete": "Delete",
+    "submitCta": "Submit site",
+    "submitNew": "Submit new site",
+    "submitMine": "Submit my faucet",
+    "visit": "Visit",
+    "liveBadge": "Live on public list"
+  },
+  "common": {
+    "signIn": "Sign in",
+    "signUp": "Create account",
+    "signOut": "Sign out",
+    "getStartedFree": "Create free account",
+    "haveAccount": "Already have an account",
+    "noAccount": "Don't have an account",
+    "loading": "Loading...",
+    "language": "Language",
+    "theme": "Theme",
+    "themeLight": "Light",
+    "themeDark": "Dark",
+    "themeBlack": "Black",
+    "copy": "Copy",
+    "showPassword": "Show password",
+    "hidePassword": "Hide password",
+    "menu": "Menu",
+    "home": "Home",
+    "selectCoin": "Select coin",
+    "cryptoPlatform": "Crypto platform",
+    "twoFactorOn": "2FA ON",
+    "twoFactorOff": "2FA OFF",
+    "available": "Available",
+    "personalToDeveloper": "Personal → Merchant",
+    "developerToPersonal": "Merchant → Personal"
+  },
+  "nav": {
+    "dashboard": "Dashboard",
+    "wallets": "Wallet",
+    "faucet": "Faucet",
+    "faucetlist": "Faucetlist",
+    "faucetSites": "My sites",
+    "deposit": "Deposit",
+    "withdraw": "Withdraw",
+    "settings": "Settings",
+    "stake": "Stake",
+    "lend": "Lending",
+    "swap": "Swap",
+    "analytics": "Analytics",
+    "docs": "API Docs",
+    "apiKeys": "API Keys",
+    "devWallets": "Merchant balance",
+    "sectionAccount": "Account",
+    "sectionDeveloper": "Developer",
+    "sectionPersonal": "Personal",
+    "sectionMerchant": "Merchant",
+    "sectionInfraDocs": "Infra & docs",
+    "uptime": "Uptime",
+    "siteDocs": "Site Docs",
+    "apiDocs": "API Docs",
+    "live": "Live",
+    "support": "Support",
+    "comingSoon": "Coming soon"
+  },
+  "lend": {
+    "title": "Lending",
+    "subtitle": "Supply assets to earn interest or borrow against your collateral.",
+    "healthFactor": "Health factor",
+    "totalDebt": "Total debt",
+    "borrowPower": "Borrow power",
+    "available": "Available to borrow",
+    "yourPositions": "Your positions",
+    "markets": "Markets",
+    "coin": "Coin",
+    "supplied": "Supplied",
+    "debt": "Debt",
+    "collateral": "Collateral",
+    "supplyApy": "Supply APY",
+    "borrowApy": "Borrow APY",
+    "utilization": "Utilization",
+    "maxLtv": "Max LTV",
+    "liquidity": "Liquidity",
+    "amountSmallestUnit": "Amount (smallest unit)",
+    "walletBalance": "Wallet balance",
+    "invalidAmount": "Enter a valid amount",
+    "success": "Operation complete.",
+    "rewards": "Rewards",
+    "rewardsAutoHint": "Auto-distributed to your wallet around the clock — no claim needed. Weight = balance + stake + loans.",
+    "received": "Received",
+    "action": {
+      "supply": "Supply",
+      "withdraw": "Withdraw",
+      "borrow": "Borrow",
+      "repay": "Repay"
+    }
+  },
+  "swap": {
+    "title": "Swap",
+    "subtitle": "Polygon DEX (POL, USDT, USDC) via SwapKit — no internal liquidity.",
+    "from": "You pay",
+    "to": "You receive",
+    "flip": "Flip pair",
+    "rate": "Exchange rate",
+    "fee": "Protocol fee (0.25%)",
+    "receive": "You receive (net)",
+    "confirm": "Confirm swap",
+    "confirming": "Executing swap…",
+    "success": "Swap completed.",
+    "insufficient": "Insufficient balance for this amount.",
+    "history": "Swap history",
+    "empty": "No swaps yet.",
+    "poweredBy": "SwapKit DEX · SatsPay fee 0.25% (affiliate)",
+    "trustLine": "Custodial · DEX route (SwapKit) · Transparent fee"
+  },
+  "stake": {
+    "title": "Staking",
+    "subtitle": "Lock funds and earn rewards over time.",
+    "plans": "Available plans",
+    "planApy": "{{apy}}% APY",
+    "planDuration": "{{days}} days",
+    "chooseCoin": "Coin",
+    "amount": "Amount to stake (smallest unit)",
+    "available": "Available: {{amount}}",
+    "expectedReward": "Expected reward",
+    "startStake": "Start stake",
+    "starting": "Starting...",
+    "activeStakes": "Active stakes",
+    "history": "History",
+    "noStakes": "No stakes yet. Choose a plan above to get started.",
+    "principal": "Principal",
+    "reward": "Reward",
+    "matures": "Matures",
+    "mature": "Ready to claim",
+    "flexible": "Flexible",
+    "flexibleHint": "Unstake anytime · pro-rata reward",
+    "claim": "Claim principal + reward",
+    "cancel": "Cancel early (forfeit reward)",
+    "cancelConfirm": "Cancel this stake? You get the principal back but forfeit the reward.",
+    "startedAt": "Started",
+    "status": {
+      "ACTIVE": "Active",
+      "COMPLETED": "Completed",
+      "CANCELED": "Canceled"
+    }
+  },
+  "developer": {
+    "balances": "Merchant & API balances",
+    "balancesHint": "These balances power your API and payments. They stay isolated from your personal wallet.",
+    "topUp": "Top up",
+    "withdrawToPersonal": "Move to personal",
+    "personalBalance": "Personal Balance",
+    "developerBalance": "Merchant Balance",
+    "amount": "Amount to transfer",
+    "transfer": "Transfer",
+    "transferring": "Transferring...",
+    "transferOk": "Transfer completed.",
+    "close": "Close"
+  },
+  "docs": {
+    "title": "API Documentation",
+    "subtitle": "Integrate SatsPay into your faucet or app in minutes.",
+    "toc": "On this page",
+    "sections": {
+      "quickstart": "Quick start",
+      "auth": "Authentication",
+      "send": "Send payment",
+      "balance": "Get balance",
+      "errors": "Error handling",
+      "limits": "Rate limits",
+      "keys": "API keys"
+    },
+    "baseUrl": "Base URL",
+    "quickstart": {
+      "text": "1. Generate an API key in Settings → API Keys. 2. Copy the raw key (only shown once). 3. Use it as the x-api-key header on every request. 4. Every /send call must include a unique idempotencyKey so retries don't double-spend."
+    },
+    "auth": {
+      "text": "All public API requests require the x-api-key header. The key you receive is a 64-character hex string prefixed with the first 8 chars visible in your key list (so you can identify which key is active without exposing the secret)."
+    },
+    "send": {
+      "desc": "Send an internal micropayment from your SatsPay balance to another SatsPay user, identified by email.",
+      "scope": "Required scope: send",
+      "idempotencyNote": "The idempotencyKey field ensures at-most-once semantics. Repeating a request with the same key returns { status: \"idempotent\" } without transferring again."
+    },
+    "balance": {
+      "desc": "Fetch balances for all coins associated with the API key owner.",
+      "scope": "Required scope: balance"
+    },
+    "errors": {
+      "text": "Errors follow a consistent shape: { error: { code, message, details? } }. Common codes include UNAUTHORIZED, VALIDATION_ERROR, RATE_LIMITED, INSUFFICIENT_BALANCE, NOT_FOUND."
+    },
+    "limits": {
+      "text": "Public API is rate-limited to 60 requests per minute per API key. Auth endpoints (/auth/login, /auth/register) are limited to 10 requests per 15 minutes per IP."
+    },
+    "keys": {
+      "text": "Manage your keys in Settings. You can create keys with specific scopes (send, balance, history, *) and disable them at any time. Keys are stored hashed — the raw value is shown only once, when generated.",
+      "manage": "Manage keys in Settings"
+    },
+    "copy": "Copy",
+    "copied": "Copied"
+  },
+  "wallets": {
+    "title": "Wallet",
+    "subtitle": "Balances, deposit, and withdraw per coin.",
+    "backToWallets": "Back to Wallets",
+    "balance": "Balance",
+    "smallestUnit": "smallest unit",
+    "address": "Deposit address",
+    "addressHint": "Send only {{coin}} to this address. Credited after {{n}} confirmations.",
+    "copyAddress": "Copy address",
+    "copied": "Copied!",
+    "totalReceived": "Total received",
+    "confirmationsBadge": "{{n}} conf.",
+    "receivedHistory": "Received transactions",
+    "empty": "No incoming transactions yet for {{coin}}",
+    "tabs": {
+      "overview": "Overview",
+      "deposit": "Deposit",
+      "withdraw": "Withdraw"
+    },
+    "withdraw": {
+      "title": "Withdraw {{coin}}",
+      "need2fa": "Enable 2FA in Settings to withdraw.",
+      "toSettings": "Go to Settings",
+      "toAddress": "Destination address",
+      "amount": "Amount (smallest unit)",
+      "amountHint": "Min: {{min}} · Available: {{available}}",
+      "totp": "2FA code",
+      "submit": "Request withdrawal",
+      "submitting": "Submitting...",
+      "success": "Withdrawal queued for processing",
+      "max": "Max"
+    }
+  },
+  "landing": {
+    "nav": {
+      "features": "Features",
+      "coins": "Coins",
+      "api": "API",
+      "faq": "FAQ"
+    },
+    "hero": {
+      "badge": "Your multi-coin wallet",
+      "title1": "Hold and send",
+      "titleAccent": "crypto",
+      "title2": "without the hassle.",
+      "subtitle": "One account to <b>receive, hold and withdraw</b> BTC, LTC, DOGE and more — simple, fast, and under your control.",
+      "ctaPrimary": "Create free account",
+      "ctaSecondary": "I already have an account",
+      "bulletFree": "Free to sign up",
+      "bulletFast": "On-chain deposit & withdraw",
+      "bulletMulti": "Many coins, one account",
+      "mockTotalBalance": "Total balance",
+      "mockDeposit": "Deposit",
+      "mockWithdraw": "Withdraw",
+      "mockSend": "Send",
+      "badgeDepositConfirmed": "Deposit confirmed",
+      "badgeSendOk": "Send complete",
+      "badgeAccountReady": "Wallet ready"
+    },
+    "features": {
+      "kicker": "For you",
+      "title": "Simple wallet. Full control.",
+      "subtitle": "Built for everyday use — deposit, withdraw, and track balances without the fuss.",
+      "deposit": {
+        "title": "Easy deposits",
+        "desc": "Get an address and receive. Funds credit automatically after network confirmations."
+      },
+      "withdraw": {
+        "title": "Withdraw anytime",
+        "desc": "Send to any address you choose, with clear confirmation at every step."
+      },
+      "multi": {
+        "title": "Everything in one place",
+        "desc": "Bitcoin, Litecoin, Dogecoin and more in the same account — no juggling apps."
+      },
+      "send": {
+        "title": "Direct transfers",
+        "desc": "Move value between accounts or out to the chain when you need — no detours."
+      },
+      "clarity": {
+        "title": "Clear balances",
+        "desc": "See what you hold in each coin at a glance — no spreadsheets, no surprises."
+      },
+      "history": {
+        "title": "Full history",
+        "desc": "Deposits, withdrawals and activity in one place whenever you need."
+      }
+    },
+    "how": {
+      "kicker": "How it works",
+      "title": "Three steps and you're in",
+      "subtitle": "From zero to your first wallet in under a minute.",
+      "s1Title": "Create your account",
+      "s1Desc": "Email and password. No KYC on signup.",
+      "s2Title": "Deposit your coins",
+      "s2Desc": "Receive on-chain and watch funds land in your wallet.",
+      "s3Title": "Hold or withdraw",
+      "s3Desc": "Track your balance and send when you need."
+    },
+    "coins": {
+      "kicker": "Coins in your wallet",
+      "title": "One account, many cryptocurrencies",
+      "trio": "Deposit · Withdraw · Balance"
+    },
+    "devsNote": {
+      "text": "Need to integrate payments into your app?",
+      "link": "API documentation"
+    },
+    "faq": {
+      "kicker": "FAQ",
+      "title": "Frequently asked questions",
+      "items": [
+        {
+          "q": "Does SatsPay charge any fees?",
+          "a": "Signup is free. On-chain withdrawals only pay the network fee."
+        },
+        {
+          "q": "How long does a deposit take?",
+          "a": "It depends on confirmations per coin (e.g. BTC/BCH 2, LTC 6, DOGE 20). After that, crediting is automatic."
+        },
+        {
+          "q": "Can I hold several coins in one account?",
+          "a": "Yes. BTC, LTC, DOGE and more live in the same SatsPay wallet."
+        },
+        {
+          "q": "How do withdrawals work?",
+          "a": "Enter the address and amount. Larger requests may be reviewed before going on-chain."
+        },
+        {
+          "q": "Is my money safe?",
+          "a": "We keep only what's needed in hot wallet. Large moves are reviewed; the rest stays in cold storage."
+        }
+      ]
+    },
+    "cta": {
+      "title": "Your wallet in under 30 seconds",
+      "subtitle": "Multiple coins ready when you sign up. No paperwork.",
+      "primary": "Create free account",
+      "secondary": "Sign in"
+    },
+    "footer": {
+      "tagline": "Everyday multi-coin wallet — BTC, LTC, DOGE and more.",
+      "product": "Product",
+      "account": "Account",
+      "community": "Community"
+    }
+  },
+  "auth": {
+    "login": {
+      "title": "Sign in",
+      "subtitle": "Access your SatsPay wallet.",
+      "email": "Email",
+      "password": "Password",
+      "totp": "2FA code",
+      "emailCode": "Email verification code",
+      "submit": "Sign in",
+      "submitting": "Signing in..."
+    },
+    "register": {
+      "title": "Create account",
+      "subtitle": "A wallet (BTC, LTC, DOGE, BCH) created automatically.",
+      "username": "Username",
+      "usernameHint": "3–24 characters; starts with a letter; letters, numbers and _ only",
+      "passwordHint": "Min. 10 characters, with uppercase, lowercase and digits.",
+      "confirmPassword": "Confirm password",
+      "acceptTerms": "I agree to the <terms>Terms & Conditions</terms> and the <privacy>Privacy Policy</privacy>.",
+      "submit": "Create account",
+      "submitting": "Creating...",
+      "errors": {
+        "mismatch": "Passwords do not match",
+        "minLength": "Password must be at least 10 characters",
+        "maxLength": "Password is too long",
+        "uppercase": "Password must contain an uppercase letter",
+        "lowercase": "Password must contain a lowercase letter",
+        "digit": "Password must contain a digit",
+        "terms": "You must accept the terms and conditions",
+        "usernameLength": "Username must be between 3 and 24 characters",
+        "usernameFormat": "Must start with a letter; only letters, numbers and underscore"
+      }
+    },
+    "layout": {
+      "backHome": "Back to home",
+      "loginHeadline": "Welcome back — your sats are waiting.",
+      "registerHeadline": "One account, multi-coin, micropayments without limits.",
+      "loginBody": "Personal wallet, faucet, staking and merchant tools — all in one login.",
+      "registerBody": "Free signup. No KYC. Faucet, staking, and a public API in the same wallet.",
+      "bulletMulti": "Multi-coin: {{n}} chains in one account",
+      "bulletProducts": "Faucet · Stake · Swap · Withdraw",
+      "bulletApi": "Public API for external faucets",
+      "securityStrip": "Email 2FA · Argon2id passwords · Auditable ledger",
+      "adminLink": "Admin sign-in"
+    }
+  },
+  "admin": {
+    "brand": "Admin",
+    "internal": "SatsPay internal",
+    "signedInAs": "Signed in as",
+    "userApp": "User app",
+    "nav": {
+      "overview": "Overview",
+      "telemetry": "Telemetry",
+      "withdrawals": "Withdrawals",
+      "merchants": "Merchants",
+      "faucetSites": "Faucetlist",
+      "stake": "Treasury & Hot"
+    },
+    "login": {
+      "title": "Admin Console",
+      "subtitle": "SatsPay internal",
+      "email": "Admin email",
+      "emailPlaceholder": "admin@company.com",
+      "checkInbox": "Check your inbox",
+      "submit": "Sign in to admin",
+      "submitting": "Authenticating...",
+      "notAdmin": "Not an admin?",
+      "userLogin": "Go to user login",
+      "restricted": "Restricted access · All actions logged"
+    },
+    "overview": {
+      "title": "Overview",
+      "subtitle": "Real-time system metrics",
+      "users": "Users",
+      "wallets": "Wallets",
+      "pendingWithdrawals": "Pending withdrawals",
+      "totalWithdrawals": "Total withdrawals",
+      "faucetClaims": "Faucet claims",
+      "apiKeys": "Active API keys",
+      "activeStakes": "Active stakes"
+    }
+  },
+  "dashboard": {
+    "title": "Dashboard",
+    "subtitle": "Your wallet balances",
+    "smallestUnit": "smallest unit",
+    "greetingMorning": "Good morning",
+    "greetingAfternoon": "Good afternoon",
+    "greetingEvening": "Good evening",
+    "welcomeBack": "Welcome back",
+    "yourWallet": "Your wallet",
+    "emptyWallet": "No balance yet — claim from the faucet to get started.",
+    "fundedCoins": "{{n}} coins with balance",
+    "balances": "Balances",
+    "totalAssets": "Total assets",
+    "acrossWallets": "Across {{n}} wallets",
+    "quickActions": "Quick actions",
+    "yourWallets": "Your wallets",
+    "recentActivity": "Recent activity",
+    "noActivity": "No activity yet. Claim from the faucet to get started.",
+    "viewAll": "View all",
+    "deposit": "Deposit",
+    "withdraw": "Withdraw",
+    "claimFaucet": "Claim faucet",
+    "balance": "Balance",
+    "actionDeposit": "Receive",
+    "actionSend": "Send",
+    "twoFaOn": "2FA enabled",
+    "twoFaOff": "2FA off",
+    "hints": {
+      "deposit": "QR + address",
+      "withdraw": "2FA required",
+      "faucet": "Every 11h"
+    },
+    "type": {
+      "DEPOSIT": "Deposit",
+      "WITHDRAWAL": "Withdrawal",
+      "WITHDRAWAL_FEE": "Network fee",
+      "WITHDRAWAL_REVERSAL": "Withdrawal reversal",
+      "FAUCET": "Faucet claim",
+      "TRANSFER_IN": "Received",
+      "TRANSFER_OUT": "Sent",
+      "ADJUSTMENT": "Adjustment"
+    }
+  },
+  "faucet": {
+    "title": "Faucet",
+    "subtitle": "Small amounts every 11 hours.",
+    "claimAmount": "Amount",
+    "claim": "Claim",
+    "claiming": "Processing...",
+    "received": "Received",
+    "cooldown": "Time remaining",
+    "available": "Available",
+    "antiBot": "Verification",
+    "antiBotPrompt": "Confirm you are human:",
+    "solveCaptcha": "Verify",
+    "captchaVerified": "Verified",
+    "cooldownActive": "Please wait for the 11-hour cooldown.",
+    "securityCheck": "Verification"
+  },
+  "deposit": {
+    "title": "Deposit",
+    "subtitle": "Send {{coin}} to the address below. Credited after {{n}} confirmations.",
+    "generating": "Generating address...",
+    "addressFor": "{{coin}} address",
+    "pausedBadge": "Paused",
+    "pausedTitle": "{{coin}} deposits temporarily paused",
+    "pausedHint": "The coin stays listed. New addresses and credits on this network are disabled for now."
+  },
+  "withdraw": {
+    "title": "Withdraw",
+    "min": "Minimum: {{amount}} smallest unit ({{coin}})",
+    "need2fa": "Enable 2FA before you can request withdrawals.",
+    "toSettings": "Go to settings",
+    "coin": "Coin",
+    "toAddress": "Destination address",
+    "amount": "Amount (smallest unit)",
+    "totp": "2FA code",
+    "submit": "Request withdrawal",
+    "submitting": "Submitting...",
+    "success": "Withdrawal queued for processing.",
+    "pausedBadge": "Paused",
+    "pausedTitle": "{{coin}} withdrawals temporarily paused",
+    "pausedHint": "The coin stays listed. Withdrawals on this network are disabled for now."
+  },
+  "settings": {
+    "title": "Settings",
+    "account": "Account",
+    "modes": {
+      "title": "Account mode",
+      "user": "Personal",
+      "merchant": "Merchant",
+      "userDesc": "Personal wallet, faucet, staking",
+      "merchantDesc": "Developer balances, API keys, docs"
+    },
+    "twofa": {
+      "title": "Two-factor authentication (email)",
+      "statusOn": "Enabled",
+      "statusOff": "Disabled — required for withdrawals",
+      "status": "Status: {{status}}",
+      "enable": "Enable email 2FA",
+      "disable": "Disable email 2FA",
+      "sendCode": "Send code to my email",
+      "codeSentTo": "We sent a 6-digit code to {{email}}. It expires in 10 minutes.",
+      "codePlaceholder": "6-digit code",
+      "confirm": "Confirm",
+      "resend": "Resend code",
+      "enabled": "2FA enabled successfully",
+      "disabled": "2FA disabled"
+    },
+    "apiKeys": {
+      "title": "API keys (for external faucets)",
+      "generate": "Generate new key",
+      "saveNow": "Save this key now. It won't be shown again:",
+      "empty": "No keys created yet",
+      "active": "active",
+      "disabled": "disabled"
+    },
+    "username": {
+      "title": "Username",
+      "label": "Username",
+      "hint": "3–24 characters; starts with a letter; letters, numbers and _ only",
+      "save": "Save",
+      "saving": "Saving…",
+      "saved": "Username updated",
+      "unchanged": "That is already your username",
+      "taken": "That username is already taken",
+      "error": "Could not update username",
+      "errors": {
+        "usernameLength": "Username must be between 3 and 24 characters",
+        "usernameFormat": "Must start with a letter; only letters, numbers and underscore"
+      }
+    }
+  },
+  "footer": {
+    "tagline": "Everyday multi-coin wallet — BTC, LTC, DOGE and more.",
+    "product": "Product",
+    "account": "Account",
+    "legal": "Legal",
+    "developers": "Developers",
+    "rights": "All rights reserved.",
+    "compliance": "Not financial advice. Crypto assets involve risk.",
+    "links": {
+      "features": "Features",
+      "coins": "Supported coins",
+      "api": "API",
+      "docs": "Documentation",
+      "faq": "FAQ",
+      "privacy": "Privacy Policy",
+      "terms": "Terms & Conditions",
+      "cookies": "Cookie Policy",
+      "security": "Security",
+      "apiRef": "API reference",
+      "guides": "Guides",
+      "sitemap": "Sitemap",
+      "llm": "llm.txt",
+      "support": "Support"
+    },
+    "backHome": "Back to home"
+  },
+  "pages": {
+    "coins": {
+      "subtitle": "Deposit, withdraw, and faucet across all 9 supported cryptocurrencies."
+    },
+    "faq": {
+      "subtitle": "Quick answers about fees, deposits, 2FA and the public API."
+    },
+    "security": {
+      "title": "Security",
+      "subtitle": "How to report vulnerabilities and how we protect accounts and funds.",
+      "sections": [
+        {
+          "title": "Report a vulnerability",
+          "body": "Email security@bitcosats.com with details. Do not exploit production beyond what is needed to demonstrate the issue."
+        },
+        {
+          "title": "Accounts & authentication",
+          "body": "Hashed passwords, HttpOnly refresh-token sessions, and mandatory 2FA for withdrawals."
+        },
+        {
+          "title": "Custody",
+          "body": "We keep the minimum in hot wallets for operations. Large movements go through operational review."
+        }
+      ]
+    },
+    "guides": {
+      "title": "Guides",
+      "subtitle": "Practical paths to start using SatsPay and the API.",
+      "items": [
+        {
+          "title": "Sign in with SatsPay (OAuth 2.0 SSO)",
+          "desc": "Embed the official login button on your site or app and authenticate users in 2 minutes.",
+          "to": "/developer/apps"
+        },
+        {
+          "title": "Create account & wallets",
+          "desc": "Free signup with BTC, LTC, DOGE and BCH.",
+          "to": "/register"
+        },
+        {
+          "title": "API reference",
+          "desc": "Public endpoints, x-api-key and idempotency.",
+          "to": "/api"
+        },
+        {
+          "title": "Documentation hub",
+          "desc": "Policies, quick start and crawler files.",
+          "to": "/documentation"
+        },
+        {
+          "title": "FAQ",
+          "desc": "Common questions from users and developers.",
+          "to": "/faq"
+        }
+      ]
+    },
+    "sitemap": {
+      "eyebrow": "SEO",
+      "title": "Sitemap",
+      "subtitle": "All public SatsPay pages in one place.",
+      "xmlHint": "XML version for search engines:"
+    },
+    "llm": {
+      "eyebrow": "AI / LLM",
+      "title": "LLM summary",
+      "subtitle": "Short, trustworthy product context for AI assistants.",
+      "intro": "SatsPay is a multi-coin micropayments wallet (BTC, LTC, DOGE, BCH) with a public API for merchants and faucets.",
+      "productTitle": "Product",
+      "devTitle": "Developer notes",
+      "dev1": "Public API auth: x-api-key header",
+      "dev2": "Every /send requires a unique idempotencyKey",
+      "dev3": "Do not invent endpoints; use /documentation and /api",
+      "rawHint": "Raw file:"
+    }
+  },
+  "cookies": {
+    "title": "Privacy & cookies",
+    "banner": "We only use essential cookies to keep your session secure and remember preferences — no ad tracking. See our",
+    "accept": "Accept",
+    "essential": "Essential only",
+    "points": {
+      "session": "Session and authentication (required)",
+      "prefs": "Language and UI preferences",
+      "ads": "No advertising cookies"
+    }
+  },
+  "documentation": {
+    "eyebrow": "Developers",
+    "title": "Documentation",
+    "subtitle": "Integrate SatsPay micropayments, manage API keys, and read our public policies.",
+    "machineReadable": "Machine-readable",
+    "cards": {
+      "api": {
+        "title": "API reference",
+        "desc": "Public endpoints, auth headers, idempotency and rate limits."
+      },
+      "privacy": {
+        "title": "Privacy Policy",
+        "desc": "How we collect, use and protect personal data."
+      },
+      "terms": {
+        "title": "Terms & Conditions",
+        "desc": "Rules for using SatsPay wallets and developer APIs."
+      },
+      "cookies": {
+        "title": "Cookie Policy",
+        "desc": "Which cookies we set and why."
+      }
+    },
+    "quickstart": {
+      "title": "Quick start",
+      "s1": "Create a free account and verify your email.",
+      "s2": "Switch to Merchant mode and generate an API key with the scopes you need.",
+      "s3": "Call https://api.bitcosats.com/v1/public/* with the x-api-key header.",
+      "s4": "Always send a unique idempotencyKey on every /send request."
+    },
+    "cta": {
+      "api": "Open API docs",
+      "account": "Create account"
+    }
+  },
+  "legal": {
+    "privacy": {
+      "title": "Privacy Policy",
+      "updated": "Last updated: August 30, 2026",
+      "sections": [
+        {
+          "title": "1. Who we are",
+          "body": [
+            "SatsPay operates a multi-coin micropayments wallet and developer API. This policy explains what data we process when you use bitcosats.com and related services.",
+            "Contact for privacy requests: privacy@bitcosats.com."
+          ]
+        },
+        {
+          "title": "2. Data we collect",
+          "body": [
+            "Account data: email address, hashed password, optional 2FA settings, and account mode preferences.",
+            "Wallet activity: deposits, withdrawals, internal transfers, staking/lending/swap events, and API usage tied to your keys.",
+            "Technical data: IP address, browser type, and identifiers needed for security, rate limiting, and fraud prevention.",
+            "We do not sell your personal data."
+          ]
+        },
+        {
+          "title": "3. How we use data",
+          "body": [
+            "To provide wallets, faucets, merchant tools and API access.",
+            "To authenticate sessions, detect abuse and comply with applicable law.",
+            "To send service notices (security alerts, password resets, and product changes)."
+          ]
+        },
+        {
+          "title": "4. Retention & security",
+          "body": [
+            "We retain account and ledger records for as long as needed to operate the service and meet legal obligations.",
+            "Access credentials are hashed; API secrets are shown once at creation. Large treasury movements may require additional operational controls."
+          ]
+        },
+        {
+          "title": "5. Your rights",
+          "body": [
+            "Depending on your jurisdiction, you may request access, correction, export or deletion of personal data, subject to security and legal retention requirements.",
+            "Email privacy@bitcosats.com with the subject line \"Privacy request\"."
+          ]
+        },
+        {
+          "title": "6. International transfers",
+          "body": [
+            "Infrastructure may run in multiple regions. We apply safeguards appropriate to the nature of the data transferred."
+          ]
+        }
+      ]
+    },
+    "terms": {
+      "title": "Terms & Conditions",
+      "updated": "Last updated: August 30, 2026",
+      "sections": [
+        {
+          "title": "1. Acceptance",
+          "body": [
+            "By creating an account or using SatsPay APIs, you agree to these Terms. If you disagree, do not use the service."
+          ]
+        },
+        {
+          "title": "2. Eligibility & accounts",
+          "body": [
+            "You must provide accurate registration information and keep credentials confidential.",
+            "You are responsible for all activity under your account and API keys."
+          ]
+        },
+        {
+          "title": "3. Service description",
+          "body": [
+            "SatsPay provides custodial micropayment wallets for supported coins (BTC, LTC, DOGE, BCH) and related tools such as faucet, staking, lending, swap, and public APIs.",
+            "Features may change; experimental modules can be limited or paused without notice when required for security."
+          ]
+        },
+        {
+          "title": "4. Risks & disclaimers",
+          "body": [
+            "Cryptocurrency involves volatility and operational risk. SatsPay is not a bank, broker or investment advisor.",
+            "Network fees, confirmation times and chain reorganizations are outside our control."
+          ]
+        },
+        {
+          "title": "5. Acceptable use",
+          "body": [
+            "Do not use SatsPay for illegal activity, sanctions evasion, phishing, spam faucets that violate third-party terms, or attempts to disrupt infrastructure.",
+            "We may suspend accounts that violate these Terms or create material risk to other users."
+          ]
+        },
+        {
+          "title": "6. API use",
+          "body": [
+            "API keys must be stored securely. Rate limits and scopes apply. Idempotency keys are required for send operations.",
+            "Abuse of public endpoints may result in key revocation."
+          ]
+        },
+        {
+          "title": "7. Limitation of liability",
+          "body": [
+            "To the fullest extent permitted by law, SatsPay is not liable for indirect, incidental or consequential damages arising from use of the service.",
+            "Total liability for any claim related to the service is limited to fees you paid us in the 3 months preceding the claim (if any)."
+          ]
+        },
+        {
+          "title": "8. Changes",
+          "body": [
+            "We may update these Terms. Material changes will be indicated by updating the \"Last updated\" date on this page."
+          ]
+        }
+      ]
+    },
+    "cookies": {
+      "title": "Cookie Policy",
+      "updated": "Last updated: August 30, 2026",
+      "sections": [
+        {
+          "title": "1. What are cookies?",
+          "body": [
+            "Cookies are small text files stored on your device. We may also use local storage for similar purposes (session preferences and consent)."
+          ]
+        },
+        {
+          "title": "2. Cookies we use",
+          "body": [
+            "Essential: authentication and session cookies (including HttpOnly refresh tokens) required to keep you signed in securely.",
+            "Preferences: language and UI mode in local storage so the app remembers your choices.",
+            "Consent: a local flag recording that you acknowledged this policy."
+          ]
+        },
+        {
+          "title": "3. Analytics & advertising",
+          "body": [
+            "We do not currently set third-party advertising cookies. If we add privacy-respecting analytics later, this page will be updated before activation."
+          ]
+        },
+        {
+          "title": "4. Managing cookies",
+          "body": [
+            "You can clear cookies and site data in your browser settings. Blocking essential cookies may prevent login.",
+            "For questions: privacy@bitcosats.com."
+          ]
+        }
+      ]
+    }
+  },
+  "faucetlist": {
+    "title": "Faucet directory",
+    "subtitle": "Discover verified faucets and earn free crypto.",
+    "docsCta": "API documentation",
+    "badge": "Official directory",
+    "verifiedCount": "{{n}} verified faucets",
+    "heroTitle": "Discover the best crypto faucets",
+    "heroBody": "Earn free <b>Bitcoin, Litecoin, Dogecoin, Solana, Polygon, and USDT</b>. Explore audited faucets and partners with instant payouts and fair fees.",
+    "searchPlaceholder": "Search by name, coin, or description…"
+  },
+  "support": {
+    "title": "Support",
+    "subtitle": "Help with deposits, withdrawals, and your account — all inside the app.",
+    "quickTitle": "Shortcuts",
+    "links": {
+      "faq": "FAQ",
+      "docs": "Platform guide",
+      "settings": "Account settings",
+      "status": "System status"
+    },
+    "contactTitle": "Open a ticket",
+    "contactSubtitle": "Pick a topic, describe the issue, and send. Our team replies here.",
+    "topicLabel": "Topic",
+    "topics": {
+      "deposit": "Deposit",
+      "withdraw": "Withdraw",
+      "account": "Account",
+      "security": "Security",
+      "other": "Other"
+    },
+    "messageLabel": "Message",
+    "messagePlaceholder": "What happened, which coin, and roughly when…",
+    "send": "Submit ticket",
+    "sending": "Sending…",
+    "hint": "We reply during business hours, right on this page — no email.",
+    "myTickets": "My tickets",
+    "loading": "Loading…",
+    "empty": "No tickets yet.",
+    "messages": "messages",
+    "reply": "Reply",
+    "replyPlaceholder": "Write your reply…",
+    "closedHint": "This ticket is closed. Open a new one if you still need help.",
+    "role": {
+      "you": "You",
+      "staff": "SatsPay staff"
+    },
+    "status": {
+      "OPEN": "Open",
+      "WAITING_USER": "Waiting on you",
+      "WAITING_STAFF": "Waiting on staff",
+      "RESOLVED": "Resolved",
+      "CLOSED": "Closed"
+    },
+    "errors": {
+      "generic": "Couldn't send. Please try again.",
+      "empty_message": "Please write a message.",
+      "invalid_topic": "Invalid topic.",
+      "ticket_closed": "Ticket is closed.",
+      "not_found": "Ticket not found."
+    }
+  },
+  "oauth": {
+    "authorize": {
+      "needLogin": "Sign in to your SatsPay account to authorize this app.",
+      "permissions": "Requested permissions",
+      "identityTitle": "Identity and basic profile",
+      "identityBody": "Access your SatsPay username and user ID.",
+      "emailTitle": "Email address",
+      "emailBody": "View your registered email ({{email}})."
+    }
+  }
+}

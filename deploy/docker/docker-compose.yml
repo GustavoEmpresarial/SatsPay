@@ -1,0 +1,149 @@
+# BitcoSats VM smoke stack — all services on an isolated bridge network.
+# No published ports for postgres; only api-server is exposed on the host.
+name: bitcosats
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: bitcosats-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-bitcosats}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-bitcosats}
+    volumes:
+      - bitcosats_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 8
+    networks:
+      bitcosats-net:
+        aliases: [postgres]
+
+  api-server:
+    image: ${API_IMAGE:-bitcosats/api-server:dev}
+    container_name: bitcosats-api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment: &app_env
+      DATABASE_URL: postgresql://${POSTGRES_USER:-bitcosats}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-bitcosats}
+      NODE_ENV: ${NODE_ENV:-production}
+      COOKIE_SECURE: ${COOKIE_SECURE:-true}
+      BIND_ADDR: "0.0.0.0:4000"
+      RUST_LOG: info
+      CORS_ORIGIN: ${CORS_ORIGIN:-https://www.satspay.pro,https://satspay.pro}
+      ADMIN_EMAILS: ${ADMIN_EMAILS:-}
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?Set JWT_ACCESS_SECRET}
+      JWT_ACCESS_TTL_SECS: "900"
+      JWT_REFRESH_TTL_SECS: "2592000"
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:?Set ENCRYPTION_KEY}
+      OTP_CODE_TTL_SECS: "600"
+      OTP_RESEND_COOLDOWN_SECS: "60"
+      OTP_MAX_ATTEMPTS: "5"
+      FAUCET_COOLDOWN_MINUTES: "660"
+      PUBLIC_API_DAILY_SEND_LIMIT: "100"
+      PUBLIC_API_SIGNATURE_MAX_SKEW_SECS: "300"
+      LEND_CLOSE_FACTOR_BPS: "5000"
+      PRICE_MAX_STALE_SECS: "600"
+      SMTP_ENABLED: ${SMTP_ENABLED:-false}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USERNAME: ${SMTP_USERNAME:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM_ADDRESS: ${SMTP_FROM_ADDRESS:-noreply@satspay.pro}
+      TURNSTILE_SECRET: ${TURNSTILE_SECRET:?Set TURNSTILE_SECRET}
+      TURNSTILE_TIMEOUT_SECS: ${TURNSTILE_TIMEOUT_SECS:-5}
+      TURNSTILE_MAX_TOKEN_AGE_SECS: ${TURNSTILE_MAX_TOKEN_AGE_SECS:-300}
+      ALLOW_STUB_CHAIN: "false"
+      USE_REAL_CHAIN_CLIENTS: "true"
+      CHAIN_NETWORK: "mainnet"
+      HOT_WALLET_WIF: ${HOT_WALLET_WIF:-}
+      HOT_WALLET_PRIVATE_KEY: ${HOT_WALLET_PRIVATE_KEY:-}
+      POL_HOT_WALLET_KEY: ${POL_HOT_WALLET_KEY:-}
+      EVM_RPC_URL: ${EVM_RPC_URL:-https://polygon-bor-rpc.publicnode.com}
+      CHAIN_DEPOSIT_XPUB: ${CHAIN_DEPOSIT_XPUB:-}
+      DEPOSIT_MNEMONIC: ${DEPOSIT_MNEMONIC:-}
+      # Dev: plaintext OK. Production (NODE_ENV=production): use HOT_MNEMONIC_ENC only.
+      HOT_MNEMONIC: ${HOT_MNEMONIC:-}
+      HOT_MNEMONIC_ENC: ${HOT_MNEMONIC_ENC:-}
+      SOL_RPC_URL: ${SOL_RPC_URL:-http://62.171.138.114:8899}
+      SOLANA_PAY_URL: ${SOLANA_PAY_URL:-http://62.171.138.114:8090/healthz}
+      DGB_INSIGHT_API: ${DGB_INSIGHT_API:-https://digiexplorer.info/api}
+      SWAPKIT_ENABLED: ${SWAPKIT_ENABLED:-false}
+      SWAPKIT_API_KEY: ${SWAPKIT_API_KEY:-}
+      SWAPKIT_BASE_URL: ${SWAPKIT_BASE_URL:-https://api.swapkit.dev}
+      SWAP_PLATFORM_FEE_BPS_SAME: ${SWAP_PLATFORM_FEE_BPS_SAME:-25}
+      SWAP_PLATFORM_FEE_BPS_CROSS: ${SWAP_PLATFORM_FEE_BPS_CROSS:-50}
+      SWAP_SLIPPAGE_PCT: ${SWAP_SLIPPAGE_PCT:-2}
+      SWAPKIT_TIMEOUT_SECS: ${SWAPKIT_TIMEOUT_SECS:-20}
+      SWAP_HOUSE_ENABLED: ${SWAP_HOUSE_ENABLED:-false}
+      DEX_SWAP_INTERVAL_SECS: ${DEX_SWAP_INTERVAL_SECS:-15}
+      # Optional overrides (smallest units). Empty → code defaults (~USD 1k).
+      WITHDRAWAL_APPROVAL_THRESHOLD_BTC: ${WITHDRAWAL_APPROVAL_THRESHOLD_BTC:-}
+      WITHDRAWAL_APPROVAL_THRESHOLD_LTC: ${WITHDRAWAL_APPROVAL_THRESHOLD_LTC:-}
+      WITHDRAWAL_APPROVAL_THRESHOLD_DOGE: ${WITHDRAWAL_APPROVAL_THRESHOLD_DOGE:-}
+      WITHDRAWAL_APPROVAL_THRESHOLD_BCH: ${WITHDRAWAL_APPROVAL_THRESHOLD_BCH:-}
+      WITHDRAWAL_APPROVAL_THRESHOLD_POL: ${WITHDRAWAL_APPROVAL_THRESHOLD_POL:-}
+      WITHDRAWAL_APPROVAL_THRESHOLD_DGB: ${WITHDRAWAL_APPROVAL_THRESHOLD_DGB:-}
+      WITHDRAWAL_APPROVAL_THRESHOLD_SOL: ${WITHDRAWAL_APPROVAL_THRESHOLD_SOL:-}
+      WITHDRAWAL_APPROVAL_THRESHOLD_USDT: ${WITHDRAWAL_APPROVAL_THRESHOLD_USDT:-}
+      WITHDRAWAL_APPROVAL_THRESHOLD_USDC: ${WITHDRAWAL_APPROVAL_THRESHOLD_USDC:-}
+    ports:
+      - "${API_HOST_BIND:-0.0.0.0}:${API_HOST_PORT:-4500}:4000"
+    networks:
+      bitcosats-net:
+        aliases: [api-server]
+
+  client:
+    image: ${CLIENT_IMAGE:-bitcosats/client:dev}
+    container_name: bitcosats-client
+    restart: unless-stopped
+    depends_on:
+      api-server:
+        condition: service_started
+    ports:
+      - "${CLIENT_HOST_BIND:-0.0.0.0}:${CLIENT_HOST_PORT:-8080}:80"
+    networks:
+      bitcosats-net:
+        aliases: [client]
+
+  worker:
+    image: ${WORKER_IMAGE:-bitcosats/worker:dev}
+    container_name: bitcosats-worker
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      api-server:
+        condition: service_started
+    environment:
+      <<: *app_env
+      HOSTNAME: bitcosats-worker
+      DEPOSIT_WATCHER_INTERVAL_SECS: "15"
+      WITHDRAWAL_BROADCAST_INTERVAL_SECS: "10"
+      WITHDRAWAL_REQUEUE_INTERVAL_SECS: "60"
+      REWARDS_TICK_INTERVAL_SECS: "60"
+      PRICE_REFRESH_INTERVAL_SECS: "120"
+      PRICE_DECIMALS: "8"
+      OUTBOX_RELAY_BATCH_SIZE: "100"
+      OUTBOX_RELAY_INTERVAL_MS: "1000"
+      COINGECKO_API_BASE_URL: "https://api.coingecko.com/api/v3"
+      COINGECKO_TIMEOUT_SECS: "10"
+      # KAFKA_BOOTSTRAP_SERVERS intentionally unset — outbox_relay stays disabled.
+    networks:
+      bitcosats-net:
+        aliases: [worker]
+
+networks:
+  bitcosats-net:
+    name: bitcosats-net
+    driver: bridge
+    internal: false
+
+volumes:
+  bitcosats_postgres_data:
+    name: bitcosats_postgres_data
