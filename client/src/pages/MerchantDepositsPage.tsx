@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api.js';
@@ -28,6 +28,12 @@ interface InvoiceItem {
   createdAt: string;
 }
 
+declare global {
+  interface Window {
+    SatsPay?: { renderButtons?: (root?: ParentNode) => number };
+  }
+}
+
 interface WebhookTestResult {
   delivered?: boolean;
   statusCode?: number;
@@ -44,6 +50,30 @@ export function MerchantDepositsPage() {
   const [filterCoin, setFilterCoin] = useState<string>('ALL');
   const [filterStatus, setFilterStatus] = useState<string>('ALL');
   const [testResult, setTestResult] = useState<{ id: string; msg: string } | null>(null);
+
+  // Preview rendered by the real SDK, so what the merchant sees here is
+  // literally what their customer gets — a hand-built imitation would drift
+  // from the script the moment either changed.
+  const buttonPreviewRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const SRC = `${ORIGIN}/sdk/satspay-pay.js`;
+    const render = () => window.SatsPay?.renderButtons?.(buttonPreviewRef.current ?? undefined);
+
+    if (window.SatsPay?.renderButtons) {
+      render();
+      return;
+    }
+    const existing = document.querySelector<HTMLScriptElement>(`script[src="${SRC}"]`);
+    if (existing) {
+      existing.addEventListener('load', render, { once: true });
+      return;
+    }
+    const script = document.createElement('script');
+    script.src = SRC;
+    script.async = true;
+    script.addEventListener('load', render, { once: true });
+    document.head.appendChild(script);
+  }, []);
 
   const { data, isLoading } = useQuery<{ invoices: InvoiceItem[] }>({
     queryKey: ['merchant-deposits'],
@@ -214,184 +244,77 @@ export function MerchantDepositsPage() {
           })}
         </div>
         <p className="text-[11px] text-ink-muted leading-relaxed">
-          Define o seletor que o cliente vê nas cobranças em dólar (<code className="font-mono">amountUsd</code>).
-          Moedas com depósito pausado não aparecem aqui e nunca são oferecidas.
+          Quando você cobra em dólar, é esta lista que o cliente vê para escolher como pagar. Moedas com depósito
+          pausado não aparecem aqui e nunca são oferecidas.
         </p>
       </div>
 
-      {/* COMO INTEGRAR */}
-      <div className="rounded-3xl border border-border bg-paper p-5 sm:p-6 shadow-xs space-y-6">
-        <div className="flex items-center gap-2 border-b border-border/80 pb-3">
-          <i className="bi bi-code-slash text-bitcoin text-base" />
-          <h2 className="text-sm sm:text-base font-black text-ink">Como integrar</h2>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div className="rounded-2xl border border-border bg-surface p-4 space-y-2">
-            <div className="flex items-center gap-2 text-amber-500 font-bold text-xs">
-              <i className="bi bi-key-fill text-base" />
-              <span>1. Crie sua chave</span>
-            </div>
-            <p className="text-xs text-ink-muted leading-relaxed">
-              Gere uma API Key com o escopo <code className="font-mono text-ink font-bold">deposits</code> em{' '}
-              <Link to="/api-keys" className="font-bold text-bitcoin hover:underline">API Keys</Link>. Ela fica só no
-              seu servidor — nunca no navegador do cliente.
-            </p>
+      {/* BOTÃO DE PAGAMENTO — o botão de verdade, não uma imitação */}
+      <div className="rounded-3xl border border-border bg-paper p-5 sm:p-6 shadow-xs space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 border-b border-border/80 pb-3">
+          <div className="flex items-center gap-2">
+            <i className="bi bi-credit-card-2-front-fill text-bitcoin text-base" />
+            <h2 className="text-sm sm:text-base font-black text-ink">Botão de pagamento</h2>
           </div>
+          <Link to="/docs?tab=deposits" className="text-[11px] font-bold text-bitcoin hover:underline self-start sm:self-auto">
+            Ver a documentação da API →
+          </Link>
+        </div>
 
-          <div className="rounded-2xl border border-border bg-surface p-4 space-y-2">
-            <div className="flex items-center gap-2 text-amber-500 font-bold text-xs">
-              <i className="bi bi-receipt text-base" />
-              <span>2. Crie a cobrança</span>
-            </div>
-            <p className="text-xs text-ink-muted leading-relaxed">
-              Seu backend chama <code className="font-mono text-ink font-bold">POST /v1/merchant/deposits</code> e
-              recebe um <code className="font-mono text-ink font-bold">checkoutUrl</code>.
-            </p>
+        <p className="text-xs text-ink-muted leading-relaxed">
+          Seu backend cria a fatura e recebe o <code className="font-mono text-ink font-bold">checkoutUrl</code>; o botão
+          só leva o cliente até lá. Nenhuma chave de API vai para o navegador e o valor não pode ser adulterado no
+          DevTools.
+        </p>
+
+        {/* Renderizado pelo próprio SDK: é exatamente o que o cliente vê. */}
+        <div className="rounded-2xl border border-border bg-surface p-5">
+          <div className="text-[10px] uppercase font-bold tracking-wider text-ink-muted mb-3">
+            Como fica no seu site
           </div>
-
-          <div className="rounded-2xl border border-border bg-surface p-4 space-y-2">
-            <div className="flex items-center gap-2 text-amber-500 font-bold text-xs">
-              <i className="bi bi-box-arrow-up-right text-base" />
-              <span>3. Leve o cliente</span>
-            </div>
-            <p className="text-xs text-ink-muted leading-relaxed">
-              Redirecione para o <code className="font-mono text-ink font-bold">checkoutUrl</code> ou use o botão
-              oficial. O resto — QR, endereço, confirmação e webhook — é por nossa conta.
-            </p>
+          <div ref={buttonPreviewRef} className="flex flex-wrap items-center gap-3">
+            <div
+              className="satspay-pay"
+              data-checkout_url="/pay/demo"
+              data-theme="bitcoin"
+              data-size="large"
+              data-label="Pagar com cripto"
+              data-target="blank"
+            />
+            <div
+              className="satspay-pay"
+              data-checkout_url="/pay/demo"
+              data-theme="light"
+              data-size="large"
+              data-label="Pagar com cripto"
+              data-target="blank"
+            />
+            <div
+              className="satspay-pay"
+              data-checkout_url="/pay/demo"
+              data-theme="dark"
+              data-size="medium"
+              data-shape="pill"
+              data-label="Pagar"
+              data-target="blank"
+            />
           </div>
+          <p className="mt-3 text-[11px] text-ink-muted">
+            Botões reais, renderizados pelo SDK. Clicar abre o checkout de demonstração.
+          </p>
         </div>
 
-        {/* COBRANÇA EM DÓLAR (recomendado) */}
-        <div className="space-y-4 pt-2 border-t border-border/80">
-          <EndpointHeader
-            method="POST"
-            path="/v1/merchant/deposits"
-            title="Cobrar em dólar — o cliente escolhe a moeda"
-            badge="Recomendado"
-          />
-          <p className="text-xs sm:text-sm text-ink-muted">
-            Você diz quanto quer receber em dólar; o checkout mostra as moedas que você aceita, já com a quantia
-            calculada, e trava a cotação quando o cliente escolhe.
-          </p>
-          <MultiLangCodeBlock
-            snippets={{
-              curl: `curl -X POST ${ORIGIN}/v1/merchant/deposits \\
-  -H "x-api-key: SUA_CHAVE_DE_API" \\
-  -H "Content-Type: application/json" \\
-  -d '{
-    "amountUsd": "25.00",
-    "orderId": "ORD-99821",
-    "callbackUrl": "https://seusite.com/api/webhook"
-  }'`,
-              js: `const res = await fetch('${ORIGIN}/v1/merchant/deposits', {
-  method: 'POST',
-  headers: {
-    'x-api-key': process.env.SATSPAY_API_KEY,
-    'Content-Type': 'application/json'
-  },
-  body: JSON.stringify({
-    amountUsd: '25.00',
-    orderId: 'ORD-99821',
-    callbackUrl: 'https://seusite.com/api/webhook'
-  })
-});
-
-const invoice = await res.json();
-redirect(invoice.checkoutUrl);`,
-              python: `import os, requests
-
-invoice = requests.post(
-    "${ORIGIN}/v1/merchant/deposits",
-    headers={"x-api-key": os.environ["SATSPAY_API_KEY"]},
-    json={
-        "amountUsd": "25.00",
-        "orderId": "ORD-99821",
-        "callbackUrl": "https://seusite.com/api/webhook",
-    },
-).json()
-
-print(invoice["checkoutUrl"])`,
-              php: `<?php
-$ch = curl_init("${ORIGIN}/v1/merchant/deposits");
-curl_setopt_array($ch, [
-  CURLOPT_RETURNTRANSFER => true,
-  CURLOPT_POST => true,
-  CURLOPT_POSTFIELDS => json_encode([
-    "amountUsd" => "25.00",
-    "orderId" => "ORD-99821",
-    "callbackUrl" => "https://seusite.com/api/webhook",
-  ]),
-  CURLOPT_HTTPHEADER => [
-    "x-api-key: " . getenv("SATSPAY_API_KEY"),
-    "Content-Type: application/json",
-  ],
-]);
-$invoice = json_decode(curl_exec($ch), true);
-header("Location: " . $invoice["checkoutUrl"]);`,
-            }}
-          />
-        </div>
-
-        {/* COBRANÇA EM CRIPTO */}
-        <div className="space-y-3 pt-2 border-t border-border/80">
-          <h3 className="text-sm font-black text-ink">Ou cobrar uma quantia exata em cripto</h3>
-          <p className="text-xs text-ink-muted leading-relaxed">
-            Aqui <b>você</b> fixa a moeda e o cliente não escolhe. Atenção à unidade:{' '}
-            <code className="font-mono text-ink font-bold">amount</code> é um <b>inteiro</b> em unidades de 1e-8, não a
-            quantidade decimal da moeda — <b>25 USDT = "{toLedgerUnits('25')}"</b>. Mandar{' '}
-            <code className="font-mono">"25.00"</code> devolve{' '}
-            <code className="font-mono text-ink font-bold">400 AMOUNT_NOT_INTEGER</code>.
-          </p>
-          <CodeBlock
-            label="CURL"
-            code={`curl -X POST ${ORIGIN}/v1/merchant/deposits \\
-  -H "x-api-key: SUA_CHAVE_DE_API" \\
-  -H "Content-Type: application/json" \\
-  -d '{
-    "coin": "USDT",
-    "amount": "${toLedgerUnits('25')}",
-    "orderId": "ORD-99821",
-    "callbackUrl": "https://seusite.com/api/webhook"
-  }'`}
-          />
-        </div>
-
-        {/* BOTÃO */}
-        <div className="space-y-3 pt-2 border-t border-border/80">
-          <h3 className="text-sm font-black text-ink">Botão de pagamento com a nossa marca</h3>
-          <p className="text-xs text-ink-muted leading-relaxed">
-            Seu backend já criou a fatura; o botão só leva o cliente até o <code className="font-mono">checkoutUrl</code>.
-            Nenhuma chave vai para o navegador e o valor não pode ser adulterado no DevTools.
-          </p>
-          <CodeBlock
-            label="HTML"
-            code={`<script src="${ORIGIN}/sdk/satspay-pay.js" async defer></script>
+        <CodeBlock
+          label="HTML"
+          code={`<script src="${ORIGIN}/sdk/satspay-pay.js" async defer></script>
 
 <div class="satspay-pay"
      data-checkout_url="COLE_O_checkoutUrl_DA_FATURA"
-     data-theme="bitcoin"
-     data-size="large"
+     data-theme="bitcoin"     <!-- bitcoin | light | dark | outline -->
+     data-size="large"        <!-- small | medium | large -->
+     data-shape="rounded"     <!-- rounded | pill | square -->
      data-label="Pagar com cripto"></div>`}
-          />
-        </div>
-
-        <div className="flex flex-wrap items-center gap-3 pt-1">
-          <Link
-            to="/pay/demo"
-            className="inline-flex items-center gap-2 rounded-xl border border-border bg-surface hover:bg-paper px-3.5 py-2 text-xs font-bold text-ink transition"
-          >
-            <i className="bi bi-eye-fill text-purple-600" />
-            <span>Ver checkout de demonstração</span>
-          </Link>
-          <Link
-            to="/docs?tab=deposits"
-            className="inline-flex items-center gap-2 rounded-xl border border-border bg-surface hover:bg-paper px-3.5 py-2 text-xs font-bold text-ink transition"
-          >
-            <i className="bi bi-book-half text-emerald-600" />
-            <span>Documentação completa</span>
-          </Link>
-        </div>
+        />
       </div>
 
       {/* WEBHOOK TEST RESULT BANNER */}

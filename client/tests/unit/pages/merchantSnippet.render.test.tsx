@@ -1,14 +1,14 @@
 /**
  * @vitest-environment jsdom
- * The "Como integrar" section — documentation, not a form.
+ * The merchant panel shows the payment button and nothing else about the API.
  *
- * It replaced a panel of inputs that looked like it created an invoice and
- * only assembled text to copy. The assertions below exist to keep that kind
- * of decorative UI from coming back.
+ * It previously carried a form that looked like it created an invoice and
+ * only assembled text to copy, and then a full integration guide. Both are
+ * gone: API documentation belongs on /docs. These assertions keep either
+ * from creeping back.
  */
 import { describe, expect, it, vi } from 'vitest';
 import { waitFor, within } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
 import { renderWithProviders } from '../../helpers/renderWithProviders.js';
 
 vi.mock('../../../src/lib/api.js', () => ({
@@ -26,90 +26,61 @@ import { MerchantDepositsPage } from '../../../src/pages/MerchantDepositsPage.js
 
 async function renderPage() {
   const rendered = renderWithProviders(<MerchantDepositsPage />, { route: '/merchant/deposits' });
-  await waitFor(() => expect(rendered.container.textContent).toMatch(/Como integrar/i), { timeout: 5000 });
+  await waitFor(() => expect(rendered.container.textContent).toMatch(/Botão de pagamento/i), { timeout: 5000 });
   return rendered;
 }
 
-describe('MerchantDepositsPage — Como integrar', () => {
-  it('walks through the three steps of an integration', async () => {
+describe('MerchantDepositsPage — botão de pagamento', () => {
+  it('previews the button with the real SDK markup', async () => {
     const { container, unmount } = await renderPage();
-    expect(container.textContent).toMatch(/1\. Crie sua chave/i);
-    expect(container.textContent).toMatch(/2\. Crie a cobrança/i);
-    expect(container.textContent).toMatch(/3\. Leve o cliente/i);
+    // Rendered by /sdk/satspay-pay.js, so the preview cannot drift from the
+    // button the merchant's customer actually sees.
+    const previews = container.querySelectorAll('.satspay-pay');
+    expect(previews.length).toBeGreaterThan(1);
+    previews.forEach((p) => expect(p.getAttribute('data-checkout_url')).toBe('/pay/demo'));
+    // More than one theme, so the options are visible rather than described.
+    const themes = new Set([...previews].map((p) => p.getAttribute('data-theme')));
+    expect(themes.size).toBeGreaterThan(1);
     unmount();
   });
 
-  it('leads with the dollar-priced call, where the customer picks the coin', async () => {
+  it('gives the HTML to copy, with no key in it', async () => {
     const { container, unmount } = await renderPage();
-    const code = container.querySelector('pre')!;
-    expect(code.textContent).toContain('POST');
-    expect(code.textContent).toContain('/v1/merchant/deposits');
-    expect(code.textContent).toContain('"amountUsd": "25.00"');
+    const html = [...container.querySelectorAll('pre')].map((p) => p.textContent ?? '');
+    const snippet = html.find((h) => h.includes('satspay-pay.js'));
+    expect(snippet, 'the embed snippet must be shown').toBeTruthy();
+    expect(snippet).toContain('data-checkout_url');
+    expect(snippet).not.toMatch(/x-api-key/i);
     unmount();
   });
 
-  it('still teaches the ledger-unit rule for the crypto-priced call', async () => {
+  it('carries no API documentation — that lives on /docs', async () => {
     const { container, unmount } = await renderPage();
-    // The exact trap that broke a real integration.
-    expect(container.textContent).toContain('2500000000');
-    expect(container.textContent).toMatch(/AMOUNT_NOT_INTEGER/);
+    const text = container.textContent ?? '';
+    for (const gone of ['Como integrar', '1. Crie sua chave', 'amountUsd', 'AMOUNT_NOT_INTEGER']) {
+      expect(text, `${gone} belongs on /docs, not on the panel`).not.toContain(gone);
+    }
+    // Only one code block remains: the embed.
+    expect(container.querySelectorAll('pre')).toHaveLength(1);
     unmount();
   });
 
-  it('switches the example between languages', async () => {
-    const user = userEvent.setup();
+  it('is documentation-free and form-free', async () => {
     const { container, unmount } = await renderPage();
-
-    const node = within(container)
-      .getAllByRole('button')
-      .find((b) => /Node\.js/i.test(b.textContent || ''))!;
-    await user.click(node);
-
-    await waitFor(() => {
-      const code = container.querySelector('pre')!;
-      expect(code.textContent).toContain('await fetch');
-      expect(code.textContent).toContain('invoice.checkoutUrl');
-    });
-    unmount();
-  });
-
-  it('shows the branded button without ever putting a key in the browser', async () => {
-    const { container, unmount } = await renderPage();
-    const blocks = [...container.querySelectorAll('pre')].map((p) => p.textContent ?? '');
-    const button = blocks.find((b) => b.includes('satspay-pay.js'));
-    expect(button, 'the pay button snippet must be shown').toBeTruthy();
-    expect(button).toContain('data-checkout_url');
-    expect(button).not.toMatch(/x-api-key/i);
-    unmount();
-  });
-
-  it('is documentation, not a form', async () => {
-    const { container, unmount } = await renderPage();
-    // The removed panel had inputs for coin, amount and orderId that created
-    // nothing. The only inputs left on this page belong to the invoice filter.
-    const inputs = [...container.querySelectorAll('input')];
-    expect(inputs, 'the integration section must not take typed input').toHaveLength(0);
-    unmount();
-  });
-
-  it('links to the demo checkout from where the merchant works', async () => {
-    const { container, unmount } = await renderPage();
-    const demo = within(container)
-      .queryAllByRole('link')
-      .filter((a) => a.getAttribute('href') === '/pay/demo');
-    expect(demo.length).toBeGreaterThan(0);
+    // The old panel had inputs for coin, amount and orderId that created
+    // nothing at all.
+    expect(container.querySelectorAll('input')).toHaveLength(0);
     unmount();
   });
 
   it('gives the four toolbar actions one shared size', async () => {
     const { container, unmount } = await renderPage();
     const labels = ['Endereços de Depósito', 'Chaves de API', 'Ver Checkout (Demo)', 'Documentação'];
-    // Exact text: the section footer also has a "Documentação completa" link.
+    // Exact text: other links elsewhere mention documentation too.
     const buttons = within(container)
       .queryAllByRole('link')
       .filter((a) => labels.includes((a.textContent || '').trim()));
     expect(buttons).toHaveLength(4);
-    // Same class string means same size, shape and weight — no odd one out.
     const classes = new Set(buttons.map((b) => b.className));
     expect(classes.size, 'toolbar buttons must share one style').toBe(1);
     unmount();
