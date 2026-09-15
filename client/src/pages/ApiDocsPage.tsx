@@ -834,12 +834,123 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 </div>
               </div>
 
+              {/* BOTÃO DE PAGAMENTO */}
+              <div className="space-y-4 pt-6 border-t border-border/80">
+                <EndpointHeader
+                  method="GET"
+                  path={`${API_BASE}/sdk/satspay-pay.js`}
+                  title="1.2 Botão de Pagamento Oficial (com a nossa marca)"
+                  badge="Sem chave no navegador"
+                />
+                <p className="text-xs sm:text-sm text-ink-muted">
+                  Seu backend cria a fatura e entrega o <code className="font-mono font-bold text-ink">checkoutUrl</code> ao
+                  botão — que só leva o cliente até o checkout hospedado. Nenhuma chave de API vai para o navegador, e o
+                  valor não pode ser adulterado no DevTools, porque o link já foi emitido pelo seu servidor.
+                </p>
+
+                <CodeBlock
+                  label="HTML SNIPPET"
+                  code={`<!-- 1. Carregue o SDK do botão -->
+<script src="${API_BASE}/sdk/satspay-pay.js" async defer></script>
+
+<!-- 2. Seu backend criou a fatura e devolveu checkoutUrl -->
+<div class="satspay-pay"
+     data-checkout_url="${API_BASE}/pay/550e8400-e29b-41d4-a716-446655440000"
+     data-theme="bitcoin"
+     data-size="large"
+     data-shape="rounded"
+     data-label="Pagar com cripto"
+     data-amount="25 USDT"></div>`}
+                />
+
+                <ParamsTable
+                  params={[
+                    { name: 'data-checkout_url', type: 'String', required: true, desc: 'O checkoutUrl devolvido pela criação da fatura. Só https/http é aceito — javascript: é recusado e o botão fica desabilitado.', example: `"${API_BASE}/pay/:id"` },
+                    { name: 'data-theme', type: 'String', required: false, desc: 'bitcoin (padrão), dark, light ou outline.', example: '"bitcoin"' },
+                    { name: 'data-size', type: 'String', required: false, desc: 'small, medium (padrão) ou large.', example: '"large"' },
+                    { name: 'data-shape', type: 'String', required: false, desc: 'rounded (padrão), pill ou square.', example: '"pill"' },
+                    { name: 'data-label', type: 'String', required: false, desc: 'Texto do botão. Tratado como texto puro, nunca como HTML.', example: '"Pagar com cripto"' },
+                    { name: 'data-amount', type: 'String', required: false, desc: 'Sufixo exibido ao lado do rótulo, só visual.', example: '"25 USDT"' },
+                    { name: 'data-target', type: 'String', required: false, desc: 'self (padrão) ou blank — blank já vai com rel="noopener".', example: '"blank"' },
+                    { name: 'data-onclick', type: 'String', required: false, desc: 'Nome de uma função global chamada antes de navegar; retornar false cancela o redirecionamento.', example: '"beforeCheckout"' },
+                  ]}
+                />
+
+                <div className="rounded-2xl border border-border bg-surface p-4 space-y-2">
+                  <div className="flex items-center gap-2 text-ink font-bold text-xs">
+                    <i className="bi bi-arrow-repeat text-bitcoin text-base" />
+                    <span>SPA / conteúdo injetado depois</span>
+                  </div>
+                  <p className="text-xs text-ink-muted leading-relaxed">
+                    Os botões são renderizados no <code className="font-mono">DOMContentLoaded</code>. Se você injetar a
+                    marcação depois (React, Vue…), chame{' '}
+                    <code className="font-mono text-ink font-bold">window.SatsPay.renderButtons()</code> — botões já
+                    renderizados não são duplicados.
+                  </p>
+                </div>
+
+                <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/5 p-4 text-xs text-ink-muted leading-relaxed">
+                  <b className="text-emerald-700">Quer ver antes de integrar?</b> Abra{' '}
+                  <a href="/pay/demo" className="font-mono font-bold text-bitcoin hover:underline">{API_BASE}/pay/demo</a>{' '}
+                  — é o checkout real com uma fatura de demonstração: endereço fictício, nenhum pagamento processado,
+                  nenhum webhook disparado.
+                </div>
+              </div>
+
+              {/* CATÁLOGO DE MOEDAS */}
+              <div className="space-y-4 pt-6 border-t border-border/80">
+                <EndpointHeader
+                  method="GET"
+                  path="/v1/public/coins"
+                  title="1.3 Catálogo de Moedas, Preços e Logos"
+                  badge="Público · sem chave"
+                />
+                <p className="text-xs sm:text-sm text-ink-muted">
+                  Tudo que a sua interface precisa para montar um seletor de moeda: símbolo, nome, escala, confirmações
+                  exigidas, se o depósito está ativo, o ícone servido pelo nosso domínio e a cotação em dólar. Pode ser
+                  chamado direto do navegador.
+                </p>
+
+                <CodeBlock
+                  label="CURL"
+                  code={`curl -s ${API_BASE}/v1/public/coins`}
+                />
+
+                <CodeBlock
+                  label="JSON RESPONSE"
+                  code={`{
+  "priceDecimals": 8,
+  "amountDecimals": 8,
+  "coins": [
+    {
+      "symbol": "USDT",
+      "name": "Tether USD",
+      "decimals": 8,
+      "onchainDecimals": 6,
+      "minConfirmations": 30,
+      "depositsEnabled": true,
+      "logoUrl": "${API_BASE}/sdk/coins/usdt.svg",
+      "priceUsd": "100000000"
+    }
+  ]
+}`}
+                />
+                <p className="text-[11px] text-ink-muted leading-relaxed">
+                  <b>priceUsd</b> vem escalado por <code className="font-mono">priceDecimals</code> (100000000 ÷ 10<sup>8</sup> = US$ 1,00)
+                  e é <b>cotação de referência</b>, não trava de preço — a fatura é sempre cobrada na quantidade de cripto
+                  que você definiu. <b>depositsEnabled: false</b> é a mesma pausa que devolve{' '}
+                  <code className="font-mono">503 DEPOSIT_PAUSED</code> na criação. Os ícones ficam em{' '}
+                  <code className="font-mono">/sdk/coins/&lt;símbolo&gt;.svg</code>, servidos com{' '}
+                  <code className="font-mono">Access-Control-Allow-Origin: *</code>, então você pode usá-los direto.
+                </p>
+              </div>
+
               {/* ENDPOINT 1.2: CONSULTAR FATURA */}
               <div className="space-y-4 pt-6 border-t border-border/80">
                 <EndpointHeader
                   method="GET"
                   path="/v1/merchant/deposits/:id"
-                  title="1.2 Consultar Status da Fatura de Depósito"
+                  title="1.4 Consultar Status da Fatura de Depósito"
                 />
                 <p className="text-xs sm:text-sm text-ink-muted">
                   Retorna a fatura completa, incluindo <code className="font-mono font-bold text-ink">receivedAmount</code>{' '}

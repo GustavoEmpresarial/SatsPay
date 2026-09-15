@@ -1,0 +1,29 @@
+Coin icons vendored from cryptocurrency-icons (MIT License).
+
+Source:  https://github.com/atomiclabs/cryptocurrency-icons
+Commit:  1a63530be6e374711a8554f31b17e4cb92c25fa5
+Set:     svg/color
+
+Vendored so the hosted checkout and the public coin catalogue
+(GET /v1/public/coins) serve icons from satspay.pro instead of depending on a
+third-party CDN at page-render time. `pol.svg` is that project's `matic.svg`,
+renamed to the symbol this platform uses.
+
+MIT License — Copyright (c) 2017 Christopher Downer
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.

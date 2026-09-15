@@ -307,6 +307,33 @@ A API HTTP do **BitcoSats** é implementada em Rust com o framework **Axum** (`c
 
 ### `GET /v1/public/pay/:id` e `POST /v1/public/pay/:id/balance`
 - Checkout público (sem `callbackUrl`/`siteUserId` na resposta) e pagamento com saldo SatsPay.
+- `amount` é o inteiro de ledger; `amountDisplay` é a mesma quantia em unidades da moeda,
+  e `qrCode` usa a quantia da moeda (BIP21/EIP-681) — um carteira que escaneasse o inteiro
+  de ledger pediria 2,5 bilhões de USDT numa fatura de 25.
+
+### `GET /v1/public/pay/demo`
+- Fatura sintética para demonstração: sem linha no banco, sem dinheiro, sem webhook.
+  Responde `demo: true`, e o checkout usa isso para rotular a página e esconder o
+  pagamento por saldo. As rotas `/demo` e `/merchant/demo` redirecionam para `/pay/demo`
+  (antes redirecionavam para a página de depósitos do próprio usuário).
+
+### `GET /v1/public/coins`
+- **Sem autenticação** — pensado para rodar no navegador do cliente.
+- Devolve `priceDecimals`, `amountDecimals` e, por moeda: `symbol`, `name`, `decimals`
+  (escala de ledger), `onchainDecimals`, `minConfirmations`, `depositsEnabled`,
+  `logoUrl` e `priceUsd` (escalado por `priceDecimals`, cotação de referência).
+- Os ícones são servidos por este domínio em `/sdk/coins/<símbolo>.svg`
+  (`client/public/sdk/coins/`, vendorizados de cryptocurrency-icons/MIT) com
+  `Access-Control-Allow-Origin: *`. Antes vinham de CDN de terceiro e não havia
+  endpoint nenhum de preço para comerciante — só `/v1/swap/prices`.
+
+### Botão de pagamento — `/sdk/satspay-pay.js`
+- Script embutível que renderiza o botão oficial a partir de
+  `<div class="satspay-pay" data-checkout_url="…">`. O backend do comerciante cria a
+  fatura; o botão só navega até o `checkoutUrl`. **Nenhuma chave vai para o navegador.**
+- `data-theme`, `data-size`, `data-shape`, `data-label`, `data-amount`, `data-target`,
+  `data-onclick`. Rótulo é inserido como texto (nunca HTML) e URL não-http(s) é recusada.
+- SPAs chamam `window.SatsPay.renderButtons()` após injetar a marcação.
 
 ### Webhook `deposit.confirmed`
 - `POST` na `callbackUrl` com `X-SatsPay-Signature: sha256=<hex HMAC-SHA256 do corpo cru>`,

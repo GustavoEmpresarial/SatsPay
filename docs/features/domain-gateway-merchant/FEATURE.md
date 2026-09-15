@@ -16,6 +16,13 @@
 
 [`../admin-merchants/FEATURE.md`](../admin-merchants/FEATURE.md) — stats + moderação  
 
+## Superfícies públicas (sem chave)
+
+- `GET /v1/public/coins` — catálogo com preço e `logoUrl` servido do nosso domínio
+- `GET /v1/public/pay/demo` — fatura sintética; `/demo` e `/merchant/demo` apontam para `/pay/demo`
+- `/sdk/satspay-pay.js` — botão de pagamento com a marca (backend cria a fatura, botão só redireciona)
+- `/sdk/coins/<símbolo>.svg` — ícones vendorizados (cryptocurrency-icons, MIT)
+
 ## User / merchant app
 
 - Checkout público `/pay/:id`  

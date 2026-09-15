@@ -12,7 +12,7 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{async_trait, Json, Router};
-use bigdecimal::BigDecimal;
+use bigdecimal::{BigDecimal, ToPrimitive};
 use db::merchant_deposits::{
     create_invoice, get_invoice_by_id, get_invoice_by_order_id, list_invoices_by_merchant,
     pay_invoice_with_balance, CreateDepositInvoiceInput, MerchantDepositError, MerchantDepositInvoice,
@@ -196,10 +196,27 @@ fn parse_amount(raw: &str, coin: shared::Coin) -> Result<BigDecimal, Rejected> {
     BigDecimal::from_str(raw).map_err(|_| invalid())
 }
 
+/// Payment URI for a wallet to scan. `amount` here is a **decimal quantity of
+/// coins** (BIP21 / EIP-681), not the ledger integer the API takes: a 25 USDT
+/// invoice used to encode `amount=2500000000`, which a scanning wallet reads
+/// as 2.5 billion USDT.
+fn payment_uri(coin: &str, address: &str, ledger_amount: &BigDecimal) -> String {
+    format!("{}:{}?amount={}", coin.to_lowercase(), address, human_amount(coin, ledger_amount))
+}
+
+/// Ledger units (1e-8) rendered as the decimal quantity of coins a human — or
+/// a wallet — expects: `2500000000` → `25`.
+fn human_amount(coin: &str, ledger_amount: &BigDecimal) -> String {
+    coin.parse::<shared::Coin>()
+        .ok()
+        .and_then(|c| ledger_amount.to_u128().map(|units| shared::format_amount(units, c)))
+        .unwrap_or_else(|| ledger_amount.to_string())
+}
+
 /// The create/get response body. One builder so the idempotent replay and the
 /// fresh insert can never answer with different shapes.
 fn invoice_json(inv: &MerchantDepositInvoice, base_url: &str) -> serde_json::Value {
-    let qr_code = format!("{}:{}?amount={}", inv.coin.to_lowercase(), inv.deposit_address, inv.amount);
+    let qr_code = payment_uri(&inv.coin, &inv.deposit_address, &inv.amount);
     let pay_url = format!("/pay/{}", inv.id);
     json!({
         "id": inv.id,
@@ -380,12 +397,13 @@ async fn get_public_invoice_handler<R: AuthRepo>(
 ) -> Response {
     match get_invoice_by_id(&state.pool, id).await {
         Ok(inv) => {
-            let qr_code = format!("{}:{}?amount={}", inv.coin.to_lowercase(), inv.deposit_address, inv.amount);
+            let qr_code = payment_uri(&inv.coin, &inv.deposit_address, &inv.amount);
             Json(json!({
                 "id": inv.id,
                 "status": inv.status,
                 "coin": inv.coin,
                 "amount": inv.amount.to_string(),
+                "amountDisplay": human_amount(&inv.coin, &inv.amount),
                 "depositAddress": inv.deposit_address,
                 "orderId": inv.order_id,
                 "siteName": inv.site_name,
@@ -582,5 +600,33 @@ mod tests {
             webhook_next_retry_at: None,
             created_at: chrono::Utc::now(),
         }
+    }
+}
+
+#[cfg(test)]
+mod display_tests {
+    use super::*;
+
+    /// The paying customer reads this. A 25 USDT invoice used to render
+    /// "2500000000 USDT" and encode the same number into the payment URI,
+    /// which a scanning wallet reads as 2.5 billion USDT.
+    #[test]
+    fn amounts_render_as_coins_not_ledger_units() {
+        assert_eq!(human_amount("USDT", &BigDecimal::from(2_500_000_000u64)), "25");
+        assert_eq!(human_amount("BTC", &BigDecimal::from(1u64)), "0.00000001");
+        assert_eq!(human_amount("LTC", &BigDecimal::from(1_000u64)), "0.00001");
+        assert_eq!(human_amount("POL", &BigDecimal::from(100_000_000u64)), "1");
+    }
+
+    #[test]
+    fn payment_uri_encodes_the_coin_quantity() {
+        let uri = payment_uri("USDT", "0xabc", &BigDecimal::from(2_500_000_000u64));
+        assert_eq!(uri, "usdt:0xabc?amount=25");
+        assert!(!uri.contains("2500000000"), "wallet would send 2.5 billion USDT: {uri}");
+    }
+
+    #[test]
+    fn unknown_coin_falls_back_to_the_raw_value() {
+        assert_eq!(human_amount("NOPE", &BigDecimal::from(42u64)), "42");
     }
 }

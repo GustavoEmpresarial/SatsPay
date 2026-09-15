@@ -84,6 +84,20 @@ describe('API Docs — matches the real gateway contract', () => {
     expect(body).not.toContain('https://www.satspay.pro');
   });
 
+  it('documents the payment button, the demo and the coin catalogue', () => {
+    // These existed only as gaps: /demo was a dead redirect, there was no pay
+    // button at all, and prices hid behind /v1/swap/prices.
+    expect(src).toContain('/sdk/satspay-pay.js');
+    expect(src).toContain('data-checkout_url');
+    expect(src).toContain('window.SatsPay.renderButtons()');
+    expect(src).toContain('/pay/demo');
+    expect(src).toContain('/v1/public/coins');
+    expect(src).toContain('logoUrl');
+    expect(src).toContain('depositsEnabled');
+    // The button must never be documented as taking a key in the browser.
+    expect(src).not.toMatch(/data-api_?key/i);
+  });
+
   it('lists error codes the API can actually return', () => {
     for (const code of [
       'INVALID_API_KEY',

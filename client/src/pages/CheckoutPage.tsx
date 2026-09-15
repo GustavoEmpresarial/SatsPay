@@ -5,7 +5,7 @@ import { api } from '../lib/api.js';
 import { coinLogo } from '../lib/coinAssets.js';
 import { addressQrDataUrl } from '../lib/qr.js';
 import { useAuthStore } from '../stores/auth.js';
-import { type Coin } from '@/shared';
+import { formatAmount, safeBigInt, type Coin } from '@/shared';
 
 interface InvoiceData {
   id: string;
@@ -23,6 +23,45 @@ interface InvoiceData {
   expiresAt: string;
   paidAt?: string;
   txHash?: string;
+  /** `amount` rendered as a quantity of coins, e.g. "25" for 25 USDT. */
+  amountDisplay?: string;
+  /** Set by `/pay/demo`: nothing here is real and nothing can be paid. */
+  demo?: boolean;
+}
+
+interface CoinCatalog {
+  priceDecimals: number;
+  coins: { symbol: string; priceUsd?: string | null }[];
+}
+
+/**
+ * Approximate fiat value of a ledger amount, or null when the coin has no
+ * cached price. The checkout showed no fiat at all, so a customer was asked
+ * for "0.00001 LTC" with no idea what that costs.
+ *
+ * Total by construction: this renders on the page a customer pays on, so a
+ * missing, malformed or partial catalogue must degrade to "no label", never
+ * to a blank checkout.
+ */
+function fiatValue(amountUnits: string, coin: Coin, catalog?: CoinCatalog): string | null {
+  try {
+    const list = Array.isArray(catalog?.coins) ? catalog.coins : [];
+    const entry = list.find((c) => c?.symbol === coin);
+    if (!entry?.priceUsd) return null;
+
+    const decimals = Number(catalog?.priceDecimals);
+    const price = Number(entry.priceUsd) / 10 ** (Number.isFinite(decimals) ? decimals : 8);
+    const coins = Number(formatAmount(safeBigInt(amountUnits), coin));
+    if (!Number.isFinite(price) || !Number.isFinite(coins) || price <= 0) return null;
+
+    return (coins * price).toLocaleString('pt-BR', {
+      style: 'currency',
+      currency: 'USD',
+      maximumFractionDigits: 2,
+    });
+  } catch {
+    return null;
+  }
 }
 
 export function CheckoutPage() {
@@ -48,6 +87,15 @@ export function CheckoutPage() {
 
   const payBalanceMut = useMutation({
     mutationFn: () => api(`/public/pay/${id}/balance`, { method: 'POST' }),
+  });
+
+  // Public catalogue: price for the fiat label. A failure here must never
+  // block the payment UI, so the label simply does not render.
+  const { data: catalog } = useQuery<CoinCatalog>({
+    queryKey: ['public-coins'],
+    queryFn: () => api<CoinCatalog>('/public/coins'),
+    staleTime: 60_000,
+    retry: false,
   });
 
   // Generate QR Code data URL
@@ -160,6 +208,18 @@ export function CheckoutPage() {
       {/* MAIN CHECKOUT CONTAINER */}
       <main className="flex-1 flex items-center justify-center p-4 py-8">
         <div className="w-full max-w-md rounded-3xl border border-border bg-paper p-6 sm:p-8 shadow-2xl relative overflow-hidden">
+          {inv.demo && (
+            <div className="mb-4 rounded-2xl border border-amber-400/40 bg-amber-50 px-4 py-3 text-xs text-amber-900">
+              <div className="flex items-center gap-2 font-bold">
+                <i className="bi bi-eye-fill" />
+                <span>Demonstração</span>
+              </div>
+              <p className="mt-1 leading-relaxed">
+                Esta é uma fatura de exemplo para você ver o checkout. O endereço não é real,
+                nenhum pagamento é processado e nenhum webhook é disparado.
+              </p>
+            </div>
+          )}
           {/* SUCCESS STATE */}
           {isConfirmed ? (
             <div className="text-center py-6 space-y-4 animate-scale-up">
@@ -256,8 +316,15 @@ export function CheckoutPage() {
                   <span className="text-xs font-bold text-ink-muted">{inv.coin}</span>
                 </div>
                 <div className="font-mono text-3xl font-black tracking-tight text-ink">
-                  {inv.amount} <span className="text-lg font-bold text-ink-muted">{inv.coin}</span>
+                  {inv.amountDisplay ?? formatAmount(safeBigInt(inv.amount), inv.coin)}{' '}
+                  <span className="text-lg font-bold text-ink-muted">{inv.coin}</span>
                 </div>
+                {fiatValue(inv.amount, inv.coin, catalog) && (
+                  <div className="text-xs font-semibold text-ink-muted mt-1">
+                    ≈ {fiatValue(inv.amount, inv.coin, catalog)}{' '}
+                    <span className="font-normal">(cotação estimada)</span>
+                  </div>
+                )}
                 {inv.description && (
                   <div className="text-[11px] text-ink-muted mt-1">{inv.description}</div>
                 )}
@@ -310,7 +377,7 @@ export function CheckoutPage() {
               </div>
 
               {/* Pay with Internal SatsPay Balance */}
-              {user && (
+              {user && !inv.demo && (
                 <div className="pt-2 border-t border-border/70">
                   <button
                     type="button"
