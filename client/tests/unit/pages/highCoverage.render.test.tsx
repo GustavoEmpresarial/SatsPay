@@ -318,7 +318,7 @@ describe('SwapPage quote UI', () => {
 });
 
 describe('ApiDocsPage tabs via query', () => {
-  for (const tab of ['deposits', 'payouts', 'oauth', 'security', 'simulator'] as const) {
+  for (const tab of ['start', 'deposits', 'payouts', 'oauth', 'security', 'simulator'] as const) {
     it(`tab=${tab}`, async () => {
       const { container, unmount } = renderWithProviders(<ApiDocsPage />, {
         route: `/api-docs?tab=${tab}`,
@@ -328,6 +328,19 @@ describe('ApiDocsPage tabs via query', () => {
       unmount();
     });
   }
+
+  it('renders the onboarding trail, not just a shell', async () => {
+    // The tab loop above only asserts that something rendered. This one fails
+    // if the onboarding content itself throws or goes missing.
+    const { findByText, container, unmount } = renderWithProviders(<ApiDocsPage />, {
+      route: '/api-docs?tab=start',
+      loggedIn: true,
+    });
+    await findByText(/Come\u00e7ar do zero/);
+    expect(container.textContent).toContain('/v1/merchant/apply');
+    expect(container.textContent).toContain('/v1/api-keys');
+    unmount();
+  });
 
   it('clicks through tab buttons', async () => {
     const user = userEvent.setup();
