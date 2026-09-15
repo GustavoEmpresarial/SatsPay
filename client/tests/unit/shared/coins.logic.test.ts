@@ -17,6 +17,7 @@ import {
   COINS,
   COIN_CONFIG,
   FALLBACK_PRICES,
+  formatLedgerAmount,
   type Coin,
 } from '../../../src/shared/coins.js';
 
@@ -159,5 +160,28 @@ describe('getCoinUsdValue / formatUsdValue', () => {
     // tiny sat amount → very small USD with fallback BTC price
     expect(formatUsdValue(1n, 'DGB')).toMatch(/\$|</);
     expect(formatUsdValue(100n, 'DGB')).toMatch(/\$/);
+  });
+});
+
+describe('formatLedgerAmount', () => {
+  it('renders ledger units as a quantity of coins', () => {
+    expect(formatLedgerAmount('2500000000', 'USDT')).toBe('25');
+    expect(formatLedgerAmount('100000000', 'POL')).toBe('1');
+    expect(formatLedgerAmount('1', 'BCH')).toBe('0.00000001');
+    expect(formatLedgerAmount('5555555556', 'POL')).toBe('55.55555556');
+  });
+
+  it('handles the fractional rows written before the API rejected decimals', () => {
+    // "7.2" here is 7.2 units of 1e-8 — the merchant dashboard used to print
+    // it raw and claim the invoice charged 7.2 POL.
+    expect(formatLedgerAmount('7.2000', 'POL')).toBe('0.000000072');
+    expect(formatLedgerAmount('0.5000', 'USDC')).toBe('0.000000005');
+  });
+
+  it('never throws on junk', () => {
+    expect(formatLedgerAmount('', 'BTC')).toBe('0');
+    expect(formatLedgerAmount(null, 'BTC')).toBe('0');
+    expect(formatLedgerAmount('abc', 'BTC')).toBe('0');
+    expect(formatLedgerAmount('0', 'BTC')).toBe('0');
   });
 });

@@ -3,7 +3,13 @@ import { Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api.js';
 import { coinLogo } from '../lib/coinAssets.js';
-import { COINS, isDepositWithdrawPaused, INTERNAL_AMOUNT_DECIMALS, type Coin } from '@/shared';
+import {
+  COINS,
+  formatLedgerAmount,
+  isDepositWithdrawPaused,
+  INTERNAL_AMOUNT_DECIMALS,
+  type Coin,
+} from '@/shared';
 import { clsx } from 'clsx';
 
 interface InvoiceItem {
@@ -539,7 +545,8 @@ export function MerchantDepositsPage() {
                       </td>
 
                       <td className="p-3.5 font-mono font-bold text-ink">
-                        {inv.amount} <span className="text-[10px] text-ink-muted">{inv.coin}</span>
+                        {formatLedgerAmount(inv.amount, inv.coin)}{' '}
+                        <span className="text-[10px] text-ink-muted">{inv.coin}</span>
                       </td>
 
                       <td className="p-3.5">
