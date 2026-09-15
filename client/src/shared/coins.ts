@@ -391,3 +391,17 @@ export function formatLedgerAmount(raw: string | number | null | undefined, coin
   const tail = padded.slice(padded.length - pointFromRight).replace(/0+$/, '');
   return tail ? `${head}.${tail}` : head;
 }
+
+/**
+ * "25" (coins) → "2500000000" (ledger units of 1e-8), or null when the input
+ * is not a quantity the ledger can hold. The inverse of
+ * `formatLedgerAmount`. String math on purpose: floats lose the last satoshi.
+ */
+export function toLedgerUnits(input: string): string | null {
+  const t = input.trim().replace(',', '.');
+  if (t === '' || t === '.' || !/^\d*\.?\d*$/.test(t)) return null;
+  const [whole = '0', frac = ''] = t.split('.');
+  if (frac.length > INTERNAL_AMOUNT_DECIMALS) return null;
+  const units = `${whole}${frac.padEnd(INTERNAL_AMOUNT_DECIMALS, '0')}`.replace(/^0+(?=\d)/, '');
+  return units === '' || /^0+$/.test(units) ? null : units;
+}

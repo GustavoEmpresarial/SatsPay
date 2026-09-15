@@ -18,6 +18,7 @@ import {
   COIN_CONFIG,
   FALLBACK_PRICES,
   formatLedgerAmount,
+  toLedgerUnits,
   type Coin,
 } from '../../../src/shared/coins.js';
 
@@ -183,5 +184,31 @@ describe('formatLedgerAmount', () => {
     expect(formatLedgerAmount(null, 'BTC')).toBe('0');
     expect(formatLedgerAmount('abc', 'BTC')).toBe('0');
     expect(formatLedgerAmount('0', 'BTC')).toBe('0');
+  });
+});
+
+describe('toLedgerUnits', () => {
+  it('converts a coin quantity into the integer the API takes', () => {
+    // The spelling a merchant reaches for ("25.00") is the one that broke a
+    // real integration; this is the conversion that makes it safe.
+    expect(toLedgerUnits('25')).toBe('2500000000');
+    expect(toLedgerUnits('25.00')).toBe('2500000000');
+    expect(toLedgerUnits('0.005')).toBe('500000');
+    expect(toLedgerUnits('0.00000001')).toBe('1');
+    expect(toLedgerUnits('25,5')).toBe('2550000000');
+  });
+
+  it('refuses what the ledger cannot hold', () => {
+    expect(toLedgerUnits('0.000000001')).toBeNull(); // 9 decimals
+    expect(toLedgerUnits('abc')).toBeNull();
+    expect(toLedgerUnits('')).toBeNull();
+    expect(toLedgerUnits('-1')).toBeNull();
+    expect(toLedgerUnits('0')).toBeNull();
+  });
+
+  it('round-trips with formatLedgerAmount', () => {
+    for (const coins of ['25', '0.005', '1', '0.00000001']) {
+      expect(formatLedgerAmount(toLedgerUnits(coins)!, 'USDT')).toBe(coins.replace(/^(\d+)\.?0*$/, '$1'));
+    }
   });
 });

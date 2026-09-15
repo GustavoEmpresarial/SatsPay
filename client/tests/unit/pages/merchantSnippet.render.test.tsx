@@ -1,6 +1,10 @@
 /**
  * @vitest-environment jsdom
- * The merchant dashboard panel that used to be decorative.
+ * The "Como integrar" section — documentation, not a form.
+ *
+ * It replaced a panel of inputs that looked like it created an invoice and
+ * only assembled text to copy. The assertions below exist to keep that kind
+ * of decorative UI from coming back.
  */
 import { describe, expect, it, vi } from 'vitest';
 import { waitFor, within } from '@testing-library/react';
@@ -8,105 +12,106 @@ import userEvent from '@testing-library/user-event';
 import { renderWithProviders } from '../../helpers/renderWithProviders.js';
 
 vi.mock('../../../src/lib/api.js', () => ({
-  api: vi.fn(async () => ({ invoices: [] })),
+  api: vi.fn(async (path: string) => {
+    if (path.includes('/merchant/settings')) {
+      return { acceptedCoins: ['USDT', 'POL'], availableCoins: ['BCH', 'POL', 'SOL', 'USDT', 'USDC'] };
+    }
+    return { invoices: [] };
+  }),
   bootstrapSession: vi.fn(async () => true),
   forceReauth: vi.fn(),
 }));
 
-import { MerchantDepositsPage, toLedgerUnits } from '../../../src/pages/MerchantDepositsPage.js';
+import { MerchantDepositsPage } from '../../../src/pages/MerchantDepositsPage.js';
 
-describe('toLedgerUnits', () => {
-  it('converts coin quantities to the integer the API takes', () => {
-    // The panel used to default to "25.00" and send it nowhere; the API now
-    // rejects that spelling outright.
-    expect(toLedgerUnits('25')).toBe('2500000000');
-    expect(toLedgerUnits('25.00')).toBe('2500000000');
-    expect(toLedgerUnits('0.005')).toBe('500000');
-    expect(toLedgerUnits('1')).toBe('100000000');
-    expect(toLedgerUnits('0.00000001')).toBe('1');
-    expect(toLedgerUnits('25,5')).toBe('2550000000');
-  });
+async function renderPage() {
+  const rendered = renderWithProviders(<MerchantDepositsPage />, { route: '/merchant/deposits' });
+  await waitFor(() => expect(rendered.container.textContent).toMatch(/Como integrar/i), { timeout: 5000 });
+  return rendered;
+}
 
-  it('refuses what the ledger cannot hold', () => {
-    expect(toLedgerUnits('0.000000001')).toBeNull(); // 9 decimals
-    expect(toLedgerUnits('abc')).toBeNull();
-    expect(toLedgerUnits('')).toBeNull();
-    expect(toLedgerUnits('-1')).toBeNull();
-    expect(toLedgerUnits('0')).toBeNull();
-  });
-});
-
-describe('MerchantDepositsPage — integration helper', () => {
-  it('links to the demo checkout from where the merchant works', async () => {
-    const { container, unmount } = renderWithProviders(<MerchantDepositsPage />, {
-      route: '/merchant/deposits',
-    });
-    await waitFor(() => expect(container.textContent).toMatch(/Gerar sua integração/i), { timeout: 5000 });
-
-    const demoLinks = within(container)
-      .queryAllByRole('link')
-      .filter((a) => a.getAttribute('href') === '/pay/demo');
-    expect(demoLinks.length, 'the demo must be reachable from the dashboard').toBeGreaterThan(0);
+describe('MerchantDepositsPage — Como integrar', () => {
+  it('walks through the three steps of an integration', async () => {
+    const { container, unmount } = await renderPage();
+    expect(container.textContent).toMatch(/1\. Crie sua chave/i);
+    expect(container.textContent).toMatch(/2\. Crie a cobrança/i);
+    expect(container.textContent).toMatch(/3\. Leve o cliente/i);
     unmount();
   });
 
-  it('builds a snippet with the converted amount', async () => {
-    const user = userEvent.setup();
-    const { container, unmount } = renderWithProviders(<MerchantDepositsPage />, {
-      route: '/merchant/deposits',
-    });
-    await waitFor(() => expect(container.textContent).toMatch(/Gerar sua integração/i), { timeout: 5000 });
-
-    const pre = container.querySelector('pre')!;
-    expect(pre.textContent).toContain('POST');
-    expect(pre.textContent).toContain('/v1/merchant/deposits');
-    expect(pre.textContent).toContain('"amount": "2500000000"');
-    expect(pre.textContent).not.toContain('"amount": "25.00"');
-
-    const amountInput = container.querySelector('input') as HTMLInputElement;
-    await user.clear(amountInput);
-    await user.type(amountInput, '0.5');
-    await waitFor(() => expect(container.querySelector('pre')!.textContent).toContain('"amount": "50000000"'));
+  it('leads with the dollar-priced call, where the customer picks the coin', async () => {
+    const { container, unmount } = await renderPage();
+    const code = container.querySelector('pre')!;
+    expect(code.textContent).toContain('POST');
+    expect(code.textContent).toContain('/v1/merchant/deposits');
+    expect(code.textContent).toContain('"amountUsd": "25.00"');
     unmount();
   });
 
-  it('switches to the payment button snippet', async () => {
-    const user = userEvent.setup();
-    const { container, unmount } = renderWithProviders(<MerchantDepositsPage />, {
-      route: '/merchant/deposits',
-    });
-    await waitFor(() => expect(container.textContent).toMatch(/Gerar sua integração/i), { timeout: 5000 });
+  it('still teaches the ledger-unit rule for the crypto-priced call', async () => {
+    const { container, unmount } = await renderPage();
+    // The exact trap that broke a real integration.
+    expect(container.textContent).toContain('2500000000');
+    expect(container.textContent).toMatch(/AMOUNT_NOT_INTEGER/);
+    unmount();
+  });
 
-    const btn = within(container)
+  it('switches the example between languages', async () => {
+    const user = userEvent.setup();
+    const { container, unmount } = await renderPage();
+
+    const node = within(container)
       .getAllByRole('button')
-      .find((b) => /2\. Botão/i.test(b.textContent || ''))!;
-    await user.click(btn);
+      .find((b) => /Node\.js/i.test(b.textContent || ''))!;
+    await user.click(node);
 
     await waitFor(() => {
-      const pre = container.querySelector('pre')!;
-      expect(pre.textContent).toContain('satspay-pay.js');
-      expect(pre.textContent).toContain('data-checkout_url');
-      // The button must never be shown carrying a key.
-      expect(pre.textContent).not.toMatch(/x-api-key/i);
+      const code = container.querySelector('pre')!;
+      expect(code.textContent).toContain('await fetch');
+      expect(code.textContent).toContain('invoice.checkoutUrl');
     });
     unmount();
   });
 
-  it('marks paused coins instead of offering them', async () => {
-    const { container, unmount } = renderWithProviders(<MerchantDepositsPage />, {
-      route: '/merchant/deposits',
-    });
-    await waitFor(() => expect(container.textContent).toMatch(/Gerar sua integração/i), { timeout: 5000 });
+  it('shows the branded button without ever putting a key in the browser', async () => {
+    const { container, unmount } = await renderPage();
+    const blocks = [...container.querySelectorAll('pre')].map((p) => p.textContent ?? '');
+    const button = blocks.find((b) => b.includes('satspay-pay.js'));
+    expect(button, 'the pay button snippet must be shown').toBeTruthy();
+    expect(button).toContain('data-checkout_url');
+    expect(button).not.toMatch(/x-api-key/i);
+    unmount();
+  });
 
-    const btc = within(container)
-      .getAllByRole('button')
-      .find((b) => (b.textContent || '').trim() === 'BTC') as HTMLButtonElement;
-    expect(btc.disabled, 'BTC deposits are paused').toBe(true);
+  it('is documentation, not a form', async () => {
+    const { container, unmount } = await renderPage();
+    // The removed panel had inputs for coin, amount and orderId that created
+    // nothing. The only inputs left on this page belong to the invoice filter.
+    const inputs = [...container.querySelectorAll('input')];
+    expect(inputs, 'the integration section must not take typed input').toHaveLength(0);
+    unmount();
+  });
 
-    const usdt = within(container)
-      .getAllByRole('button')
-      .find((b) => (b.textContent || '').trim().startsWith('USDT')) as HTMLButtonElement;
-    expect(usdt.disabled).toBe(false);
+  it('links to the demo checkout from where the merchant works', async () => {
+    const { container, unmount } = await renderPage();
+    const demo = within(container)
+      .queryAllByRole('link')
+      .filter((a) => a.getAttribute('href') === '/pay/demo');
+    expect(demo.length).toBeGreaterThan(0);
+    unmount();
+  });
+
+  it('gives the four toolbar actions one shared size', async () => {
+    const { container, unmount } = await renderPage();
+    const labels = ['Endereços de Depósito', 'Chaves de API', 'Ver Checkout (Demo)', 'Documentação'];
+    // Exact text: the section footer also has a "Documentação completa" link.
+    const buttons = within(container)
+      .queryAllByRole('link')
+      .filter((a) => labels.includes((a.textContent || '').trim()));
+    expect(buttons).toHaveLength(4);
+    // Same class string means same size, shape and weight — no odd one out.
+    const classes = new Set(buttons.map((b) => b.className));
+    expect(classes.size, 'toolbar buttons must share one style').toBe(1);
     unmount();
   });
 });
