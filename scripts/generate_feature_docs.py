@@ -75,19 +75,39 @@ DOMAINS: list[dict] = [
     {
         "slug": "domain-gateway-merchant",
         "title": "Gateway merchant (invoices + HMAC)",
-        "keywords": "merchant_deposit_invoices gateway HMAC api_keys webhook checkout order_id fee 0.5%",
+        "keywords": "merchant_deposit_invoices gateway HMAC api_keys webhook checkout order_id fee 0.5% deposit.confirmed checkoutUrl payUrl invoice_watcher ledger units idempotency",
         "files": [
             "crates/db/migrations/0010_merchant_deposit_invoices.sql",
+            "crates/db/migrations/0026_merchant_invoice_order_unique.sql",
+            "crates/db/migrations/0027_merchant_invoice_onchain.sql",
+            "crates/api-http/src/merchant_deposits.rs",
+            "crates/webhooks/src/lib.rs",
+            "crates/worker/src/invoice_watcher.rs",
             "docs/api/public-api-hmac.md",
+            "docs/api/http-api-reference.md",
             "client/src/pages/CheckoutPage.tsx",
             "client/src/pages/AdminMerchantsPage.tsx",
         ],
         "apis": [
-            "POST /v1/public/pay",
+            "POST /v1/merchant/deposits",
+            "GET /v1/merchant/deposits/:id",
+            "GET /v1/merchant/webhook-signing-secret",
             "GET /v1/public/pay/:id",
+            "POST /v1/public/pay/:id/balance",
             "GET /v1/admin/merchants/stats",
         ],
-        "notes": "Site X cria invoice → usuário paga on-chain → webhook. Taxa plataforma ~0,5%.",
+        "notes": (
+            "Criar fatura: `POST /v1/merchant/deposits` (201; aliases `/deposits/create`, `/invoices`) — "
+            "`/v1/public/pay` NÃO cria nada. Resposta traz `checkoutUrl` (absoluto) + `payUrl` (relativo). "
+            "`amount` é inteiro em unidades de ledger (1e-8), nunca decimal da moeda: 25 USDT = \"2500000000\" "
+            "(decimal → 400 AMOUNT_NOT_INTEGER). `orderId` único por merchant: repetir devolve 200 com a mesma "
+            "fatura, divergir devolve 409 DUPLICATE_ORDER_ID. Taxa plataforma 0,5% (`feeAmount`/`netAmount`; "
+            "no webhook o campo chama `fee`). Auth: `x-api-key` ou requisição assinada, escopo `deposits`, "
+            "whitelist de IP com IP real. Confirmação on-chain: `worker::invoice_watcher` → `confirm_invoice` → "
+            "sweep. Webhook `deposit.confirmed`, `X-SatsPay-Signature: sha256=<hex>` sobre o corpo cru, com "
+            "`timestamp`/`attempt` no corpo e retry com backoff (`crates/webhooks`). Statuses: "
+            "PENDING → DETECTED → CONFIRMED | EXPIRED | CANCELLED (não existe PAID)."
+        ),
     },
     {
         "slug": "domain-auth",
@@ -405,6 +425,20 @@ def enrich_notes(comp: str, text: str, apis: list[str], tabs: list[str]) -> str:
         bits.append("2FA / fee / min withdrawal; status PENDING→BROADCAST→CONFIRMED.")
     if "Deposit" in comp:
         bits.append("Endereço HD por coin; watcher no worker credita ledger.")
+    if "MerchantDeposits" in comp:
+        bits.append(
+            "Gateway: `POST /v1/merchant/deposits` (aliases `/deposits/create`, `/invoices`) → 201 com "
+            "`checkoutUrl`/`payUrl`. `amount` em unidades de ledger (1e-8). `orderId` idempotente por merchant. "
+            "Confirmação via `worker::invoice_watcher` (on-chain) ou `POST /v1/public/pay/:id/balance` (saldo). "
+            "Webhook `deposit.confirmed` assinado `sha256=<hex>`; segredo em `GET /v1/merchant/webhook-signing-secret`. "
+            "Pausa BTC/LTC/DOGE/DGB → 503 DEPOSIT_PAUSED; `/v1/public/send` não pausa."
+        )
+    if "ApiDocs" in comp:
+        bits.append(
+            "Página pública do contrato da API. Tem de bater com `crates/api-http/src/merchant_deposits.rs` e "
+            "`crates/webhooks/src/lib.rs` — guardado por `client/tests/unit/contract/merchantGateway.contract.test.ts`. "
+            "Host único em `API_BASE`; tabela de moedas vem de `client/src/shared/coins.ts`."
+        )
     if "RequireAdmin" in text or "admin" in comp.lower():
         bits.append("UI admin sempre pt-BR.")
     return " ".join(bits)

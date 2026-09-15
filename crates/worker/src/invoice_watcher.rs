@@ -94,6 +94,26 @@ async fn scan_invoice(
         }
     }
 
+    // Legacy rows could share a deposit address (invoices once fell back to
+    // the merchant's personal address). Crediting from a shared address would
+    // let one payment confirm several invoices, so never auto-confirm one.
+    match db::merchant_deposits::count_invoices_at_address(pool, &inv.deposit_address).await {
+        Ok(n) if n > 1 => {
+            tracing::error!(
+                invoice_id = %inv.id,
+                merchant_id = %inv.merchant_id,
+                invoices_at_address = n,
+                "INVOICE_ADDRESS_NOT_UNIQUE: refusing to credit from a shared deposit address"
+            );
+            return;
+        }
+        Ok(_) => {}
+        Err(e) => {
+            tracing::error!(invoice_id = %inv.id, error = %e, "invoice_watcher: address uniqueness check failed");
+            return;
+        }
+    }
+
     // Record what the chain shows before deciding — an underpayment or a
     // still-shallow payment must be visible to the merchant instead of
     // looking like "nothing arrived".

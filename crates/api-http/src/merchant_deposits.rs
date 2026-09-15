@@ -288,16 +288,21 @@ async fn create_deposit_handler<R: AuthRepo>(
         Err(e) => return fail(StatusCode::INTERNAL_SERVER_ERROR, "INTERNAL_ERROR", &e.to_string()),
     }
 
-    // Generate dedicated deposit address
+    // Every invoice needs its OWN address: the watcher attributes an on-chain
+    // payment to an invoice by the address it landed on. The old fallback here
+    // reused the merchant's shared personal deposit address, which would let a
+    // single payment confirm two different invoices — so a failure to derive a
+    // fresh address now fails the request instead.
     let client = state.chain_registry.get(coin);
     let (deposit_address, hd_index) = match client.generate_address(&auth.merchant_id.to_string()).await {
         Ok(addr) => (addr.address, addr.hd_index.map(|i| i as i64)),
-        Err(_) => {
-            // Fallback to merchant deposit address
-            match db::deposits::get_or_create_address(&state.pool, auth.merchant_id, coin, client.as_ref()).await {
-                Ok(addr) => (addr, None),
-                Err(e) => return fail(StatusCode::INTERNAL_SERVER_ERROR, "ADDRESS_UNAVAILABLE", &e.to_string()),
-            }
+        Err(e) => {
+            tracing::error!(merchant_id = %auth.merchant_id, coin = %coin.as_str(), error = %e.message, "gateway: could not derive an invoice address");
+            return fail(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "ADDRESS_UNAVAILABLE",
+                "could not generate a deposit address for this coin right now",
+            );
         }
     };
 

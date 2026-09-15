@@ -577,3 +577,16 @@ pub async fn mark_invoice_swept(pool: &PgPool, invoice_id: Uuid) -> Result<(), M
 
     Ok(())
 }
+
+/// How many invoices share `deposit_address`. Must be 1 before an on-chain
+/// payment can be attributed to a specific invoice.
+pub async fn count_invoices_at_address(pool: &PgPool, address: &str) -> Result<i64, MerchantDepositError> {
+    let count: i64 = sqlx::query_scalar(
+        "SELECT count(*)::bigint FROM merchant_deposit_invoices WHERE deposit_address = $1",
+    )
+    .bind(address)
+    .fetch_one(pool)
+    .await?;
+
+    Ok(count)
+}
