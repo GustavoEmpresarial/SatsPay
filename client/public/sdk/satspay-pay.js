@@ -74,8 +74,30 @@
     }
   }
 
+  /**
+   * The real SatsPay mark, same asset the login button uses. An <img> can
+   * fail (offline, blocked, cache miss) and a payment button must never
+   * render as a broken image, so it falls back to the inline glyph below.
+   */
+  function logoNode(size, fill) {
+    var img = document.createElement('img');
+    img.src = ORIGIN + '/sdk/satspay-logo.png?v=3';
+    img.alt = '';
+    img.width = size;
+    img.height = size;
+    img.setAttribute('aria-hidden', 'true');
+    img.style.cssText = 'display:block;width:' + size + 'px;height:' + size + 'px;object-fit:contain;border-radius:4px';
+    img.addEventListener('error', function () {
+      var span = document.createElement('span');
+      span.style.cssText = 'display:flex;align-items:center';
+      span.innerHTML = logoSvg(size, fill);
+      if (img.parentNode) img.parentNode.replaceChild(span, img);
+    });
+    return img;
+  }
+
   function logoSvg(size, fill) {
-    // Inline so the button paints before any network request resolves.
+    // Fallback mark, inline so it paints with no network at all.
     return (
       '<svg width="' + size + '" height="' + size + '" viewBox="0 0 32 32" aria-hidden="true" focusable="false">' +
       '<circle cx="16" cy="16" r="16" fill="' + fill + '" opacity="0.18"></circle>' +
@@ -141,8 +163,10 @@
     var s = SIZES[size] || SIZES.medium;
 
     var text = amount ? label + ' · ' + amount : label;
-    btn.innerHTML = logoSvg(s.icon, t.fg) + '<span></span>';
-    btn.lastChild.textContent = text; // textContent, never innerHTML — label is merchant input
+    var caption = document.createElement('span');
+    caption.textContent = text; // textContent, never innerHTML — label is merchant input
+    btn.appendChild(logoNode(s.icon, t.fg));
+    btn.appendChild(caption);
     btn.setAttribute('aria-label', text);
 
     if (onclick) {

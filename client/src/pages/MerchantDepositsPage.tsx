@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api.js';
 import { coinLogo } from '../lib/coinAssets.js';
-import { COINS, type Coin } from '@/shared';
+import { COINS, isDepositWithdrawPaused, INTERNAL_AMOUNT_DECIMALS, type Coin } from '@/shared';
 import { clsx } from 'clsx';
 
 interface InvoiceItem {
@@ -33,35 +33,64 @@ interface WebhookTestResult {
   error?: string;
 }
 
+/** Absolute origin for copy-paste snippets. */
+const ORIGIN = typeof window !== 'undefined' && window.location?.origin
+  ? window.location.origin
+  : 'https://www.satspay.pro';
+
+/**
+ * "25" (coins) → "2500000000" (ledger units of 1e-8), or null when the input
+ * is not a number the ledger can hold. String math on purpose: floats lose
+ * the last satoshi.
+ */
+export function toLedgerUnits(input: string): string | null {
+  const t = input.trim().replace(',', '.');
+  if (t === '' || t === '.' || !/^\d*\.?\d*$/.test(t)) return null;
+  const [whole = '0', frac = ''] = t.split('.');
+  if (frac.length > INTERNAL_AMOUNT_DECIMALS) return null;
+  const units = `${whole}${frac.padEnd(INTERNAL_AMOUNT_DECIMALS, '0')}`.replace(/^0+(?=\d)/, '');
+  return units === '' || /^0+$/.test(units) ? null : units;
+}
+
 export function MerchantDepositsPage() {
   const qc = useQueryClient();
   const [filterCoin, setFilterCoin] = useState<string>('ALL');
   const [filterStatus, setFilterStatus] = useState<string>('ALL');
   const [testResult, setTestResult] = useState<{ id: string; msg: string } | null>(null);
 
-  // Configuração das Moedas Aceitas pelo Comerciante
-  const [enabledCoins, setEnabledCoins] = useState<Coin[]>([
-    'BTC',
-    'LTC',
-    'DOGE',
-    'BCH',
-    'POL',
-    'DGB',
-    'SOL',
-    'USDT',
-    'USDC',
-  ]);
-  const [amountTokens, setAmountTokens] = useState<string>('25.00');
+  // Integration snippet builder. These inputs used to feed nothing at all:
+  // the panel promised "accepted coins" configuration that was never saved or
+  // sent, and defaulted the amount to "25.00" — the decimal spelling the API
+  // rejects, since amounts are integers of 1e-8.
+  const [snippetCoin, setSnippetCoin] = useState<Coin>('USDT');
+  const [amountTokens, setAmountTokens] = useState<string>('25');
   const [orderId, setOrderId] = useState<string>('ORD-88219');
+  const [snippetKind, setSnippetKind] = useState<'curl' | 'button'>('curl');
+  const [snippetCopied, setSnippetCopied] = useState(false);
 
-  const toggleCoin = (c: Coin) => {
-    if (enabledCoins.includes(c)) {
-      if (enabledCoins.length === 1) return;
-      setEnabledCoins(enabledCoins.filter((item) => item !== c));
-    } else {
-      setEnabledCoins([...enabledCoins, c]);
-    }
-  };
+  const ledgerUnits = toLedgerUnits(amountTokens);
+  const safeOrderId = orderId.trim() || 'ORD-88219';
+  const snippet =
+    snippetKind === 'curl'
+      ? `curl -X POST ${ORIGIN}/v1/merchant/deposits \\
+  -H "x-api-key: SUA_CHAVE_DE_API" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "coin": "${snippetCoin}",
+    "amount": "${ledgerUnits ?? '...'}",
+    "orderId": "${safeOrderId}",
+    "callbackUrl": "https://seusite.com/api/webhook"
+  }'
+
+# A resposta traz checkoutUrl — redirecione o cliente para lá.`
+      : `<script src="${ORIGIN}/sdk/satspay-pay.js" async defer></script>
+
+<div class="satspay-pay"
+     data-checkout_url="COLE_O_checkoutUrl_DA_FATURA"
+     data-theme="bitcoin"
+     data-size="large"
+     data-label="Pagar com cripto"
+     data-amount="${amountTokens.trim() || '25'} ${snippetCoin}"></div>`;
 
   const { data, isLoading } = useQuery<{ invoices: InvoiceItem[] }>({
     queryKey: ['merchant-deposits'],
@@ -134,6 +163,13 @@ export function MerchantDepositsPage() {
               <span>Chaves de API</span>
             </Link>
             <Link
+              to="/pay/demo"
+              className="inline-flex items-center gap-2 rounded-xl bg-paper hover:bg-surface-hover active:scale-[0.98] px-3.5 py-2 text-xs font-bold text-ink border border-border/60 transition-all shadow-2xs hover:text-purple-600"
+            >
+              <i className="bi bi-eye-fill text-purple-600" />
+              <span>Ver Checkout (Demo)</span>
+            </Link>
+            <Link
               to="/docs?tab=deposits"
               className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 active:scale-[0.98] px-3.5 py-2 text-xs font-bold text-white transition-all shadow-xs"
             >
@@ -175,60 +211,83 @@ export function MerchantDepositsPage() {
         </div>
       </div>
 
-      {/* CONFIGURAÇÃO DE MOEDAS ACEITAS & SIMULADOR DE COBRANÇA */}
+      {/* GERADOR DE INTEGRAÇÃO */}
       <div className="rounded-3xl border border-border bg-paper p-5 sm:p-6 shadow-xs space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 border-b border-border/80 pb-3">
           <div className="flex items-center gap-2">
-            <i className="bi bi-sliders text-bitcoin text-base" />
-            <h2 className="text-sm sm:text-base font-black text-ink">
-              Moedas Aceitas pelo Comerciante (Configuração do seu Site)
-            </h2>
+            <i className="bi bi-code-slash text-bitcoin text-base" />
+            <h2 className="text-sm sm:text-base font-black text-ink">Gerar sua integração</h2>
           </div>
-          <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-600 bg-emerald-500/10 px-2.5 py-0.5 rounded-full self-start sm:self-auto">
-            Configurável por Fatura / API
-          </span>
+          <Link
+            to="/pay/demo"
+            className="text-[11px] font-bold text-purple-600 hover:underline self-start sm:self-auto"
+          >
+            Ver o checkout de demonstração →
+          </Link>
         </div>
 
+        <p className="text-xs text-ink-muted leading-relaxed">
+          Escolha a moeda e o valor e copie o código pronto. O seu backend cria a fatura e recebe o{' '}
+          <code className="font-mono font-bold text-ink">checkoutUrl</code>; o botão só leva o cliente até lá, então
+          nenhuma chave de API vai para o navegador.
+        </p>
+
         <div className="space-y-2">
-          <label className="block text-xs font-bold text-ink">
-            Selecione quais moedas seu estabelecimento aceita receber:
-          </label>
+          <label className="block text-xs font-bold text-ink">Moeda da cobrança:</label>
           <div className="flex flex-wrap gap-1.5">
             {COINS.map((c) => {
-              const active = enabledCoins.includes(c);
+              const paused = isDepositWithdrawPaused(c);
+              const active = snippetCoin === c;
               return (
                 <button
                   key={c}
                   type="button"
-                  onClick={() => toggleCoin(c)}
+                  disabled={paused}
+                  onClick={() => setSnippetCoin(c)}
+                  title={paused ? 'Depósitos desta moeda estão temporariamente pausados' : undefined}
                   className={clsx(
                     'flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-bold transition-all border',
-                    active
-                      ? 'bg-bitcoin text-white border-bitcoin shadow-xs scale-102'
-                      : 'bg-surface text-ink-muted border-border hover:text-ink hover:bg-paper',
+                    paused
+                      ? 'cursor-not-allowed border-border bg-surface text-ink-muted/50 line-through'
+                      : active
+                        ? 'bg-bitcoin text-white border-bitcoin shadow-xs scale-102'
+                        : 'bg-surface text-ink-muted border-border hover:text-ink hover:bg-paper',
                   )}
                 >
                   <img src={coinLogo(c)} alt={c} className="h-3.5 w-3.5 rounded-full object-contain" />
                   <span>{c}</span>
-                  {active && <i className="bi bi-check2 font-bold text-xs" />}
+                  {active && !paused && <i className="bi bi-check2 font-bold text-xs" />}
                 </button>
               );
             })}
           </div>
+          <p className="text-[11px] text-ink-muted">
+            Moedas riscadas estão com depósito pausado e devolvem{' '}
+            <code className="font-mono">503 DEPOSIT_PAUSED</code> na criação da fatura.
+          </p>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2 border-t border-border/60 items-end">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2 border-t border-border/60 items-start">
           <div>
             <label className="block text-[11px] uppercase font-bold text-ink-muted mb-1">
-              Quantidade de Tokens (Crypto Amount):
+              Valor em {snippetCoin}:
             </label>
             <input
               type="text"
               value={amountTokens}
               onChange={(e) => setAmountTokens(e.target.value)}
               className="input w-full font-mono text-xs font-bold"
-              placeholder="25.00"
+              placeholder="25"
             />
+            {ledgerUnits ? (
+              <p className="mt-1 text-[11px] text-ink-muted">
+                A API recebe <code className="font-mono font-bold text-ink">"{ledgerUnits}"</code> (unidades de 1e-8).
+              </p>
+            ) : (
+              <p className="mt-1 text-[11px] font-bold text-rose-600">
+                Valor inválido — use no máximo 8 casas decimais.
+              </p>
+            )}
           </div>
           <div>
             <label className="block text-[11px] uppercase font-bold text-ink-muted mb-1">
@@ -241,17 +300,47 @@ export function MerchantDepositsPage() {
               className="input w-full font-mono text-xs font-bold"
               placeholder="ORD-88219"
             />
+            <p className="mt-1 text-[11px] text-ink-muted">
+              Único por pedido — repetir devolve a mesma fatura.
+            </p>
           </div>
           <div>
-            <Link
-              to="/deposit"
-              className="w-full rounded-2xl bg-bitcoin hover:bg-bitcoin-dark text-white font-bold py-2.5 px-4 text-xs shadow-md shadow-bitcoin/25 transition-all flex items-center justify-center gap-2 active:scale-95"
+            <label className="block text-[11px] uppercase font-bold text-ink-muted mb-1">Copiar:</label>
+            <div className="flex gap-1.5">
+              {(['curl', 'button'] as const).map((k) => (
+                <button
+                  key={k}
+                  type="button"
+                  onClick={() => setSnippetKind(k)}
+                  className={clsx(
+                    'rounded-xl px-3 py-2 text-[11px] font-bold border transition-all',
+                    snippetKind === k
+                      ? 'bg-bitcoin text-white border-bitcoin'
+                      : 'bg-surface text-ink-muted border-border hover:text-ink',
+                  )}
+                >
+                  {k === 'curl' ? '1. Criar fatura' : '2. Botão'}
+                </button>
+              ))}
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                navigator.clipboard?.writeText(snippet);
+                setSnippetCopied(true);
+                setTimeout(() => setSnippetCopied(false), 1500);
+              }}
+              className="mt-1.5 w-full rounded-xl border border-border bg-surface hover:bg-paper py-2 text-[11px] font-bold text-ink transition"
             >
-              <i className="bi bi-qr-code text-sm" />
-              <span>Ver meus endereços HD</span>
-            </Link>
+              <i className={clsx('bi', snippetCopied ? 'bi-check2 text-emerald-600' : 'bi-clipboard')} />{' '}
+              {snippetCopied ? 'Copiado!' : 'Copiar código'}
+            </button>
           </div>
         </div>
+
+        <pre className="overflow-x-auto rounded-2xl border border-border bg-[#090D16] p-4 font-mono text-[11px] leading-relaxed text-emerald-400/95">
+          {snippet}
+        </pre>
       </div>
 
       {/* WEBHOOK TEST RESULT BANNER */}

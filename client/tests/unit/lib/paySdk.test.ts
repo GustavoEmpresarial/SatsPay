@@ -33,7 +33,34 @@ describe('satspay-pay.js', () => {
     expect(link).toBeTruthy();
     expect(link.href).toBe('https://www.satspay.pro/pay/abc-123');
     expect(link.textContent).toContain('Pagar com SatsPay');
-    expect(link.querySelector('svg'), 'button must carry the brand mark').toBeTruthy();
+  });
+
+  it('carries the real SatsPay logo, not a drawn stand-in', () => {
+    const body = load('<div class="satspay-pay" data-checkout_url="https://www.satspay.pro/pay/x"></div>');
+    const img = body.querySelector('img') as HTMLImageElement;
+    expect(img, 'button must show the brand mark').toBeTruthy();
+    expect(img.src).toContain('/sdk/satspay-logo.png');
+    expect(img.alt).toBe('');
+    expect(img.getAttribute('aria-hidden')).toBe('true');
+  });
+
+  it('falls back to an inline mark if the logo fails to load', () => {
+    // A broken image on a payment button is worse than a plain glyph.
+    const body = load('<div class="satspay-pay" data-checkout_url="https://www.satspay.pro/pay/x"></div>');
+    const img = body.querySelector('img') as HTMLImageElement;
+    img.dispatchEvent(new Event('error'));
+    expect(body.querySelector('img')).toBeNull();
+    expect(body.querySelector('svg'), 'fallback mark must render').toBeTruthy();
+  });
+
+  it('offers a white theme', () => {
+    // "botão personalizado branco com a nossa logo"
+    const body = load(
+      '<div class="satspay-pay" data-checkout_url="https://www.satspay.pro/pay/x" data-theme="light"></div>',
+    );
+    const link = body.querySelector('a') as HTMLAnchorElement;
+    expect(link.style.background.replace(/\s/g, '')).toMatch(/#FFFFFF|rgb\(255,255,255\)/i);
+    expect(link.querySelector('img')).toBeTruthy();
   });
 
   it('never hands the browser a javascript: URL', () => {
@@ -52,8 +79,14 @@ describe('satspay-pay.js', () => {
       '<div class="satspay-pay" data-checkout_url="https://www.satspay.pro/pay/x" data-label="&lt;img src=x onerror=alert(1)&gt;"></div>',
     );
     const link = body.querySelector('a') as HTMLAnchorElement;
-    expect(link.querySelector('img'), 'label must not be injected as HTML').toBeNull();
-    expect(link.textContent).toContain('<img src=x onerror=alert(1)>');
+
+    // The button legitimately contains one <img>: the brand logo. The label
+    // must not be able to add another, nor bring an onerror handler with it.
+    const imgs = Array.from(link.querySelectorAll('img'));
+    expect(imgs).toHaveLength(1);
+    expect(imgs[0].src).toContain('/sdk/satspay-logo.png');
+    expect(imgs[0].getAttribute('onerror')).toBeNull();
+    expect(link.querySelector('span')!.textContent).toBe('<img src=x onerror=alert(1)>');
   });
 
   it('disables itself when no checkout URL is given', () => {

@@ -843,9 +843,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                   badge="Sem chave no navegador"
                 />
                 <p className="text-xs sm:text-sm text-ink-muted">
-                  Seu backend cria a fatura e entrega o <code className="font-mono font-bold text-ink">checkoutUrl</code> ao
-                  botão — que só leva o cliente até o checkout hospedado. Nenhuma chave de API vai para o navegador, e o
-                  valor não pode ser adulterado no DevTools, porque o link já foi emitido pelo seu servidor.
+                  Botão oficial com a logo SatsPay, em quatro temas (inclusive <b>branco</b>), três tamanhos e três
+                  formatos. Seu backend cria a fatura e entrega o{' '}
+                  <code className="font-mono font-bold text-ink">checkoutUrl</code> ao botão — que só leva o cliente até o
+                  checkout hospedado. Nenhuma chave de API vai para o navegador, e o valor não pode ser adulterado no
+                  DevTools, porque o link já foi emitido pelo seu servidor.
                 </p>
 
                 <CodeBlock
@@ -866,7 +868,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 <ParamsTable
                   params={[
                     { name: 'data-checkout_url', type: 'String', required: true, desc: 'O checkoutUrl devolvido pela criação da fatura. Só https/http é aceito — javascript: é recusado e o botão fica desabilitado.', example: `"${API_BASE}/pay/:id"` },
-                    { name: 'data-theme', type: 'String', required: false, desc: 'bitcoin (padrão), dark, light ou outline.', example: '"bitcoin"' },
+                    { name: 'data-theme', type: 'String', required: false, desc: 'bitcoin (padrão, laranja), light (branco com a logo), dark (escuro) ou outline (contorno).', example: '"light"' },
                     { name: 'data-size', type: 'String', required: false, desc: 'small, medium (padrão) ou large.', example: '"large"' },
                     { name: 'data-shape', type: 'String', required: false, desc: 'rounded (padrão), pill ou square.', example: '"pill"' },
                     { name: 'data-label', type: 'String', required: false, desc: 'Texto do botão. Tratado como texto puro, nunca como HTML.', example: '"Pagar com cripto"' },
