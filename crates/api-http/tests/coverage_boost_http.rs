@@ -13,6 +13,14 @@ use uuid::Uuid;
 const HOT_MNEMONIC: &str =
     "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
 
+/// `std::env` is process-global, but `#[sqlx::test]` runs every test in this
+/// binary in parallel. Tests that set `HOT_MNEMONIC` / `CHAIN_NETWORK` /
+/// `SWAP_HOUSE_ENABLED` must therefore not overlap: otherwise one test's
+/// mnemonic is read while another builds its `AppState`, and the treasury /
+/// swap assertions fail at random. Hold the guard for the whole test, since
+/// the chain registry reads these variables lazily.
+static ENV_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 async fn oneshot(
     state: api_http::AppState<db::auth::PgAuthRepo>,
     req: axum::http::Request<Body>,
@@ -349,6 +357,7 @@ async fn oauth_edges_and_basic_auth(pool: PgPool) {
 
 #[sqlx::test(migrations = "../db/migrations")]
 async fn admin_forbidden_sweep_and_treasury_hot(pool: PgPool) {
+    let _env = ENV_LOCK.lock().await;
     std::env::set_var("HOT_MNEMONIC", HOT_MNEMONIC);
     std::env::set_var("CHAIN_NETWORK", "mainnet");
 
@@ -478,19 +487,53 @@ async fn admin_forbidden_sweep_and_treasury_hot(pool: PgPool) {
         assert_eq!(st, axum::http::StatusCode::BAD_REQUEST, "{path}");
     }
 
-    // Conflict arms on fake withdrawal approve/reject
-    let (st, _, _) = oneshot(
+    // Approve now always demands a step-up OTP first, so a JWT-only call is
+    // answered with `codeSent` and never reaches the withdrawal at all.
+    let (st, body, _) = oneshot(
         state.clone(),
         axum::http::Request::builder()
             .method("POST")
             .uri(format!("/v1/admin/withdrawals/{fake}/approve"))
+            .header("content-type", "application/json")
             .header("authorization", format!("Bearer {admin_token}"))
             .header("x-real-ip", "203.0.113.121")
-            .body(Body::empty())
+            .body(Body::from(serde_json::json!({}).to_string()))
             .unwrap(),
     )
     .await;
-    assert_eq!(st, axum::http::StatusCode::CONFLICT);
+    assert_eq!(st, axum::http::StatusCode::OK, "{body}");
+    assert_eq!(body["codeSent"], true);
+
+    // With the code, it gets through the gate and hits the real conflict arm.
+    let admin_id: Uuid =
+        sqlx::query_scalar("SELECT id FROM users WHERE lower(email) = 'admin@bitcosats.test'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    let otp_hash = crypto::hash_password("123456").unwrap();
+    sqlx::query(
+        "INSERT INTO email_otps (user_id, purpose, code_hash, expires_at) \
+         VALUES ($1, 'LOGIN', $2, now() + interval '10 minutes')",
+    )
+    .bind(admin_id)
+    .bind(&otp_hash)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let (st, body, _) = oneshot(
+        state.clone(),
+        axum::http::Request::builder()
+            .method("POST")
+            .uri(format!("/v1/admin/withdrawals/{fake}/approve"))
+            .header("content-type", "application/json")
+            .header("authorization", format!("Bearer {admin_token}"))
+            .header("x-real-ip", "203.0.113.121")
+            .body(Body::from(serde_json::json!({ "emailCode": "123456" }).to_string()))
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(st, axum::http::StatusCode::CONFLICT, "{body}");
 
     let (st, _, _) = oneshot(
         state,
@@ -723,6 +766,7 @@ async fn swap_dex_swapkit_api_errors(pool: PgPool) {
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
+    let _env = ENV_LOCK.lock().await;
     std::env::set_var("HOT_MNEMONIC", HOT_MNEMONIC);
     common::seed_price_cache(&pool).await;
 
@@ -878,6 +922,7 @@ async fn swap_dex_swapkit_api_errors(pool: PgPool) {
 
 #[sqlx::test(migrations = "../db/migrations")]
 async fn wallet_ledger_and_swap_quote_edges(pool: PgPool) {
+    let _env = ENV_LOCK.lock().await;
     std::env::set_var("SWAP_HOUSE_ENABLED", "true");
     common::seed_price_cache(&pool).await;
     let (state, token, user_id, _) = common::register_user(pool.clone(), "wledg").await;

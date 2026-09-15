@@ -340,6 +340,7 @@ async fn merchant_invoice_pay_confirm_webhook(pool: PgPool) {
             coin: Coin::Btc,
             amount: BigDecimal::from(1_000_000u64),
             deposit_address: "bc1qinvoice".into(),
+            hd_index: Some(7),
             callback_url: "https://shop.example/cb".into(),
             success_url: None,
             cancel_url: None,
@@ -347,6 +348,10 @@ async fn merchant_invoice_pay_confirm_webhook(pool: PgPool) {
             customer_name: Some("Cust".into()),
             description: Some("order".into()),
             expiry_minutes: Some(60),
+            accepted_coins: vec![],
+            price_usd_scaled: None,
+            price_decimals: None,
+            quote_price_scaled: None,
         },
     )
     .await
@@ -382,6 +387,7 @@ async fn merchant_invoice_pay_confirm_webhook(pool: PgPool) {
             coin: Coin::Btc,
             amount: BigDecimal::from(500_000u64),
             deposit_address: "bc1qin2".into(),
+            hd_index: None,
             callback_url: "https://shop.example/cb".into(),
             success_url: None,
             cancel_url: None,
@@ -389,6 +395,10 @@ async fn merchant_invoice_pay_confirm_webhook(pool: PgPool) {
             customer_name: None,
             description: None,
             expiry_minutes: Some(30),
+            accepted_coins: vec![],
+            price_usd_scaled: None,
+            price_decimals: None,
+            quote_price_scaled: None,
         },
     )
     .await

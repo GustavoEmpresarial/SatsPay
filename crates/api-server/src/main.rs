@@ -127,6 +127,23 @@ async fn main() {
         }
     }
 
+    // Absolute origin for hosted checkout links. Explicit `PUBLIC_BASE_URL`
+    // wins; otherwise reuse the first CORS origin so no new required env is
+    // introduced for existing deployments.
+    let public_base_url = std::env::var("PUBLIC_BASE_URL")
+        .ok()
+        .map(|s| s.trim().trim_end_matches('/').to_string())
+        .filter(|s| !s.is_empty())
+        .or_else(|| {
+            std::env::var("CORS_ORIGIN").ok().and_then(|raw| {
+                raw.split(',')
+                    .map(str::trim)
+                    .find(|o| !o.is_empty())
+                    .map(|o| o.trim_end_matches('/').to_string())
+            })
+        })
+        .unwrap_or_else(|| "https://www.satspay.pro".to_string());
+
     let settings = api_http::AppSettings {
         faucet_cooldown_minutes: required_env("FAUCET_COOLDOWN_MINUTES"),
         public_api_daily_send_limit: required_env("PUBLIC_API_DAILY_SEND_LIMIT"),
@@ -135,6 +152,7 @@ async fn main() {
         price_max_stale: std::time::Duration::from_secs(required_env("PRICE_MAX_STALE_SECS")),
         public_api_signature_max_skew: std::time::Duration::from_secs(required_env("PUBLIC_API_SIGNATURE_MAX_SKEW_SECS")),
         smtp_enabled: std::env::var("SMTP_ENABLED").map(|v| v == "true").unwrap_or(false),
+        public_base_url,
     };
 
     let state = api_http::AppState {

@@ -289,24 +289,89 @@ export function DocumentationPage() {
                 </div>
                 <div>
                   <h2 className="text-xl font-bold text-ink">Sistemas para Comerciantes & Desenvolvedores</h2>
-                  <p className="text-xs text-ink-muted">Emissão de chaves de API, carteiras corporativas e assinatura HMAC</p>
+                  <p className="text-xs text-ink-muted">Gateway de cobranças, checkout hospedado, chaves de API e webhooks assinados</p>
                 </div>
               </div>
 
               <div className="prose text-sm text-ink-muted space-y-4">
                 <p>
-                  O BitcoSats oferece ferramentas completas para empresas, comerciantes e desenvolvedores que desejam aceitar ou enviar criptoativos programaticamente:
+                  O SatsPay entrega duas coisas diferentes para quem vende: um <strong>gateway de
+                  cobranças</strong> com checkout hospedado, e uma <strong>API de envios</strong> para
+                  automatizar pagamentos. As duas usam a mesma credencial de servidor.
                 </p>
-                <h3 className="text-base font-bold text-ink pt-2">Chaves de API & Assinatura Criptográfica HMAC</h3>
+
+                <h3 className="text-base font-bold text-ink pt-2">Gateway de cobranças</h3>
                 <p>
-                  As chaves de API permitem automatizar transferências de fundos. Quando configurada com <code>requireSignature = true</code>, cada requisição deve ser assinada com HMAC-SHA256 contendo timestamp, nonce e hash do payload para prevenir ataques de repetição (*replay attacks*).
+                  O seu backend cria a fatura, o cliente paga numa página sob o domínio oficial, e você
+                  recebe um webhook assinado quando o pagamento confirma na blockchain. Em resumo:
                 </p>
+                <ol className="list-decimal pl-5 space-y-1.5 text-sm">
+                  <li>
+                    <strong>Credenciamento</strong> — <code>POST /v1/merchant/apply</code>. Enquanto o
+                    pedido não for aprovado, criar fatura responde <code>403</code>.
+                  </li>
+                  <li>
+                    <strong>Chave de API</strong> — emitida com escopo <code>deposits</code>. O segredo
+                    aparece uma única vez; ele vive no seu servidor e <strong>nunca</strong> no navegador.
+                  </li>
+                  <li>
+                    <strong>Cobrança</strong> — <code>POST /v1/merchant/deposits</code>. Você informa a
+                    moeda e a quantia, ou apenas <code>amountUsd</code> e deixa o cliente escolher a moeda.
+                  </li>
+                  <li>
+                    <strong>Checkout</strong> — redirecione para o <code>checkoutUrl</code> da resposta, ou
+                    use o botão oficial (<code>/sdk/satspay-pay.js</code>), que só navega até esse link.
+                  </li>
+                  <li>
+                    <strong>Webhook</strong> — <code>deposit.confirmed</code>, assinado em
+                    <code> X-SatsPay-Signature</code>. Confirme sempre pela assinatura, nunca pelo
+                    redirecionamento do navegador.
+                  </li>
+                </ol>
+
+                <h3 className="text-base font-bold text-ink pt-2">O cliente escolhe como pagar</h3>
+                <p>
+                  Você define quais moedas aceita no painel; quem paga escolhe entre elas no checkout. A
+                  cotação trava no instante da escolha e vale até a fatura vencer. Se você cobrou em
+                  dólar, a variação de preço entre a trava e o pagamento é sua — a plataforma não absorve
+                  nem repassa nada além da taxa.
+                </p>
+                <p>
+                  A <strong>taxa do gateway é de 0,25%</strong>, igual para todo comerciante, descontada
+                  da fatura: <code>feeAmount + netAmount</code> é exatamente o valor cobrado.
+                </p>
+
+                <h3 className="text-base font-bold text-ink pt-2">Quantias são inteiros</h3>
+                <p>
+                  Todo campo <code>amount</code> da API é um <strong>inteiro em unidades de 1e-8</strong>,
+                  em qualquer moeda: 25 USDT é <code>"2500000000"</code>, não <code>"25.00"</code>. A
+                  única exceção é <code>amountUsd</code>, que é decimal porque é dinheiro fiat. Mandar
+                  decimal onde se espera inteiro responde <code>400 AMOUNT_NOT_INTEGER</code> em vez de
+                  cobrar o valor errado.
+                </p>
+
+                <h3 className="text-base font-bold text-ink pt-2">Chaves de API e assinatura HMAC</h3>
+                <p>
+                  Uma chave pode ser restrita por escopo, por lista de IPs e por validade. Com{' '}
+                  <code>requireSignature = true</code>, cada requisição precisa vir assinada em
+                  HMAC-SHA256 sobre <code>timestamp + método + caminho + hash do corpo</code> — e a
+                  própria assinatura é reservada como uso único, o que impede repetição sem precisar de
+                  um nonce separado.
+                </p>
+
                 <div className="flex flex-wrap gap-3 pt-2">
-                  <Link to="/api-keys" className="btn-primary text-xs">
+                  <Link to="/docs?tab=start" className="btn-primary text-xs">
+                    Começar do zero →
+                  </Link>
+                  <Link to="/api-keys" className="btn-secondary text-xs">
                     Gerenciar API Keys →
                   </Link>
-                  <Link to="/docs" className="btn-secondary text-xs">
-                    Ver Especificação da API →
+                  <Link to="/docs?tab=deposits" className="btn-secondary text-xs">
+                    Gateway de cobranças →
+                  </Link>
+                  <Link to="/pay/demo" className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 font-bold text-xs px-3.5 py-2 flex items-center gap-1.5 transition-all">
+                    <i className="bi bi-qr-code" />
+                    <span>Ver o checkout de demonstração</span>
                   </Link>
                   <Link to="/docs?tab=simulator" className="rounded-xl border border-purple-500/30 bg-purple-500/10 hover:bg-purple-500/20 text-purple-600 font-bold text-xs px-3.5 py-2 flex items-center gap-1.5 transition-all">
                     <i className="bi bi-cpu" />

@@ -28,6 +28,10 @@ pub struct AppSettings {
     /// OTP even if the account has not enabled 2FA. Admin withdrawal approve
     /// always requires step-up OTP regardless of this flag.
     pub smtp_enabled: bool,
+    /// Public origin the hosted checkout is reachable at (no trailing slash) —
+    /// used to build the absolute `checkoutUrl` merchants redirect to. From
+    /// `PUBLIC_BASE_URL`, else the first `CORS_ORIGIN` entry.
+    pub public_base_url: String,
 }
 
 /// Shared axum state — auth service (generic over its repo) plus raw

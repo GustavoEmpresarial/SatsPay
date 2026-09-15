@@ -18,6 +18,7 @@ pub mod oauth;
 pub mod oauth_pkce;
 pub mod oauth_redirect;
 pub mod public_api;
+pub mod public_catalog;
 pub mod rate_limit;
 pub mod referral;
 pub mod rewards;
@@ -79,6 +80,7 @@ fn route_tree<R: AuthRepo + 'static>() -> Router<AppState<R>> {
         .merge(merchant_deposits::routes::<R>())
         .merge(admin::routes::<R>())
         .merge(public_api::routes::<R>())
+        .merge(public_catalog::routes::<R>())
         .merge(rewards::routes::<R>())
         .merge(referral::routes::<R>())
         .merge(airdrop::routes::<R>())

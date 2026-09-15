@@ -365,7 +365,9 @@ async fn merchant_public_pay_alias_without_v1(pool: PgPool) {
 
     let (state_p, payer_token, payer_id, _) = common::register_user(pool, "alias-payer").await;
     let payer_uid = Uuid::parse_str(&payer_id).unwrap();
-    common::credit_personal(&state_p.pool, payer_uid, Coin::Btc, 5_000_000).await;
+    // Must be the invoice's coin: seeding BTC left the POL wallet empty, so
+    // this assertion had been failing on `insufficient balance`.
+    common::credit_personal(&state_p.pool, payer_uid, Coin::Pol, 5_000_000).await;
 
     let (st, paid) = oneshot(
         state_p,

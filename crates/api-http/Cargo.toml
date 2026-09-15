@@ -14,6 +14,7 @@ crypto = { path = "../crypto" }
 captcha.workspace = true
 queue.workspace = true
 swapkit = { path = "../swapkit" }
+webhooks.workspace = true
 uuid.workspace = true
 bigdecimal.workspace = true
 chrono.workspace = true

@@ -367,3 +367,41 @@ export interface WalletBalance {
   address?: string | null;
 }
 
+
+/**
+ * Renders a ledger amount as a quantity of coins.
+ *
+ * Unlike `formatAmount`, this tolerates a fractional ledger value: rows
+ * written before the API rejected decimal `amount` hold things like "7.2"
+ * (7.2 units of 1e-8, not 7.2 coins). Showing the raw value told the merchant
+ * they had charged 7.2 POL when the invoice actually asked for 0.000000072.
+ */
+export function formatLedgerAmount(raw: string | number | null | undefined, coin: Coin): string {
+  const text = String(raw ?? '').trim();
+  if (!text || !/^\d*\.?\d*$/.test(text)) return '0';
+
+  const [whole = '0', frac = ''] = text.split('.');
+  const scale = INTERNAL_AMOUNT_DECIMALS;
+  // Shift the decimal point left by `scale` places, with string math so no
+  // precision is lost on large amounts.
+  const digits = `${whole}${frac}`.replace(/^0+(?=\d)/, '') || '0';
+  const pointFromRight = frac.length + scale;
+  const padded = digits.padStart(pointFromRight + 1, '0');
+  const head = padded.slice(0, padded.length - pointFromRight) || '0';
+  const tail = padded.slice(padded.length - pointFromRight).replace(/0+$/, '');
+  return tail ? `${head}.${tail}` : head;
+}
+
+/**
+ * "25" (coins) → "2500000000" (ledger units of 1e-8), or null when the input
+ * is not a quantity the ledger can hold. The inverse of
+ * `formatLedgerAmount`. String math on purpose: floats lose the last satoshi.
+ */
+export function toLedgerUnits(input: string): string | null {
+  const t = input.trim().replace(',', '.');
+  if (t === '' || t === '.' || !/^\d*\.?\d*$/.test(t)) return null;
+  const [whole = '0', frac = ''] = t.split('.');
+  if (frac.length > INTERNAL_AMOUNT_DECIMALS) return null;
+  const units = `${whole}${frac.padEnd(INTERNAL_AMOUNT_DECIMALS, '0')}`.replace(/^0+(?=\d)/, '');
+  return units === '' || /^0+$/.test(units) ? null : units;
+}

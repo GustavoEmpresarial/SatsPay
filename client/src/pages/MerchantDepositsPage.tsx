@@ -1,9 +1,10 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api.js';
 import { coinLogo } from '../lib/coinAssets.js';
-import { COINS, type Coin } from '@/shared';
+import { COINS, formatLedgerAmount, toLedgerUnits, type Coin } from '@/shared';
+import { CodeBlock, EndpointHeader, MultiLangCodeBlock } from '../components/ApiSnippets.js';
 import { clsx } from 'clsx';
 
 interface InvoiceItem {
@@ -27,11 +28,22 @@ interface InvoiceItem {
   createdAt: string;
 }
 
+declare global {
+  interface Window {
+    SatsPay?: { renderButtons?: (root?: ParentNode) => number };
+  }
+}
+
 interface WebhookTestResult {
   delivered?: boolean;
   statusCode?: number;
   error?: string;
 }
+
+/** Absolute origin for copy-paste snippets. */
+const ORIGIN = typeof window !== 'undefined' && window.location?.origin
+  ? window.location.origin
+  : 'https://www.satspay.pro';
 
 export function MerchantDepositsPage() {
   const qc = useQueryClient();
@@ -39,35 +51,60 @@ export function MerchantDepositsPage() {
   const [filterStatus, setFilterStatus] = useState<string>('ALL');
   const [testResult, setTestResult] = useState<{ id: string; msg: string } | null>(null);
 
-  // Configuração das Moedas Aceitas pelo Comerciante
-  const [enabledCoins, setEnabledCoins] = useState<Coin[]>([
-    'BTC',
-    'LTC',
-    'DOGE',
-    'BCH',
-    'POL',
-    'DGB',
-    'SOL',
-    'USDT',
-    'USDC',
-  ]);
-  const [amountTokens, setAmountTokens] = useState<string>('25.00');
-  const [orderId, setOrderId] = useState<string>('ORD-88219');
+  // Preview rendered by the real SDK, so what the merchant sees here is
+  // literally what their customer gets — a hand-built imitation would drift
+  // from the script the moment either changed.
+  const buttonPreviewRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const SRC = `${ORIGIN}/sdk/satspay-pay.js`;
+    const render = () => window.SatsPay?.renderButtons?.(buttonPreviewRef.current ?? undefined);
 
-  const toggleCoin = (c: Coin) => {
-    if (enabledCoins.includes(c)) {
-      if (enabledCoins.length === 1) return;
-      setEnabledCoins(enabledCoins.filter((item) => item !== c));
-    } else {
-      setEnabledCoins([...enabledCoins, c]);
+    if (window.SatsPay?.renderButtons) {
+      render();
+      return;
     }
-  };
+    const existing = document.querySelector<HTMLScriptElement>(`script[src="${SRC}"]`);
+    if (existing) {
+      existing.addEventListener('load', render, { once: true });
+      return;
+    }
+    const script = document.createElement('script');
+    script.src = SRC;
+    script.async = true;
+    script.addEventListener('load', render, { once: true });
+    document.head.appendChild(script);
+  }, []);
 
   const { data, isLoading } = useQuery<{ invoices: InvoiceItem[] }>({
     queryKey: ['merchant-deposits'],
     queryFn: () => api('/merchant/deposits'),
     refetchInterval: 5000,
   });
+
+  // Coins this merchant accepts on the hosted checkout. The old panel with
+  // this name persisted nothing; this one round-trips to the server.
+  const settingsQ = useQuery<{ acceptedCoins: Coin[]; availableCoins: Coin[] }>({
+    queryKey: ['merchant-settings'],
+    queryFn: () => api('/merchant/settings'),
+  });
+  const acceptedCoins = settingsQ.data?.acceptedCoins ?? [];
+  const availableCoins = settingsQ.data?.availableCoins ?? [];
+
+  const saveSettingsMut = useMutation({
+    mutationFn: (coins: Coin[]) =>
+      api('/merchant/settings', { method: 'PUT', json: { acceptedCoins: coins } }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['merchant-settings'] }),
+  });
+
+  const toggleAccepted = (c: Coin) => {
+    const next = acceptedCoins.includes(c)
+      ? acceptedCoins.filter((x) => x !== c)
+      : [...acceptedCoins, c];
+    // The API refuses a selection with nothing payable in it; do not even
+    // send that request.
+    if (next.length === 0) return;
+    saveSettingsMut.mutate(next);
+  };
 
   const testWebhookMut = useMutation({
     mutationFn: (invId: string) =>
@@ -116,30 +153,24 @@ export function MerchantDepositsPage() {
           </p>
         </div>
 
-        {/* Cohesive Action Toolbar */}
-        <div className="flex items-center gap-2 flex-wrap self-start lg:self-auto">
-          <div className="inline-flex items-center gap-1.5 p-1 rounded-2xl bg-surface border border-border shadow-2xs">
-            <Link
-              to="/deposit"
-              className="inline-flex items-center gap-2 rounded-xl bg-paper hover:bg-surface-hover active:scale-[0.98] px-3.5 py-2 text-xs font-bold text-ink border border-border/60 transition-all shadow-2xs hover:text-bitcoin"
-            >
-              <i className="bi bi-qr-code text-bitcoin" />
-              <span>Endereços de Depósito</span>
-            </Link>
-            <Link
-              to="/api-keys"
-              className="inline-flex items-center gap-2 rounded-xl bg-paper hover:bg-surface-hover active:scale-[0.98] px-3.5 py-2 text-xs font-bold text-ink border border-border/60 transition-all shadow-2xs hover:text-amber-600"
-            >
-              <i className="bi bi-key-fill text-amber-500" />
-              <span>Chaves de API</span>
-            </Link>
-            <Link
-              to="/docs?tab=deposits"
-              className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 active:scale-[0.98] px-3.5 py-2 text-xs font-bold text-white transition-all shadow-xs"
-            >
-              <i className="bi bi-book-half" />
-              <span>Documentação</span>
-            </Link>
+        {/* Cohesive Action Toolbar — one size for all four */}
+        <div className="w-full lg:w-auto">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 p-1.5 rounded-2xl bg-surface border border-border shadow-2xs">
+            {[
+              { to: '/deposit', icon: 'bi-qr-code', accent: 'text-bitcoin', label: 'Endereços de Depósito' },
+              { to: '/api-keys', icon: 'bi-key-fill', accent: 'text-amber-500', label: 'Chaves de API' },
+              { to: '/pay/demo', icon: 'bi-eye-fill', accent: 'text-purple-600', label: 'Ver Checkout (Demo)' },
+              { to: '/docs?tab=deposits', icon: 'bi-book-half', accent: 'text-emerald-600', label: 'Documentação' },
+            ].map((b) => (
+              <Link
+                key={b.to}
+                to={b.to}
+                className="flex h-full items-center justify-center gap-2 rounded-xl bg-paper hover:bg-surface-hover active:scale-[0.98] px-3 py-2.5 text-center text-xs font-bold text-ink border border-border/60 transition-all shadow-2xs"
+              >
+                <i className={clsx('bi', b.icon, b.accent)} />
+                <span>{b.label}</span>
+              </Link>
+            ))}
           </div>
         </div>
       </header>
@@ -175,83 +206,115 @@ export function MerchantDepositsPage() {
         </div>
       </div>
 
-      {/* CONFIGURAÇÃO DE MOEDAS ACEITAS & SIMULADOR DE COBRANÇA */}
+      {/* MOEDAS ACEITAS — configuração real, separada da documentação */}
+      <div className="rounded-3xl border border-border bg-paper p-5 sm:p-6 shadow-xs space-y-3">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 border-b border-border/80 pb-3">
+          <div className="flex items-center gap-2">
+            <i className="bi bi-coin text-bitcoin text-base" />
+            <h2 className="text-sm sm:text-base font-black text-ink">Moedas que você aceita receber</h2>
+          </div>
+          {saveSettingsMut.isPending && <span className="text-[11px] text-ink-muted">salvando…</span>}
+          {saveSettingsMut.isError && (
+            <span className="text-[11px] font-bold text-rose-600">não foi possível salvar</span>
+          )}
+        </div>
+
+        <div className="flex flex-wrap gap-1.5">
+          {availableCoins.map((c) => {
+            const on = acceptedCoins.includes(c);
+            return (
+              <button
+                key={c}
+                type="button"
+                data-testid={`accepted-coin-${c}`}
+                disabled={saveSettingsMut.isPending}
+                onClick={() => toggleAccepted(c)}
+                className={clsx(
+                  'flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-bold transition-all border',
+                  on
+                    ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs'
+                    : 'bg-surface text-ink-muted border-border hover:text-ink hover:bg-paper',
+                )}
+              >
+                <img src={coinLogo(c)} alt={c} className="h-3.5 w-3.5 rounded-full object-contain" />
+                <span>{c}</span>
+                {on && <i className="bi bi-check2 font-bold text-xs" />}
+              </button>
+            );
+          })}
+        </div>
+        <p className="text-[11px] text-ink-muted leading-relaxed">
+          Quando você cobra em dólar, é esta lista que o cliente vê para escolher como pagar. Moedas com depósito
+          pausado não aparecem aqui e nunca são oferecidas.
+        </p>
+      </div>
+
+      {/* BOTÃO DE PAGAMENTO — o botão de verdade, não uma imitação */}
       <div className="rounded-3xl border border-border bg-paper p-5 sm:p-6 shadow-xs space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 border-b border-border/80 pb-3">
           <div className="flex items-center gap-2">
-            <i className="bi bi-sliders text-bitcoin text-base" />
-            <h2 className="text-sm sm:text-base font-black text-ink">
-              Moedas Aceitas pelo Comerciante (Configuração do seu Site)
-            </h2>
+            <i className="bi bi-credit-card-2-front-fill text-bitcoin text-base" />
+            <h2 className="text-sm sm:text-base font-black text-ink">Botão de pagamento</h2>
           </div>
-          <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-600 bg-emerald-500/10 px-2.5 py-0.5 rounded-full self-start sm:self-auto">
-            Configurável por Fatura / API
-          </span>
+          <Link to="/docs?tab=deposits" className="text-[11px] font-bold text-bitcoin hover:underline self-start sm:self-auto">
+            Ver a documentação da API →
+          </Link>
         </div>
 
-        <div className="space-y-2">
-          <label className="block text-xs font-bold text-ink">
-            Selecione quais moedas seu estabelecimento aceita receber:
-          </label>
-          <div className="flex flex-wrap gap-1.5">
-            {COINS.map((c) => {
-              const active = enabledCoins.includes(c);
-              return (
-                <button
-                  key={c}
-                  type="button"
-                  onClick={() => toggleCoin(c)}
-                  className={clsx(
-                    'flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-bold transition-all border',
-                    active
-                      ? 'bg-bitcoin text-white border-bitcoin shadow-xs scale-102'
-                      : 'bg-surface text-ink-muted border-border hover:text-ink hover:bg-paper',
-                  )}
-                >
-                  <img src={coinLogo(c)} alt={c} className="h-3.5 w-3.5 rounded-full object-contain" />
-                  <span>{c}</span>
-                  {active && <i className="bi bi-check2 font-bold text-xs" />}
-                </button>
-              );
-            })}
+        <p className="text-xs text-ink-muted leading-relaxed">
+          Seu backend cria a fatura e recebe o <code className="font-mono text-ink font-bold">checkoutUrl</code>; o botão
+          só leva o cliente até lá. Nenhuma chave de API vai para o navegador e o valor não pode ser adulterado no
+          DevTools.
+        </p>
+
+        {/* Renderizado pelo próprio SDK: é exatamente o que o cliente vê. */}
+        <div className="rounded-2xl border border-border bg-surface p-5">
+          <div className="text-[10px] uppercase font-bold tracking-wider text-ink-muted mb-3">
+            Como fica no seu site
           </div>
+          <div ref={buttonPreviewRef} className="flex flex-wrap items-center gap-3">
+            <div
+              className="satspay-pay"
+              data-checkout_url="/pay/demo"
+              data-theme="bitcoin"
+              data-size="large"
+              data-label="Pagar com cripto"
+              data-target="blank"
+            />
+            <div
+              className="satspay-pay"
+              data-checkout_url="/pay/demo"
+              data-theme="light"
+              data-size="large"
+              data-label="Pagar com cripto"
+              data-target="blank"
+            />
+            <div
+              className="satspay-pay"
+              data-checkout_url="/pay/demo"
+              data-theme="dark"
+              data-size="medium"
+              data-shape="pill"
+              data-label="Pagar"
+              data-target="blank"
+            />
+          </div>
+          <p className="mt-3 text-[11px] text-ink-muted">
+            Botões reais, renderizados pelo SDK. Clicar abre o checkout de demonstração.
+          </p>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2 border-t border-border/60 items-end">
-          <div>
-            <label className="block text-[11px] uppercase font-bold text-ink-muted mb-1">
-              Quantidade de Tokens (Crypto Amount):
-            </label>
-            <input
-              type="text"
-              value={amountTokens}
-              onChange={(e) => setAmountTokens(e.target.value)}
-              className="input w-full font-mono text-xs font-bold"
-              placeholder="25.00"
-            />
-          </div>
-          <div>
-            <label className="block text-[11px] uppercase font-bold text-ink-muted mb-1">
-              Identificador do Pedido (orderId):
-            </label>
-            <input
-              type="text"
-              value={orderId}
-              onChange={(e) => setOrderId(e.target.value)}
-              className="input w-full font-mono text-xs font-bold"
-              placeholder="ORD-88219"
-            />
-          </div>
-          <div>
-            <Link
-              to="/deposit"
-              className="w-full rounded-2xl bg-bitcoin hover:bg-bitcoin-dark text-white font-bold py-2.5 px-4 text-xs shadow-md shadow-bitcoin/25 transition-all flex items-center justify-center gap-2 active:scale-95"
-            >
-              <i className="bi bi-qr-code text-sm" />
-              <span>Ver meus endereços HD</span>
-            </Link>
-          </div>
-        </div>
+        <CodeBlock
+          label="HTML"
+          code={`<script src="${ORIGIN}/sdk/satspay-pay.js" async defer></script>
+
+<div class="satspay-pay"
+     data-checkout_url="COLE_O_checkoutUrl_DA_FATURA"
+     data-theme="bitcoin"     <!-- bitcoin | light | dark | outline -->
+     data-size="large"        <!-- small | medium | large -->
+     data-shape="rounded"     <!-- rounded | pill | square -->
+     data-label="Pagar com cripto"></div>`}
+        />
       </div>
 
       {/* WEBHOOK TEST RESULT BANNER */}
@@ -382,7 +445,8 @@ export function MerchantDepositsPage() {
                       </td>
 
                       <td className="p-3.5 font-mono font-bold text-ink">
-                        {inv.amount} <span className="text-[10px] text-ink-muted">{inv.coin}</span>
+                        {formatLedgerAmount(inv.amount, inv.coin)}{' '}
+                        <span className="text-[10px] text-ink-muted">{inv.coin}</span>
                       </td>
 
                       <td className="p-3.5">
@@ -423,8 +487,15 @@ export function MerchantDepositsPage() {
                             <i className="bi bi-exclamation-triangle-fill text-xs" />
                             <span>Falha ({inv.webhookAttempts}x)</span>
                           </span>
+                        ) : isPaid ? (
+                          <span className="text-ink-muted text-[10px]">Aguardando envio</span>
                         ) : (
-                          <span className="text-ink-muted text-[10px]">Pendente</span>
+                          // A webhook only ever fires for a confirmed invoice.
+                          // Saying "pending" on an expired one promised a
+                          // delivery that was never going to happen.
+                          <span className="text-ink-muted/60 text-[10px]" title="Webhook só é enviado quando a fatura é confirmada">
+                            —
+                          </span>
                         )}
                       </td>
 

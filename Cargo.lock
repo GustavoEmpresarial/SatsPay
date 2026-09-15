@@ -104,6 +104,7 @@ dependencies = [
  "tracing",
  "url",
  "uuid",
+ "webhooks",
  "wiremock",
 ]
 
@@ -3598,6 +3599,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "webhooks"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "crypto",
+ "db",
+ "reqwest",
+ "serde_json",
+ "sqlx",
+ "tokio",
+ "tracing",
+ "url",
+ "uuid",
+ "wiremock",
+]
+
+[[package]]
 name = "webpki-roots"
 version = "1.0.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3884,6 +3902,7 @@ dependencies = [
  "bigdecimal",
  "chain",
  "chrono",
+ "crypto",
  "db",
  "events",
  "pricing",
@@ -3898,6 +3917,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid",
+ "webhooks",
 ]
 
 [[package]]

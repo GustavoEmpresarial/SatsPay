@@ -11,6 +11,8 @@ path = "src/main.rs"
 
 [dependencies]
 db.workspace = true
+crypto = { path = "../crypto" }
+webhooks.workspace = true
 events.workspace = true
 queue.workspace = true
 chain = { path = "../chain" }
