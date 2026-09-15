@@ -140,14 +140,17 @@ fn row_to_invoice(row: &sqlx::postgres::PgRow) -> MerchantDepositInvoice {
     }
 }
 
-/// Gateway fee in basis points: 0.5%.
-const GATEWAY_FEE_BPS: u32 = 50;
+/// Gateway fee in basis points: 0.25%. Single rate for every merchant —
+/// there is no per-merchant plan, so changing it here changes it for all.
+/// Documented on /docs and in docs/api/http-api-reference.md; keep those in
+/// step with this constant.
+pub const GATEWAY_FEE_BPS: u32 = 25;
 
 /// Splits `amount` into (fee, net) in **whole** ledger units.
 ///
 /// The ledger stores integer units of 1e-8, so the fee cannot carry a
-/// fractional part: `amount * 0.005` on 250001 is 1250.005, which would
-/// credit a fraction of the smallest representable unit and leave
+/// fractional part: 0.25% of 250001 is 625.0025, which would credit a
+/// fraction of the smallest representable unit and leave
 /// `fee + net != amount`. Truncating the fee keeps the identity exact and
 /// rounds in the merchant's favour by at most one unit.
 fn split_fee(amount: &BigDecimal) -> (BigDecimal, BigDecimal) {
@@ -631,10 +634,14 @@ mod fee_tests {
     }
 
     #[test]
-    fn fee_is_half_a_percent_truncated_down() {
-        assert_eq!(split_fee(&BigDecimal::from(250_000)).0, BigDecimal::from(1_250));
-        // 0.5% of 250001 is 1250.005 — truncating favours the merchant.
-        assert_eq!(split_fee(&BigDecimal::from(250_001)).0, BigDecimal::from(1_250));
+    fn fee_is_a_quarter_percent_truncated_down() {
+        assert_eq!(GATEWAY_FEE_BPS, 25, "the published rate is 0.25%");
+        assert_eq!(split_fee(&BigDecimal::from(250_000)).0, BigDecimal::from(625));
+        assert_eq!(split_fee(&BigDecimal::from(250_000)).1, BigDecimal::from(249_375));
+        // 0.25% of 250001 is 625.0025 — truncating favours the merchant.
+        assert_eq!(split_fee(&BigDecimal::from(250_001)).0, BigDecimal::from(625));
+        // 25 USDT in ledger units.
+        assert_eq!(split_fee(&BigDecimal::from(2_500_000_000u64)).0, BigDecimal::from(6_250_000));
         // Amounts too small to owe a whole unit of fee owe nothing.
         assert_eq!(split_fee(&BigDecimal::from(1)).0, BigDecimal::from(0));
         assert_eq!(split_fee(&BigDecimal::from(1)).1, BigDecimal::from(1));

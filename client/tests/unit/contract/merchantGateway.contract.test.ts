@@ -97,6 +97,27 @@ describe('contract: invoice list / detail casing', () => {
   });
 });
 
+describe('contract: gateway fee', () => {
+  it('publishes the rate the backend actually charges', () => {
+    // The fee is a single hardcoded rate; the docs page mirrors it in a
+    // constant. If one moves without the other, merchants are quoted a price
+    // the ledger does not honour.
+    const backend = /pub const GATEWAY_FEE_BPS: u32 = (\d+)/.exec(invoiceModel);
+    expect(backend, 'GATEWAY_FEE_BPS must stay findable').toBeTruthy();
+    const docsConst = /const GATEWAY_FEE_BPS = (\d+)/.exec(docs);
+    expect(docsConst, 'the docs page must mirror the constant').toBeTruthy();
+    expect(docsConst![1]).toBe(backend![1]);
+    expect(backend![1]).toBe('25');
+  });
+
+  it('states that one invoice carries exactly one coin', () => {
+    // The dashboard used to show an "accepted coins" panel that configured
+    // nothing, so merchants expected a picker at checkout. There is none.
+    expect(docs).toMatch(/Uma fatura = uma moeda/i);
+    expect(docs).toMatch(/não tem seletor de moeda|não escolhe no checkout/i);
+  });
+});
+
 describe('contract: error codes', () => {
   it('every code in the docs table is emitted by the backend', () => {
     const publicApi = readFileSync(path.join(repoRoot, 'crates/api-http/src/public_api.rs'), 'utf8');

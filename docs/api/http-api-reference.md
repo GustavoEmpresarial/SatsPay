@@ -287,7 +287,12 @@ A API HTTP do **BitcoSats** é implementada em Rust com o framework **Axum** (`c
   → `400 AMOUNT_NOT_INTEGER`; valor que zera on-chain → `400 AMOUNT_BELOW_MINIMUM`.
 - **Idempotência**: `orderId` é único por comerciante. Repetir a mesma cobrança devolve `200` com a
   fatura original; mesmo `orderId` com outro valor → `409 DUPLICATE_ORDER_ID`.
-- **Resposta `201`**: `id`, `status`, `coin`, `amount`, `feeAmount` (0,5%), `netAmount`,
+- **Moeda**: uma fatura tem **uma** moeda e um endereço daquela rede. Não há seletor no
+  checkout nem conversão depois de criada — para o cliente escolher, ofereça a escolha no site
+  do comerciante e crie a fatura já na moeda escolhida (um `orderId` por tentativa).
+- **Taxa**: `GATEWAY_FEE_BPS` = 25 (**0,25%**), única para todos os comerciantes, truncada
+  para unidades inteiras a favor do comerciante — `feeAmount + netAmount == amount` exato.
+- **Resposta `201`**: `id`, `status`, `coin`, `amount`, `feeAmount` (0,25%), `netAmount`,
   `depositAddress`, `payUrl` (relativo), `checkoutUrl` (absoluto, via `PUBLIC_BASE_URL`),
   `qrCode` (URI `moeda:endereço?amount=`), `orderId`, `expiresAt`, `createdAt`.
 - **Pausa**: BTC/LTC/DOGE/DGB → `503 DEPOSIT_PAUSED` (`shared::DEPOSIT_WITHDRAW_PAUSED_COINS`).

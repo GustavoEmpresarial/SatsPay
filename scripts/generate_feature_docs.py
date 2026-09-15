@@ -75,7 +75,7 @@ DOMAINS: list[dict] = [
     {
         "slug": "domain-gateway-merchant",
         "title": "Gateway merchant (invoices + HMAC)",
-        "keywords": "merchant_deposit_invoices gateway HMAC api_keys webhook checkout order_id fee 0.5% deposit.confirmed checkoutUrl payUrl invoice_watcher ledger units idempotency",
+        "keywords": "merchant_deposit_invoices gateway HMAC api_keys webhook checkout order_id fee 0.25% uma-moeda-por-fatura deposit.confirmed checkoutUrl payUrl invoice_watcher ledger units idempotency",
         "files": [
             "crates/db/migrations/0010_merchant_deposit_invoices.sql",
             "crates/db/migrations/0026_merchant_invoice_order_unique.sql",
@@ -101,12 +101,14 @@ DOMAINS: list[dict] = [
             "`/v1/public/pay` NÃO cria nada. Resposta traz `checkoutUrl` (absoluto) + `payUrl` (relativo). "
             "`amount` é inteiro em unidades de ledger (1e-8), nunca decimal da moeda: 25 USDT = \"2500000000\" "
             "(decimal → 400 AMOUNT_NOT_INTEGER). `orderId` único por merchant: repetir devolve 200 com a mesma "
-            "fatura, divergir devolve 409 DUPLICATE_ORDER_ID. Taxa plataforma 0,5% (`feeAmount`/`netAmount`; "
+            "fatura, divergir devolve 409 DUPLICATE_ORDER_ID. Taxa plataforma 0,25% — GATEWAY_FEE_BPS=25 (`feeAmount`/`netAmount`; "
             "no webhook o campo chama `fee`). Auth: `x-api-key` ou requisição assinada, escopo `deposits`, "
             "whitelist de IP com IP real. Confirmação on-chain: `worker::invoice_watcher` → `confirm_invoice` → "
             "sweep. Webhook `deposit.confirmed`, `X-SatsPay-Signature: sha256=<hex>` sobre o corpo cru, com "
             "`timestamp`/`attempt` no corpo e retry com backoff (`crates/webhooks`). Statuses: "
-            "PENDING → DETECTED → CONFIRMED | EXPIRED | CANCELLED (não existe PAID)."
+            "PENDING → DETECTED → CONFIRMED | EXPIRED | CANCELLED (não existe PAID). "
+            "Uma fatura = uma moeda, definida pelo merchant no `coin`; o checkout NÃO tem "
+            "seletor de moeda e não converte depois de criada."
         ),
     },
     {

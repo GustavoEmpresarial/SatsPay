@@ -20,6 +20,10 @@ const API_BASE = 'https://www.satspay.pro';
 /** Ledger scale, shared with the backend (`Coin::onchain_decimals` docs). */
 const UNITS_PER_COIN = 10 ** INTERNAL_AMOUNT_DECIMALS;
 
+/** Mirrors `GATEWAY_FEE_BPS` in crates/db/src/merchant_deposits.rs. */
+const GATEWAY_FEE_BPS = 25;
+const GATEWAY_FEE_PERCENT = `${GATEWAY_FEE_BPS / 100}%`.replace('.', ',');
+
 /** "25" USDT → "2500000000". Used in the unit examples below. */
 function toLedgerUnits(coins: number): string {
   return BigInt(Math.round(coins * UNITS_PER_COIN)).toString();
@@ -213,8 +217,8 @@ function WebhookSimulator() {
         siteUserId: 'user_4412',
         coin: 'USDT',
         amount: '2500000000',
-        fee: '12500000',
-        netAmount: '2487500000',
+        fee: '6250000',
+        netAmount: '2493750000',
         txHash: '0x4a8f9c2d1e0b3a7f8e6c5d4b3a2f1e0d9c8b7a6f5e4d3c2b1a0f9e8d7c6b5a4',
         status: 'CONFIRMED',
         paidAt: '2026-09-02T17:32:10.442Z',
@@ -787,8 +791,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
   "status": "PENDING",
   "coin": "USDT",
   "amount": "${toLedgerUnits(25)}",
-  "feeAmount": "${toLedgerUnits(0.125)}",
-  "netAmount": "${toLedgerUnits(24.875)}",
+  "feeAmount": "${toLedgerUnits(0.0625)}",
+  "netAmount": "${toLedgerUnits(24.9375)}",
   "depositAddress": "0x71C6705624342490cf03323decB0C392A8892A88",
   "payUrl": "/pay/550e8400-e29b-41d4-a716-446655440000",
   "checkoutUrl": "${API_BASE}/pay/550e8400-e29b-41d4-a716-446655440000",
@@ -806,15 +810,69 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 </div>
 
                 {/* TAXA */}
-                <div className="rounded-2xl border border-border bg-surface p-4 space-y-2">
-                  <div className="flex items-center gap-2 text-ink font-bold text-xs">
-                    <i className="bi bi-percent text-bitcoin text-base" />
-                    <span>Taxa do gateway: 0,5% por fatura</span>
+                <div className="rounded-2xl border-2 border-bitcoin/40 bg-bitcoin/5 p-4 space-y-3">
+                  <div className="flex items-center gap-2 text-bitcoin-dark font-black text-sm">
+                    <i className="bi bi-percent text-base" />
+                    <span>Taxa do gateway: {GATEWAY_FEE_PERCENT} por fatura recebida</span>
                   </div>
                   <p className="text-xs text-ink-muted leading-relaxed">
-                    O cliente paga <code className="font-mono text-ink font-bold">amount</code>; você é creditado em{' '}
-                    <code className="font-mono text-ink font-bold">netAmount</code> (<code className="font-mono">amount − feeAmount</code>).
-                    Para 25 USDT: taxa de {toLedgerUnits(0.125)} (0,125 USDT) e crédito líquido de {toLedgerUnits(24.875)} (24,875 USDT).
+                    O cliente paga <code className="font-mono text-ink font-bold">amount</code> integral; você é creditado em{' '}
+                    <code className="font-mono text-ink font-bold">netAmount</code>, que é{' '}
+                    <code className="font-mono">amount − feeAmount</code>. A taxa é <b>truncada para unidades inteiras</b>
+                    {' '}de 1e-8, sempre a seu favor, então <code className="font-mono">feeAmount + netAmount</code> é
+                    exatamente igual a <code className="font-mono">amount</code>.
+                  </p>
+                  <div className="overflow-x-auto rounded-xl border border-border bg-paper">
+                    <table className="w-full text-left text-xs">
+                      <thead className="border-b border-border bg-surface/60 text-[10px] font-extrabold uppercase tracking-wider text-ink-muted">
+                        <tr>
+                          <th className="px-3 py-2">Cobrança</th>
+                          <th className="px-3 py-2">amount</th>
+                          <th className="px-3 py-2">feeAmount ({GATEWAY_FEE_PERCENT})</th>
+                          <th className="px-3 py-2">netAmount (você recebe)</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-border font-mono">
+                        {[25, 100, 1].map((coins) => {
+                          const units = Number(toLedgerUnits(coins));
+                          const fee = Math.floor((units * GATEWAY_FEE_BPS) / 10_000);
+                          return (
+                            <tr key={coins}>
+                              <td className="px-3 py-2 text-ink">{coins} USDT</td>
+                              <td className="px-3 py-2 text-ink-muted">{units}</td>
+                              <td className="px-3 py-2 text-bitcoin-dark font-bold">{fee}</td>
+                              <td className="px-3 py-2 text-emerald-700 font-bold">{units - fee}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                  <p className="text-[11px] text-ink-muted">
+                    Taxa única para todos os comerciantes — não há plano ou tarifa por conta. No webhook o campo
+                    chama-se <code className="font-mono text-ink font-bold">fee</code>; na criação da fatura,{' '}
+                    <code className="font-mono text-ink font-bold">feeAmount</code>.
+                  </p>
+                </div>
+
+                {/* UMA MOEDA POR FATURA */}
+                <div className="rounded-2xl border border-amber-500/30 bg-amber-500/5 p-4 space-y-2">
+                  <div className="flex items-center gap-2 text-amber-700 font-bold text-xs">
+                    <i className="bi bi-coin text-base" />
+                    <span>Uma fatura = uma moeda. O cliente não escolhe no checkout.</span>
+                  </div>
+                  <p className="text-xs text-ink-muted leading-relaxed">
+                    A moeda é definida por <b>você</b> no <code className="font-mono text-ink font-bold">coin</code> da
+                    criação, e a fatura nasce com um endereço dedicado <b>daquela</b> rede e um valor fixo naquela moeda.
+                    O checkout hospedado não tem seletor de moeda: não existe conversão automática entre moedas depois
+                    que a fatura foi criada.
+                  </p>
+                  <p className="text-xs text-ink-muted leading-relaxed">
+                    <b>Para deixar o cliente escolher</b>, ofereça a escolha no <i>seu</i> site e crie a fatura já na
+                    moeda escolhida — uma chamada por moeda, com o <code className="font-mono text-ink font-bold">orderId</code>{' '}
+                    distinto por tentativa. Use{' '}
+                    <code className="font-mono text-ink font-bold">GET /v1/public/coins</code> para montar esse seletor
+                    com preço e logo, e para saber quais moedas estão ativas.
                   </p>
                 </div>
 
@@ -1668,8 +1726,8 @@ X-SatsPay-Delivery: 7c6f1f0e-1d2a-4a55-9a1e-6b2c0d9f4e11`}
   "siteUserId": "user_4412",
   "coin": "USDT",
   "amount": "2500000000",
-  "fee": "12500000",
-  "netAmount": "2487500000",
+  "fee": "6250000",
+  "netAmount": "2493750000",
   "txHash": "0x4a8f9c2d1e0b3a7f8e6c5d4b3a2f1e0d9c8b7a6f5e4d3c2b1a0f9e8d7c6b5a4",
   "status": "CONFIRMED",
   "paidAt": "2026-09-02T17:32:10.442Z",

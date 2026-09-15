@@ -158,10 +158,10 @@ async fn documented_create_path_and_checkout_url(pool: PgPool) {
     let id = body["id"].as_str().expect("invoice id");
     assert_eq!(body["payUrl"], format!("/pay/{id}"));
     assert_eq!(body["checkoutUrl"], format!("https://www.satspay.pro/pay/{id}"));
-    // The 0.5% gateway fee is charged and both sides of it are reported —
-    // the docs page has never mentioned it at all.
-    assert_eq!(body["feeAmount"], "1250");
-    assert_eq!(body["netAmount"], "248750");
+    // The 0.25% gateway fee is charged and both sides of it are reported —
+    // the docs page did not mention the fee at all.
+    assert_eq!(body["feeAmount"], "625");
+    assert_eq!(body["netAmount"], "249375");
     assert_eq!(body["status"], "PENDING");
 }
 
@@ -411,9 +411,9 @@ async fn list_and_detail_use_the_same_camel_case_as_create(pool: PgPool) {
         assert!(get[field].is_null(), "GET still exposes {field}");
     }
     assert_eq!(get["orderId"], "ORD-CASE-1");
-    // 0.5% of 250000, in whole ledger units — never a fraction of 1e-8.
-    assert_eq!(get["feeAmount"], "1250");
-    assert_eq!(get["netAmount"], "248750");
+    // 0.25% of 250000, in whole ledger units — never a fraction of 1e-8.
+    assert_eq!(get["feeAmount"], "625");
+    assert_eq!(get["netAmount"], "249375");
 }
 
 async fn fetch(
