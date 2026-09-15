@@ -91,6 +91,7 @@ pub fn test_state(pool: PgPool) -> AppState<PgAuthRepo> {
             price_max_stale: Duration::from_secs(86_400),
             public_api_signature_max_skew: Duration::from_secs(300),
             smtp_enabled: false,
+            public_base_url: "https://www.satspay.pro".into(),
         },
         swapkit: Arc::new(SwapKitClient::from_env()),
     }
