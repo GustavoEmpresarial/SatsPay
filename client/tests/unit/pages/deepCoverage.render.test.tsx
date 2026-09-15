@@ -584,12 +584,22 @@ describe('FaucetPage claim', () => {
     const claim = within(container)
       .getAllByRole('button')
       .find((b) => /reivindicar|claim/i.test(b.textContent || ''));
-    if (claim && !(claim as HTMLButtonElement).disabled) {
-      await user.click(claim);
-      await waitFor(() => expect(container.innerHTML).toMatch(/sucesso|success|claim|receb/i), {
-        timeout: 5000,
-      });
-    }
+    expect(claim, 'claim button must be rendered').toBeTruthy();
+    expect((claim as HTMLButtonElement).disabled, 'claim must be enabled after captcha + mount delay').toBe(false);
+    await user.click(claim!);
+
+    // Assert the success banner itself, not a word: the message is
+    // translated ("Received" / "Recebido"), so matching prose made this
+    // depend on the test locale — it rendered "Received: +0.00001 LTC." and
+    // the old regex only covered the Portuguese spelling.
+    await waitFor(
+      () => {
+        const banner = container.querySelector('.bg-emerald-50');
+        expect(banner, 'success banner must appear after a successful claim').toBeTruthy();
+        expect(banner!.textContent).toMatch(/\+\s*[\d.]+\s*LTC/);
+      },
+      { timeout: 5000 },
+    );
 
     unmount();
   });
