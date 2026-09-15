@@ -77,6 +77,19 @@ describe('CheckoutPage — what the customer reads', () => {
     }
   });
 
+  it('shows the host it is actually served from, never a foreign domain', async () => {
+    catalogResponse = { priceDecimals: 8, coins: [] };
+    const { container, unmount } = renderWithProviders(<CheckoutPage />, {
+      route: '/pay/inv-1',
+      routePath: '/pay/:id',
+    });
+    await waitFor(() => expect(container.textContent).toContain('USDT'), { timeout: 5000 });
+    // A wrong domain on the page a customer pays on reads as phishing.
+    expect(container.textContent).not.toContain('satspay.app');
+    expect(container.textContent).toMatch(/localhost|satspay\.pro/);
+    unmount();
+  });
+
   it('labels the demo invoice and hides the real payment action', async () => {
     catalogResponse = { priceDecimals: 8, coins: [{ symbol: 'USDT', priceUsd: '100000000' }] };
     const { container, unmount } = renderWithProviders(<CheckoutPage />, {

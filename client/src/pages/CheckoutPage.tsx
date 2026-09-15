@@ -29,6 +29,16 @@ interface InvoiceData {
   demo?: boolean;
 }
 
+/**
+ * The host actually serving this page. Hardcoding it meant the checkout —
+ * the one page a customer inspects before sending money — advertised
+ * "satspay.app", a domain this platform does not use.
+ */
+function checkoutHost(): string {
+  if (typeof window === 'undefined' || !window.location?.host) return 'satspay.pro';
+  return window.location.host.replace(/^www\./, '');
+}
+
 interface CoinCatalog {
   priceDecimals: number;
   coins: { symbol: string; priceUsd?: string | null }[];
@@ -418,7 +428,7 @@ export function CheckoutPage() {
             <span>Processado com segurança por <b>SatsPay</b></span>
           </div>
           <Link to="/" className="text-ink-muted hover:text-ink">
-            satspay.app
+            {checkoutHost()}
           </Link>
         </div>
       </footer>
