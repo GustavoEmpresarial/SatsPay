@@ -796,7 +796,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
   "depositAddress": "0x71C6705624342490cf03323decB0C392A8892A88",
   "payUrl": "/pay/550e8400-e29b-41d4-a716-446655440000",
   "checkoutUrl": "${API_BASE}/pay/550e8400-e29b-41d4-a716-446655440000",
-  "qrCode": "usdt:0x71C6705624342490cf03323decB0C392A8892A88?amount=${toLedgerUnits(25)}",
+  "qrCode": "usdt:0x71C6705624342490cf03323decB0C392A8892A88?amount=25",
   "orderId": "ORD-99821",
   "expiresAt": "2026-09-02T18:00:00.000Z",
   "createdAt": "2026-09-02T17:00:00.000Z"
@@ -855,44 +855,160 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                   </p>
                 </div>
 
-                {/* UMA MOEDA POR FATURA */}
-                <div className="rounded-2xl border border-amber-500/30 bg-amber-500/5 p-4 space-y-2">
-                  <div className="flex items-center gap-2 text-amber-700 font-bold text-xs">
+                {/* DUAS FORMAS DE PRECIFICAR */}
+                <div className="rounded-2xl border-2 border-emerald-500/40 bg-emerald-500/5 p-4 space-y-3">
+                  <div className="flex items-center gap-2 text-emerald-700 font-black text-sm">
                     <i className="bi bi-coin text-base" />
-                    <span>Uma fatura = uma moeda. O cliente não escolhe no checkout.</span>
+                    <span>Duas formas de cobrar — escolha uma</span>
                   </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div className="rounded-xl border border-border bg-paper p-3 space-y-1.5">
+                      <div className="text-xs font-bold text-ink">A. Em cripto (você escolhe a moeda)</div>
+                      <code className="block font-mono text-[11px] text-ink-muted">
+                        {'{ coin: "USDT", amount: "2500000000" }'}
+                      </code>
+                      <p className="text-[11px] text-ink-muted leading-relaxed">
+                        A fatura nasce travada naquela moeda, com o endereço daquela rede. O cliente
+                        não escolhe nada. É o contrato original e ele não mudou.
+                      </p>
+                    </div>
+
+                    <div className="rounded-xl border border-emerald-500/40 bg-emerald-500/5 p-3 space-y-1.5">
+                      <div className="text-xs font-bold text-ink">B. Em dólar (o cliente escolhe)</div>
+                      <code className="block font-mono text-[11px] text-ink-muted">
+                        {'{ amountUsd: "25.00" }'}
+                      </code>
+                      <p className="text-[11px] text-ink-muted leading-relaxed">
+                        O checkout mostra um seletor com as moedas que você aceita, cada uma já com a
+                        quantia calculada. O cliente escolhe e a cotação trava.
+                      </p>
+                    </div>
+                  </div>
+
                   <p className="text-xs text-ink-muted leading-relaxed">
-                    A moeda é definida por <b>você</b> no <code className="font-mono text-ink font-bold">coin</code> da
-                    criação, e a fatura nasce com um endereço dedicado <b>daquela</b> rede e um valor fixo naquela moeda.
-                    O checkout hospedado não tem seletor de moeda: não existe conversão automática entre moedas depois
-                    que a fatura foi criada.
-                  </p>
-                  <p className="text-xs text-ink-muted leading-relaxed">
-                    <b>Para deixar o cliente escolher</b>, ofereça a escolha no <i>seu</i> site e crie a fatura já na
-                    moeda escolhida — uma chamada por moeda, com o <code className="font-mono text-ink font-bold">orderId</code>{' '}
-                    distinto por tentativa. Use{' '}
-                    <code className="font-mono text-ink font-bold">GET /v1/public/coins</code> para montar esse seletor
-                    com preço e logo, e para saber quais moedas estão ativas.
+                    Mandar as duas juntas devolve <code className="font-mono text-ink font-bold">400 AMBIGUOUS_AMOUNT</code>;
+                    nenhuma delas, <code className="font-mono text-ink font-bold">400 INVALID_AMOUNT</code>.
+                    Atenção à diferença: <code className="font-mono text-ink font-bold">amount</code> é
+                    <b> inteiro</b> em unidades de 1e-8, mas{' '}
+                    <code className="font-mono text-ink font-bold">amountUsd</code> é <b>decimal</b>, porque é
+                    dinheiro de verdade.
                   </p>
                 </div>
 
-                {/* IDEMPOTÊNCIA */}
-                <div className="rounded-2xl border border-border bg-surface p-4 space-y-2">
-                  <div className="flex items-center gap-2 text-ink font-bold text-xs">
-                    <i className="bi bi-arrow-repeat text-purple-600 text-base" />
-                    <span>Idempotência por orderId</span>
+                {/* COMO A COTAÇÃO TRAVA */}
+                <div className="rounded-2xl border border-amber-500/30 bg-amber-500/5 p-4 space-y-2">
+                  <div className="flex items-center gap-2 text-amber-700 font-bold text-xs">
+                    <i className="bi bi-lock-fill text-base" />
+                    <span>Quando a cotação trava, e quem carrega a variação</span>
                   </div>
-                  <p className="text-xs text-ink-muted leading-relaxed">
-                    Repetir o POST com o mesmo <code className="font-mono text-ink font-bold">orderId</code> e os mesmos{' '}
-                    <code className="font-mono text-ink font-bold">coin</code>/<code className="font-mono text-ink font-bold">amount</code>{' '}
-                    devolve <b>200 OK</b> com a fatura original — nunca uma segunda cobrança. Reutilizar o mesmo{' '}
-                    <code className="font-mono text-ink font-bold">orderId</code> para outro valor retorna{' '}
-                    <b>409 <code className="font-mono">DUPLICATE_ORDER_ID</code></b>.
+                  <ol className="text-xs text-ink-muted leading-relaxed list-decimal pl-4 space-y-1">
+                    <li>Você cria a fatura em dólar. Nada foi cotado ainda — nenhuma exposição.</li>
+                    <li>
+                      O cliente escolhe a moeda. <b>Nesse instante</b> a cotação trava e vale até a fatura
+                      expirar.
+                    </li>
+                    <li>
+                      Da trava até o pagamento chegar na rede, quem carrega a variação de preço é{' '}
+                      <b>você</b>: pediu US$ 25 e recebe a cripto que valia US$ 25 naquele instante. A
+                      plataforma não absorve a diferença.
+                    </li>
+                    <li>
+                      A conversão arredonda <b>para cima</b>, sempre a seu favor — nunca a menos do que
+                      você pediu.
+                    </li>
+                  </ol>
+                  <p className="text-[11px] text-ink-muted">
+                    O cliente pode trocar de moeda enquanto nada chegou. Assim que qualquer endereço da
+                    fatura recebe dinheiro, a moeda congela — trocar ali abandonaria um pagamento em
+                    trânsito. E se ele pagou num endereço que já tinha visto antes de trocar, esse
+                    pagamento <b>é honrado</b>: a fatura passa a apontar para a moeda que recebeu.
+                  </p>
+                </div>
+
+                {/* SELECT-COIN */}
+                <div className="space-y-3">
+                  <EndpointHeader
+                    method="POST"
+                    path="/v1/public/pay/:id/select-coin"
+                    title="Escolher a moeda (chamado pelo checkout)"
+                    badge="Público · sem chave"
+                  />
+                  <p className="text-xs sm:text-sm text-ink-muted">
+                    O checkout hospedado já faz isso sozinho. Está documentado porque a resposta é o
+                    mesmo payload de <code className="font-mono font-bold text-ink">GET /v1/public/pay/:id</code>,
+                    e porque quem monta o próprio checkout precisa dele.
+                  </p>
+                  <CodeBlock
+                    label="CURL"
+                    code={`curl -X POST ${API_BASE}/v1/public/pay/550e8400-.../select-coin \\
+  -H "Content-Type: application/json" \\
+  -d '{ "coin": "POL" }'`}
+                  />
+                  <div className="overflow-x-auto rounded-2xl border border-border bg-surface">
+                    <table className="w-full text-left text-xs">
+                      <thead className="border-b border-border bg-paper text-[10px] font-extrabold uppercase tracking-wider text-ink-muted">
+                        <tr>
+                          <th className="px-4 py-2.5">Código</th>
+                          <th className="px-4 py-2.5">HTTP</th>
+                          <th className="px-4 py-2.5">Quando</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-border font-mono text-[11px]">
+                        <tr>
+                          <td className="px-4 py-2.5 font-bold text-rose-600">COIN_NOT_ACCEPTED</td>
+                          <td className="px-4 py-2.5 text-ink">400</td>
+                          <td className="px-4 py-2.5 font-sans text-ink-muted">
+                            Moeda fora da lista da fatura, pausada, ou fatura de moeda única.
+                          </td>
+                        </tr>
+                        <tr>
+                          <td className="px-4 py-2.5 font-bold text-purple-600">COIN_LOCKED</td>
+                          <td className="px-4 py-2.5 text-ink">409</td>
+                          <td className="px-4 py-2.5 font-sans text-ink-muted">
+                            Já existe pagamento em andamento — a moeda congelou.
+                          </td>
+                        </tr>
+                        <tr>
+                          <td className="px-4 py-2.5 font-bold text-amber-600">PRICE_UNAVAILABLE</td>
+                          <td className="px-4 py-2.5 text-ink">503</td>
+                          <td className="px-4 py-2.5 font-sans text-ink-muted">
+                            Sem cotação fresca para a moeda. Nunca cotamos com preço velho.
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                {/* MOEDAS ACEITAS */}
+                <div className="space-y-3">
+                  <EndpointHeader
+                    method="GET"
+                    path="/v1/merchant/settings"
+                    title="Moedas que você aceita receber"
+                  />
+                  <p className="text-xs sm:text-sm text-ink-muted">
+                    Define o seletor que o cliente vê nas cobranças em dólar. Configure uma vez no painel
+                    (Gateway de Depósitos) ou por API. Lista vazia significa <b>todas as ativas</b>, então
+                    uma moeda que sai da pausa passa a ser oferecida sozinha. Pausadas nunca aparecem.
+                  </p>
+                  <CodeBlock
+                    label="CURL"
+                    code={`curl -X PUT ${API_BASE}/v1/merchant/settings \\
+  -H "x-api-key: SUA_CHAVE_DE_API" \\
+  -H "Content-Type: application/json" \\
+  -d '{ "acceptedCoins": ["USDT", "USDC", "POL", "SOL"] }'`}
+                  />
+                  <p className="text-[11px] text-ink-muted">
+                    Uma lista em que nenhuma moeda está ativa devolve{' '}
+                    <code className="font-mono font-bold text-ink">400 NO_USABLE_COIN</code> — melhor recusar
+                    do que deixar você com um checkout que ninguém consegue pagar.
                   </p>
                 </div>
               </div>
 
-              {/* BOTÃO DE PAGAMENTO */}
+              {/* BOTÃO DE PAGAMENTO */}              {/* BOTÃO DE PAGAMENTO */}
               <div className="space-y-4 pt-6 border-t border-border/80">
                 <EndpointHeader
                   method="GET"

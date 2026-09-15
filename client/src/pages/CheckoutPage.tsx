@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { useQuery, useMutation } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api.js';
 import { coinLogo } from '../lib/coinAssets.js';
 import { addressQrDataUrl } from '../lib/qr.js';
@@ -27,6 +27,21 @@ interface InvoiceData {
   amountDisplay?: string;
   /** Set by `/pay/demo`: nothing here is real and nothing can be paid. */
   demo?: boolean;
+  /** Coins the customer may still switch to, priced. Empty = no choice. */
+  coinOptions?: CoinOption[];
+  /** True once the coin is final — chosen and paid, or expired. */
+  coinLocked?: boolean;
+  /** What the merchant asked for in USD, when priced that way. */
+  amountUsd?: string | null;
+}
+
+interface CoinOption {
+  coin: Coin;
+  name: string;
+  amount: string;
+  amountDisplay: string;
+  logoUrl: string;
+  minConfirmations: number;
 }
 
 /**
@@ -76,11 +91,17 @@ function fiatValue(amountUnits: string, coin: Coin, catalog?: CoinCatalog): stri
 
 export function CheckoutPage() {
   const { id } = useParams<{ id: string }>();
+  const qc = useQueryClient();
   const user = useAuthStore((s) => s.user);
   const [copied, setCopied] = useState(false);
   const [timeLeft, setTimeLeft] = useState<string>('');
   const [redirectCount, setRedirectCount] = useState<number>(4);
   const [qrUrl, setQrUrl] = useState<string>('');
+  // The invoice opens on a default coin the system picked, so having a coin
+  // is not the same as the customer having chosen one. Until they act, the
+  // picker is what they see — otherwise the choice is invisible, which is the
+  // whole reason this exists.
+  const [coinChosen, setCoinChosen] = useState(false);
 
   const { data: inv, isLoading, error } = useQuery<InvoiceData>({
     queryKey: ['public-invoice', id],
@@ -97,6 +118,16 @@ export function CheckoutPage() {
 
   const payBalanceMut = useMutation({
     mutationFn: () => api(`/public/pay/${id}/balance`, { method: 'POST' }),
+  });
+
+  const selectCoinMut = useMutation({
+    mutationFn: (coin: Coin) =>
+      api(`/public/pay/${id}/select-coin`, { method: 'POST', json: { coin } }),
+    onSuccess: () => {
+      // The server is the source of truth for the locked amount and address.
+      void qc.invalidateQueries({ queryKey: ['public-invoice', id] });
+      setCoinChosen(true);
+    },
   });
 
   // Public catalogue: price for the fiat label. A failure here must never
@@ -193,6 +224,13 @@ export function CheckoutPage() {
 
   const isConfirmed = inv.status === 'CONFIRMED';
   const isExpired = inv.status === 'EXPIRED';
+
+  // A choice exists only while the server still allows switching and there is
+  // more than one option to switch between.
+  const canSwitchCoin = !inv.coinLocked && (inv.coinOptions?.length ?? 0) > 1;
+  // Show the picker first: the coin the invoice opens on was chosen by the
+  // system, not by the person about to pay.
+  const picking = canSwitchCoin && !coinChosen;
 
   return (
     <div className="min-h-screen bg-canvas text-ink flex flex-col justify-between selection:bg-bitcoin/30">
@@ -319,6 +357,73 @@ export function CheckoutPage() {
                 </div>
               </div>
 
+              {/* Coin picker — replaces the payment details until chosen */}
+              {picking && (() => {
+                const options = inv.coinOptions ?? [];
+                return (
+                  <div className="rounded-2xl border border-border bg-surface/70 p-4 space-y-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs font-bold text-ink">Escolha como pagar</span>
+                      {inv.amountUsd && (
+                        <span className="text-[11px] text-ink-muted">Cobrança: US$ {inv.amountUsd}</span>
+                      )}
+                    </div>
+                    <div className="space-y-1.5">
+                      {options.map((o) => (
+                        <button
+                          key={o.coin}
+                          type="button"
+                          disabled={selectCoinMut.isPending}
+                          onClick={() => selectCoinMut.mutate(o.coin)}
+                          className={`flex w-full items-center justify-between gap-3 rounded-xl border px-3 py-2.5 text-left transition ${
+                            o.coin === inv.coin
+                              ? 'border-bitcoin bg-bitcoin/5'
+                              : 'border-border bg-paper hover:border-bitcoin/40'
+                          }`}
+                        >
+                          <span className="flex items-center gap-2 min-w-0">
+                            <img src={o.logoUrl} alt="" className="h-6 w-6 rounded-full object-contain" />
+                            <span className="min-w-0">
+                              <span className="block text-xs font-bold text-ink">{o.coin}</span>
+                              <span className="block text-[10px] text-ink-muted truncate">{o.name}</span>
+                            </span>
+                          </span>
+                          <span className="text-right shrink-0">
+                            <span className="block font-mono text-sm font-bold text-ink">
+                              {o.amountDisplay} {o.coin}
+                            </span>
+                            <span className="block text-[10px] text-ink-muted">
+                              {o.minConfirmations} confirmações
+                            </span>
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                    <p className="text-[11px] text-ink-muted leading-relaxed">
+                      A cotação é travada quando você escolhe e vale até a fatura expirar.
+                    </p>
+                    {selectCoinMut.isError && (
+                      <p className="text-[11px] font-bold text-rose-600">
+                        Não foi possível trocar de moeda agora. Tente novamente.
+                      </p>
+                    )}
+                  </div>
+                );
+              })()}
+
+              {!picking && canSwitchCoin && (
+                <div className="text-center">
+                  <button
+                    type="button"
+                    onClick={() => setCoinChosen(false)}
+                    className="text-[11px] font-bold text-bitcoin hover:underline"
+                  >
+                    <i className="bi bi-arrow-left-right" /> Pagar com outra moeda
+                  </button>
+                </div>
+              )}
+
+              {!picking && (<>
               {/* Amount Box */}
               <div className="rounded-2xl border border-border bg-surface/70 p-4 text-center">
                 <div className="flex items-center justify-center gap-2 mb-1">
@@ -385,6 +490,8 @@ export function CheckoutPage() {
                   </button>
                 </div>
               </div>
+
+              </>)}
 
               {/* Pay with Internal SatsPay Balance */}
               {user && !inv.demo && (

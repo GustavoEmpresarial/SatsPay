@@ -99,6 +99,9 @@ async fn demo_invoice_handler<R: AuthRepo>(State(state): State<AppState<R>>) -> 
         "paidAt": serde_json::Value::Null,
         "txHash": serde_json::Value::Null,
         "logoUrl": logo_url(state.settings.public_base_url.trim_end_matches('/'), coin),
+        "coinOptions": [],
+        "coinLocked": true,
+        "amountUsd": serde_json::Value::Null,
     }))
     .into_response()
 }

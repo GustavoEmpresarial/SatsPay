@@ -110,11 +110,25 @@ describe('contract: gateway fee', () => {
     expect(backend![1]).toBe('25');
   });
 
-  it('states that one invoice carries exactly one coin', () => {
-    // The dashboard used to show an "accepted coins" panel that configured
-    // nothing, so merchants expected a picker at checkout. There is none.
-    expect(docs).toMatch(/Uma fatura = uma moeda/i);
-    expect(docs).toMatch(/não tem seletor de moeda|não escolhe no checkout/i);
+  it('documents both pricing modes and who carries the price movement', () => {
+    // The merchant has to know which field to send, that they are mutually
+    // exclusive, and whose money moves while the quote is locked.
+    expect(docs).toContain('amountUsd');
+    expect(docs).toContain('AMBIGUOUS_AMOUNT');
+    expect(docs).toMatch(/amountUsd.{0,80}decimal/is);
+    expect(docs).toMatch(/cotação trava|cotação é travada/i);
+    expect(docs).toMatch(/arredonda.{0,40}para cima/is);
+    expect(docs).toContain('select-coin');
+    expect(docs).toContain('COIN_LOCKED');
+    expect(docs).toContain('COIN_NOT_ACCEPTED');
+    expect(docs).toContain('/v1/merchant/settings');
+  });
+
+  it('only documents select-coin errors the handler can actually return', () => {
+    const handlerCodes = [...handler.matchAll(/"([A-Z_]{4,})"/g)].map((m) => m[1]);
+    for (const code of ['COIN_LOCKED', 'COIN_NOT_ACCEPTED', 'PRICE_UNAVAILABLE', 'AMBIGUOUS_AMOUNT', 'NO_USABLE_COIN', 'INVALID_AMOUNT_USD']) {
+      expect(handlerCodes, `docs promise ${code}`).toContain(code);
+    }
   });
 });
 

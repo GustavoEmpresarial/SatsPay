@@ -98,6 +98,31 @@ export function MerchantDepositsPage() {
     refetchInterval: 5000,
   });
 
+  // Coins this merchant accepts on the hosted checkout. The old panel with
+  // this name persisted nothing; this one round-trips to the server.
+  const settingsQ = useQuery<{ acceptedCoins: Coin[]; availableCoins: Coin[] }>({
+    queryKey: ['merchant-settings'],
+    queryFn: () => api('/merchant/settings'),
+  });
+  const acceptedCoins = settingsQ.data?.acceptedCoins ?? [];
+  const availableCoins = settingsQ.data?.availableCoins ?? [];
+
+  const saveSettingsMut = useMutation({
+    mutationFn: (coins: Coin[]) =>
+      api('/merchant/settings', { method: 'PUT', json: { acceptedCoins: coins } }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['merchant-settings'] }),
+  });
+
+  const toggleAccepted = (c: Coin) => {
+    const next = acceptedCoins.includes(c)
+      ? acceptedCoins.filter((x) => x !== c)
+      : [...acceptedCoins, c];
+    // The API refuses a selection with nothing payable in it; do not even
+    // send that request.
+    if (next.length === 0) return;
+    saveSettingsMut.mutate(next);
+  };
+
   const testWebhookMut = useMutation({
     mutationFn: (invId: string) =>
       api<WebhookTestResult>(`/merchant/deposits/${invId}/test-webhook`, { method: 'POST' }),
@@ -231,6 +256,49 @@ export function MerchantDepositsPage() {
           <code className="font-mono font-bold text-ink">checkoutUrl</code>; o botão só leva o cliente até lá, então
           nenhuma chave de API vai para o navegador.
         </p>
+
+        {/* MOEDAS ACEITAS — persistido no servidor */}
+        <div className="space-y-2 pb-4 border-b border-border/60">
+          <div className="flex items-center justify-between gap-2">
+            <label className="block text-xs font-bold text-ink">
+              Moedas que você aceita receber:
+            </label>
+            {saveSettingsMut.isPending && (
+              <span className="text-[11px] text-ink-muted">salvando…</span>
+            )}
+            {saveSettingsMut.isError && (
+              <span className="text-[11px] font-bold text-rose-600">não foi possível salvar</span>
+            )}
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {availableCoins.map((c) => {
+              const on = acceptedCoins.includes(c);
+              return (
+                <button
+                  key={c}
+                  type="button"
+                  data-testid={`accepted-coin-${c}`}
+                  disabled={saveSettingsMut.isPending}
+                  onClick={() => toggleAccepted(c)}
+                  className={clsx(
+                    'flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-bold transition-all border',
+                    on
+                      ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs'
+                      : 'bg-surface text-ink-muted border-border hover:text-ink hover:bg-paper',
+                  )}
+                >
+                  <img src={coinLogo(c)} alt={c} className="h-3.5 w-3.5 rounded-full object-contain" />
+                  <span>{c}</span>
+                  {on && <i className="bi bi-check2 font-bold text-xs" />}
+                </button>
+              );
+            })}
+          </div>
+          <p className="text-[11px] text-ink-muted">
+            Vale para cobranças em dólar (<code className="font-mono">amountUsd</code>), onde o cliente
+            escolhe a moeda no checkout. Moedas pausadas não aparecem aqui e nunca são oferecidas.
+          </p>
+        </div>
 
         <div className="space-y-2">
           <label className="block text-xs font-bold text-ink">Moeda da cobrança:</label>

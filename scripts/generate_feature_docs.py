@@ -107,8 +107,12 @@ DOMAINS: list[dict] = [
             "sweep. Webhook `deposit.confirmed`, `X-SatsPay-Signature: sha256=<hex>` sobre o corpo cru, com "
             "`timestamp`/`attempt` no corpo e retry com backoff (`crates/webhooks`). Statuses: "
             "PENDING → DETECTED → CONFIRMED | EXPIRED | CANCELLED (não existe PAID). "
-            "Uma fatura = uma moeda, definida pelo merchant no `coin`; o checkout NÃO tem "
-            "seletor de moeda e não converte depois de criada."
+            "Duas formas de precificar: `coin`+`amount` (trava a moeda) ou `amountUsd` "
+            "(o cliente escolhe no checkout via POST /v1/public/pay/:id/select-coin). "
+            "Cotação trava na escolha; variação até o pagamento é do merchant; conversão "
+            "arredonda para cima. Endereço abandonado continua vigiado "
+            "(`merchant_invoice_addresses`). Moedas aceitas por merchant em "
+            "/v1/merchant/settings (vazio = todas as ativas; pausada nunca é oferecida)."
         ),
     },
     {

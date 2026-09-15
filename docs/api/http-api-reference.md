@@ -287,9 +287,12 @@ A API HTTP do **BitcoSats** é implementada em Rust com o framework **Axum** (`c
   → `400 AMOUNT_NOT_INTEGER`; valor que zera on-chain → `400 AMOUNT_BELOW_MINIMUM`.
 - **Idempotência**: `orderId` é único por comerciante. Repetir a mesma cobrança devolve `200` com a
   fatura original; mesmo `orderId` com outro valor → `409 DUPLICATE_ORDER_ID`.
-- **Moeda**: uma fatura tem **uma** moeda e um endereço daquela rede. Não há seletor no
-  checkout nem conversão depois de criada — para o cliente escolher, ofereça a escolha no site
-  do comerciante e crie a fatura já na moeda escolhida (um `orderId` por tentativa).
+- **Duas formas de precificar, nunca as duas juntas:**
+  - `coin` + `amount` → fatura travada naquela moeda (contrato original, inalterado).
+  - `amountUsd` (decimal, ex. `"25.00"`) + `acceptedCoins` opcional → o cliente escolhe a moeda
+    no checkout. Sem `acceptedCoins`, usa a configuração do comerciante.
+  - As duas juntas → `400 AMBIGUOUS_AMOUNT`; nenhuma → `400 INVALID_AMOUNT`.
+  - `amount` é **inteiro** em unidades de 1e-8; `amountUsd` é **decimal**, porque é fiat.
 - **Taxa**: `GATEWAY_FEE_BPS` = 25 (**0,25%**), única para todos os comerciantes, truncada
   para unidades inteiras a favor do comerciante — `feeAmount + netAmount == amount` exato.
 - **Resposta `201`**: `id`, `status`, `coin`, `amount`, `feeAmount` (0,25%), `netAmount`,
@@ -300,6 +303,30 @@ A API HTTP do **BitcoSats** é implementada em Rust com o framework **Axum** (`c
 ### `GET /v1/merchant/deposits` / `GET /v1/merchant/deposits/:id`
 - **Autenticação**: igual à criação. `:id` de outro comerciante → `403 INVOICE_FORBIDDEN`.
 - Status: `PENDING → DETECTED → CONFIRMED | EXPIRED | CANCELLED` (não existe `PAID`).
+
+### `GET` / `PUT /v1/merchant/settings`
+- **Autenticação**: igual à criação de fatura (escopo `deposits`).
+- `GET` devolve `acceptedCoins` (resolvido) e `availableCoins` (todas as ativas).
+- `PUT` recebe `{ "acceptedCoins": ["USDT","POL"] }`. Lista vazia guardada significa
+  **todas as ativas** — assim uma moeda que sai da pausa passa a ser oferecida sozinha,
+  sem ninguém editar nada. Moeda pausada é filtrada na leitura **e** na escrita.
+- Seleção sem nenhuma moeda ativa → `400 NO_USABLE_COIN`.
+
+### `POST /v1/public/pay/:id/select-coin`
+- **Sem autenticação** — quem paga é um desconhecido com um link, não uma conta.
+  Tudo que poderia ser abusado é limitado pela própria fatura:
+  - a moeda tem de estar no `accepted_coins` **da fatura** (o cliente não amplia a lista)
+    e não pode estar pausada → `400 COIN_NOT_ACCEPTED`;
+  - endereços são únicos por `(fatura, moeda)`, então trocar de moeda ida e volta reusa
+    linhas em vez de queimar índices HD — o pior caso por fatura é um endereço por moeda aceita;
+  - com pagamento em andamento → `409 COIN_LOCKED`;
+  - sem cotação fresca → `503 PRICE_UNAVAILABLE` (nunca cotamos com preço velho);
+  - o payload não expõe nada de outro comerciante nem de outra fatura.
+- **Cotação**: trava no instante da escolha e vale até `expiresAt`. Da trava até o pagamento
+  chegar, a variação de preço é do **comerciante** — a plataforma não absorve. A conversão
+  USD → unidades arredonda **para cima**, a favor do comerciante.
+- **Endereço abandonado continua valendo**: se o cliente viu BTC, mandou, e depois trocou para
+  POL, o watcher honra o pagamento em BTC e a fatura passa a apontar para BTC.
 
 ### `GET /v1/merchant/webhook-signing-secret`
 - **Autenticação**: Bearer JWT.

@@ -11,6 +11,8 @@ pub mod ledger;
 pub mod lend;
 pub mod merchant;
 pub mod merchant_deposits;
+pub mod merchant_multicoin;
+pub mod merchant_settings;
 pub mod network_fees;
 pub mod oauth;
 pub mod pricing;

@@ -27,6 +27,10 @@ fn input(merchant: Uuid, order_id: &str, amount: u64) -> inv_db::CreateDepositIn
         customer_name: None,
         description: None,
         expiry_minutes: Some(60),
+        accepted_coins: vec![],
+        price_usd_scaled: None,
+        price_decimals: None,
+        quote_price_scaled: None,
     }
 }
 

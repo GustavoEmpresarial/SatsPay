@@ -348,6 +348,10 @@ async fn merchant_invoice_pay_confirm_webhook(pool: PgPool) {
             customer_name: Some("Cust".into()),
             description: Some("order".into()),
             expiry_minutes: Some(60),
+            accepted_coins: vec![],
+            price_usd_scaled: None,
+            price_decimals: None,
+            quote_price_scaled: None,
         },
     )
     .await
@@ -391,6 +395,10 @@ async fn merchant_invoice_pay_confirm_webhook(pool: PgPool) {
             customer_name: None,
             description: None,
             expiry_minutes: Some(30),
+            accepted_coins: vec![],
+            price_usd_scaled: None,
+            price_decimals: None,
+            quote_price_scaled: None,
         },
     )
     .await

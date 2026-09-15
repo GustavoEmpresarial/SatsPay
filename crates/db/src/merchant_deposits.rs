@@ -71,6 +71,17 @@ pub struct MerchantDepositInvoice {
     pub webhook_last_error: Option<String>,
     pub webhook_last_attempt_at: Option<DateTime<Utc>>,
     pub webhook_next_retry_at: Option<DateTime<Utc>>,
+    /// Coins the customer may switch to. One entry means no choice is offered.
+    pub accepted_coins: Vec<String>,
+    /// What the merchant asked for in USD, scaled by `price_decimals`.
+    /// `None` on an invoice priced directly in crypto.
+    pub price_usd_scaled: Option<BigDecimal>,
+    pub price_decimals: Option<i32>,
+    /// Set once the coin is final — the customer confirmed, or money arrived.
+    /// While `None`, the selection can still change.
+    pub coin_locked_at: Option<DateTime<Utc>>,
+    /// Coin price used for the current selection, for reconciliation.
+    pub quote_price_scaled: Option<BigDecimal>,
     pub created_at: DateTime<Utc>,
 }
 
@@ -92,6 +103,14 @@ pub struct CreateDepositInvoiceInput {
     pub customer_name: Option<String>,
     pub description: Option<String>,
     pub expiry_minutes: Option<i64>,
+    /// Coins the customer may pick from. Empty or single = no choice offered,
+    /// and the coin is locked at creation.
+    pub accepted_coins: Vec<shared::Coin>,
+    /// USD the merchant asked for, scaled by `price_decimals`.
+    pub price_usd_scaled: Option<BigDecimal>,
+    pub price_decimals: Option<i32>,
+    /// Coin price used for the initial selection.
+    pub quote_price_scaled: Option<BigDecimal>,
 }
 
 /// Every column [`row_to_invoice`] reads, in one place — the three read
@@ -102,7 +121,9 @@ const INVOICE_COLUMNS: &str = "id, merchant_id, api_key_id, site_user_id, order_
      tx_hash, confirmations, received_amount, callback_url, success_url, cancel_url, \
      customer_email, customer_name, description, status::text as status, \
      expires_at, paid_at, webhook_delivered, webhook_status_code, \
-     webhook_attempts, webhook_last_error, webhook_last_attempt_at, webhook_next_retry_at, created_at";
+     webhook_attempts, webhook_last_error, webhook_last_attempt_at, webhook_next_retry_at, \
+     accepted_coins::text[] as accepted_coins, price_usd_scaled, price_decimals, \
+     coin_locked_at, quote_price_scaled, created_at";
 
 fn row_to_invoice(row: &sqlx::postgres::PgRow) -> MerchantDepositInvoice {
     MerchantDepositInvoice {
@@ -136,6 +157,11 @@ fn row_to_invoice(row: &sqlx::postgres::PgRow) -> MerchantDepositInvoice {
         webhook_last_error: row.get("webhook_last_error"),
         webhook_last_attempt_at: row.get("webhook_last_attempt_at"),
         webhook_next_retry_at: row.get("webhook_next_retry_at"),
+        accepted_coins: row.get("accepted_coins"),
+        price_usd_scaled: row.get("price_usd_scaled"),
+        price_decimals: row.get("price_decimals"),
+        coin_locked_at: row.get("coin_locked_at"),
+        quote_price_scaled: row.get("quote_price_scaled"),
         created_at: row.get("created_at"),
     }
 }
@@ -153,7 +179,7 @@ pub const GATEWAY_FEE_BPS: u32 = 25;
 /// fraction of the smallest representable unit and leave
 /// `fee + net != amount`. Truncating the fee keeps the identity exact and
 /// rounds in the merchant's favour by at most one unit.
-fn split_fee(amount: &BigDecimal) -> (BigDecimal, BigDecimal) {
+pub(crate) fn split_fee(amount: &BigDecimal) -> (BigDecimal, BigDecimal) {
     let fee = (amount * BigDecimal::from(GATEWAY_FEE_BPS) / BigDecimal::from(10_000)).with_scale(0);
     let net = amount - &fee;
     (fee, net)
@@ -168,17 +194,36 @@ pub async fn create_invoice(
     
     let (fee_amount, net_amount) = split_fee(&input.amount);
 
+    // The selection offered at creation is always among the accepted coins,
+    // so the checkout never shows a coin the merchant did not agree to.
+    let mut accepted = input.accepted_coins.clone();
+    if accepted.is_empty() {
+        accepted.push(input.coin);
+    }
+    if !accepted.contains(&input.coin) {
+        accepted.push(input.coin);
+    }
+    let accepted_text: Vec<String> = accepted.iter().map(|c| c.as_str().to_string()).collect();
+    let locked_at: Option<DateTime<Utc>> = if accepted.len() <= 1 { Some(Utc::now()) } else { None };
+    let coin_for_address = input.coin;
+    let amount_for_address = input.amount.clone();
+    let quote_for_address = input.quote_price_scaled.clone();
+    let hd_for_address = input.hd_index;
+    let address_for_row = input.deposit_address.clone();
+
     let row = sqlx::query(&format!(
         "INSERT INTO merchant_deposit_invoices (
             merchant_id, api_key_id, site_user_id, order_id, site_name,
             coin, amount, fee_amount, net_amount, deposit_address,
             callback_url, success_url, cancel_url, customer_email, customer_name,
-            description, status, expires_at, hd_index
+            description, status, expires_at, hd_index,
+            accepted_coins, price_usd_scaled, price_decimals, quote_price_scaled, coin_locked_at
         ) VALUES (
             $1, $2, $3, $4, $5,
             $6::coin, $7, $8, $9, $10,
             $11, $12, $13, $14, $15,
-            $16, 'PENDING'::deposit_invoice_status, $17, $18
+            $16, 'PENDING'::deposit_invoice_status, $17, $18,
+            $19::text[]::coin[], $20, $21, $22, $23
         ) RETURNING {INVOICE_COLUMNS}"
     ))
     .bind(input.merchant_id)
@@ -199,6 +244,13 @@ pub async fn create_invoice(
     .bind(input.description)
     .bind(expires_at)
     .bind(input.hd_index)
+    .bind(&accepted_text)
+    .bind(input.price_usd_scaled.as_ref())
+    .bind(input.price_decimals)
+    .bind(input.quote_price_scaled.as_ref())
+    // A single-coin invoice is final the moment it exists; a multi-coin one
+    // stays open until the customer picks.
+    .bind(locked_at)
     .fetch_one(pool)
     .await
     .map_err(|e| {
@@ -211,7 +263,23 @@ pub async fn create_invoice(
         }
     })?;
 
-    Ok(row_to_invoice(&row))
+    let invoice = row_to_invoice(&row);
+
+    // Register the first address in the child table, so the watcher reaches
+    // every invoice through one path whether or not the coin ever changes.
+    crate::merchant_multicoin::upsert_invoice_address(
+        pool,
+        invoice.id,
+        coin_for_address,
+        &address_for_row,
+        hd_for_address,
+        &amount_for_address,
+        quote_for_address.as_ref(),
+    )
+    .await
+    .map_err(|e| MerchantDepositError::Db(sqlx::Error::Protocol(e.to_string())))?;
+
+    Ok(invoice)
 }
 
 pub async fn get_invoice_by_id(pool: &PgPool, id: Uuid) -> Result<MerchantDepositInvoice, MerchantDepositError> {
