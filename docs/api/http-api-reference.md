@@ -2,6 +2,42 @@
 
 A API HTTP do **BitcoSats** é implementada em Rust com o framework **Axum** (`crates/api-http/`). Todas as respostas seguem o formato JSON e utilizam códigos HTTP semânticos.
 
+## 0. Convenções que valem para toda a API
+
+**Quantias são inteiros.** Todo campo `amount` desta API é um inteiro em unidades de
+ledger de `1e-8`, em qualquer moeda. `25 USDT` é `"2500000000"`, nunca `"25.00"`.
+A única exceção é `amountUsd` no gateway de cobranças, que é **fiat decimal** — e por
+isso está marcado como tal onde aparece. Quantias viajam como **string**: `2500000000`
+cabe num double, mas `9 007 199 254 740 993` não, e nenhuma API de dinheiro deve
+depender de o cliente ter notado a diferença.
+
+**Aliases.** Vários endpoints estão montados em mais de um caminho por compatibilidade
+com integrações anteriores. Cada família é documentada **uma vez**, no caminho canônico,
+com os aliases listados na entrada:
+
+| Canônico | Aliases (mesmo handler, mesmo comportamento) |
+|---|---|
+| `/v1/api-keys` | `/v1/public/keys`, `/public/keys`, `/api-keys` |
+| `/v1/public/send`, `/v1/public/balance` | `/public/send`, `/public/balance` |
+| `/v1/public/pay/*` | `/public/pay/*` |
+| `/v1/merchant/deposits` | `/v1/merchant/deposits/create`, `/v1/merchant/invoices` |
+| `/v1/faucet/*`, `/v1/faucetlist/*` | `/faucet/*`, `/faucetlist/*` |
+
+**Autenticação.** Três mecanismos, nunca misturados na mesma requisição:
+- **Bearer JWT** — sessão de usuário no app. Cookie `HttpOnly` no navegador.
+- **`x-api-key`** — chave de servidor, com escopos. Ver §12.
+- **HMAC assinado** — chave com `requireSignature`, descrito em
+  [`public-api-hmac.md`](public-api-hmac.md).
+
+Rotas marcadas **ADMIN** exigem JWT cujo usuário tenha `role = "ADMIN"`; para um usuário
+comum elas respondem `403`, não `404`.
+
+**Erros.** Corpo JSON com `error` (mensagem legível) e, nas superfícies novas, `code`
+(constante estável — `AMOUNT_NOT_INTEGER`, `COIN_LOCKED`, `DUPLICATE_ORDER_ID`…).
+Integre contra o `code`, nunca contra o texto.
+
+---
+
 ---
 
 ## 1. Endpoints de Sistema e Saúde
@@ -83,6 +119,20 @@ A API HTTP do **BitcoSats** é implementada em Rust com o framework **Axum** (`c
 - **Body**: `{"username": "novo_nome"}`
 - **Descrição**: Altera o display username do usuário.
 
+### `GET /v1/auth/security-logs`
+- **Autenticação**: Bearer JWT
+- **Descrição**: Histórico de eventos de segurança da própria conta (logins, trocas de
+  senha, emissão de chaves), com IP e user-agent. Só os do usuário autenticado.
+
+### `POST /v1/auth/admin/login`
+- **Autenticação**: Pública, mas só conclui para usuário com `role = "ADMIN"`.
+- **Descrição**: Sessão do painel administrativo, separada da sessão do app. Um JWT de
+  usuário comum não vale no painel e vice-versa.
+
+### `POST /v1/auth/admin/logout`
+- **Autenticação**: Bearer JWT (admin)
+- **Descrição**: Encerra a sessão administrativa.
+
 ---
 
 ## 3. Carteiras e Razão (`/v1/wallet`)
@@ -149,6 +199,19 @@ A API HTTP do **BitcoSats** é implementada em Rust com o framework **Axum** (`c
   }
   ```
 
+### `GET /v1/deposits/history`
+- **Autenticação**: Bearer JWT
+- **Descrição**: Depósitos on-chain detectados para o usuário, com moeda, quantia,
+  confirmações e hash. Só os da própria conta.
+
+### `GET /v1/withdrawals`
+- **Autenticação**: Bearer JWT
+- **Descrição**: Saques do usuário, incluindo os que aguardam aprovação manual.
+
+### `GET /v1/withdrawals/history`
+- **Autenticação**: Bearer JWT
+- **Descrição**: Histórico de saques já liquidados ou rejeitados.
+
 ---
 
 ## 5. Câmbio Instantâneo (`/v1/swap`)
@@ -175,6 +238,29 @@ A API HTTP do **BitcoSats** é implementada em Rust com o framework **Axum** (`c
   ```
 - **Descrição**: Executa a conversão atômica debitando da carteira do usuário e creditando via liquidez da carteira `HOUSE`.
 
+### `POST /v1/swap/quote`
+- **Autenticação**: Bearer JWT
+- **Descrição**: Mesma cotação do `GET`, aceitando o par no corpo. Uma cotação tem
+  validade curta; executar fora dela recalcula.
+
+### `POST /v1/swap/execute`
+- **Autenticação**: Bearer JWT
+- **Descrição**: Alias de `POST /v1/swap` — executa a conversão na cotação vigente.
+
+### `GET /v1/swap/history`
+- **Autenticação**: Bearer JWT
+- **Descrição**: Conversões do usuário, com par, quantias de entrada e saída e taxa aplicada.
+
+### `GET /v1/swap/orders/:id`
+- **Autenticação**: Bearer JWT. Ordem de outro usuário → `403`.
+- **Descrição**: Estado de uma conversão específica.
+
+### `GET /v1/swap/telemetry`
+- **Autenticação**: Bearer JWT
+- **Descrição**: Saúde do motor de câmbio — idade das cotações em cache e disponibilidade
+  das fontes de preço. Nenhuma cotação obsoleta é usada para converter dinheiro: preço
+  velho falha fechado.
+
 ---
 
 ## 6. Faucet e Diretório Faucetlist (`/v1/faucet` e `/v1/faucetlist`)
@@ -191,6 +277,24 @@ A API HTTP do **BitcoSats** é implementada em Rust com o framework **Axum** (`c
 ### `POST /v1/faucetlist/click/:id`
 - **Autenticação**: Pública
 - **Descrição**: Registra clique e redirecionamento para o site parceiro.
+
+### `POST /v1/faucet/claim`
+- **Autenticação**: Bearer JWT
+- **Body**: `{"coin": "BTC", "captchaToken": "…"}`
+- **Descrição**: Mesma operação de `/claim/:coin`, com a moeda no corpo.
+
+### `POST /v1/faucetlist`
+- **Autenticação**: Bearer JWT
+- **Descrição**: Submete um site ao diretório. Entra como pendente — quem aprova é a
+  curadoria, em `/v1/admin/faucetlist`.
+
+### `GET /v1/faucetlist/mine`
+- **Autenticação**: Bearer JWT
+- **Descrição**: Sites submetidos pelo próprio usuário, incluindo os ainda não aprovados.
+
+### `DELETE /v1/faucetlist/:id`
+- **Autenticação**: Bearer JWT (dono do site). De outro dono → `403`.
+- **Descrição**: Remove o próprio site do diretório.
 
 ---
 
@@ -218,6 +322,10 @@ A API HTTP do **BitcoSats** é implementada em Rust com o framework **Axum** (`c
 ### `POST /v1/stake/:id/cancel`
 - **Autenticação**: Bearer JWT
 - **Descrição**: Cancela um contrato de staking antes do prazo (sem rendimento).
+
+### `GET /v1/stake/strategies`
+- **Autenticação**: Bearer JWT
+- **Descrição**: Prazos e taxas disponíveis para novos contratos (catálogo, não posições).
 
 ---
 
@@ -345,9 +453,18 @@ A API HTTP do **BitcoSats** é implementada em Rust com o framework **Axum** (`c
 
 ### `GET /v1/public/pay/demo`
 - Fatura sintética para demonstração: sem linha no banco, sem dinheiro, sem webhook.
+  Oferece as moedas que **aquele** comerciante aceita quando há sessão, e todas as ativas
+  quando não há — ela existe para demonstrar o seletor, então esconder o seletor a
+  descaracteriza.
   Responde `demo: true`, e o checkout usa isso para rotular a página e esconder o
   pagamento por saldo. As rotas `/demo` e `/merchant/demo` redirecionam para `/pay/demo`
   (antes redirecionavam para a página de depósitos do próprio usuário).
+
+### `POST /v1/public/pay/demo/select-coin`
+- **Sem autenticação.** Corpo `{ "coin": "POL" }`, mesma resposta do checkout.
+- **Não escreve nada**: não grava linha, não consome índice HD e não cota dinheiro real.
+  Os endereços demonstrativos são propositalmente **inválidos** em suas redes (todos contêm
+  `-DEMO-`), para que ninguém consiga enviar moeda de verdade para a página de exemplo.
 
 ### `GET /v1/public/coins`
 - **Sem autenticação** — pensado para rodar no navegador do cliente.
@@ -410,3 +527,283 @@ A API HTTP do **BitcoSats** é implementada em Rust com o framework **Axum** (`c
   }
   ```
 - **Descrição**: Cria um novo programa de mineração de liquidez.
+
+### `GET /v1/admin/stats`
+- **Descrição**: Números agregados da plataforma — usuários, saldos, volume, operações pendentes.
+
+### `GET /v1/admin/economics`
+- **Descrição**: Visão econômica: emissão, taxas arrecadadas, passivo do ledger e liquidez.
+
+### `GET /v1/admin/treasury-wallets`
+- **Descrição**: Carteiras de tesouraria (`HOUSE`, `LEND_POOL`, hot wallets) com saldo on-chain
+  e saldo contábil. Nunca devolve chave privada nem seed — nem em ambiente de desenvolvimento.
+
+### `GET /v1/admin/treasury-health`
+- **Descrição**: Reconciliação entre o que o ledger diz que devemos e o que existe on-chain.
+  É o alarme de solvência: divergência aqui é `CRITICAL`, não um relatório.
+
+### `GET /v1/admin/withdrawals`
+- **Descrição**: Todos os saques, em qualquer estado (o `pending-withdrawals` é o recorte
+  que aguarda decisão).
+
+### `GET /v1/admin/audit-logs`
+- **Descrição**: Trilha de auditoria das ações administrativas — quem, o quê, quando, de
+  qual IP, sobre qual recurso, com qual resultado.
+
+### `POST /v1/admin/rewards/programs/:id/active`
+- **Body**: `{"active": false}`
+- **Descrição**: Liga ou desliga a emissão de um programa sem apagá-lo.
+
+### Credenciamento de comerciantes
+
+### `GET /v1/admin/merchant/applications`
+- **Descrição**: Fila de pedidos de credenciamento aguardando decisão.
+
+### `POST /v1/admin/merchant/:id/approve`
+- **Descrição**: Aprova o pedido. A partir daí o usuário pode emitir chave com escopo
+  `deposits` e criar cobranças.
+
+### `POST /v1/admin/merchant/:id/reject`
+- **Body**: `{"reason": "documentação insuficiente"}`
+- **Descrição**: Recusa o pedido, com motivo registrado.
+
+### `GET /v1/admin/merchants` / `GET /v1/admin/merchants/stats`
+- **Descrição**: Comerciantes já credenciados e seus números agregados (faturas, volume, taxa).
+
+### `POST /v1/admin/merchants/:id/approve` / `POST /v1/admin/merchants/:id/suspend`
+- **Descrição**: Reativa ou suspende um comerciante credenciado. Suspenso não cria faturas novas.
+
+### Curadoria do Faucetlist
+
+### `GET /v1/admin/faucetlist`
+- **Descrição**: Sites submetidos, incluindo os pendentes de curadoria.
+
+### `POST /v1/admin/faucetlist/:id/approve`, `/v1/admin/faucetlist/:id/reject`, `/v1/admin/faucetlist/:id/suspend`
+- **Descrição**: Publica, recusa ou tira do ar um site do diretório.
+
+### Suporte (visão do operador)
+
+### `GET /v1/admin/support/tickets` / `GET /v1/admin/support/tickets/:id`
+- **Descrição**: Todos os tíquetes, de qualquer usuário — a versão administrativa de §14.
+
+### `POST /v1/admin/support/tickets/:id/messages`
+- **Body**: `{"body": "texto da resposta"}`
+- **Descrição**: Responde ao usuário no tíquete.
+
+### `POST /v1/admin/support/tickets/:id/status`
+- **Body**: `{"status": "RESOLVED"}`
+- **Descrição**: Move o tíquete de estado (`OPEN`, `PENDING`, `RESOLVED`, `CLOSED`).
+
+### Observabilidade de erros
+
+### `GET /v1/admin/telemetry/overview`
+- **Descrição**: Painel de erros: contagem por severidade, taxa de erro, grupos mais
+  frequentes, primeira e última ocorrência.
+
+### `GET /v1/admin/telemetry/errors`
+- **Descrição**: Ocorrências individuais, filtráveis. Os payloads passam por redação antes
+  de serem gravados (`db::telemetry::redact_secrets`): senha, token, chave e seed nunca
+  chegam ao banco.
+
+### `POST /v1/admin/telemetry/errors/:id/resolve` e `POST /v1/admin/telemetry/errors/:id/ignore`
+- **Descrição**: Move uma ocorrência no ciclo de vida (`NEW → RESOLVED | IGNORED`).
+
+### `POST /v1/admin/telemetry/errors/batch-resolve`
+- **Body**: `{"ids": ["…", "…"]}`
+- **Descrição**: Resolve um conjunto específico.
+
+### `POST /v1/admin/telemetry/errors/resolve-all` e `POST /v1/admin/telemetry/errors/clear`
+- **Descrição**: Resolve tudo que está aberto; `clear` apaga o histórico. Operação
+  destrutiva e auditada — `clear` descarta evidência, não apenas ruído de tela.
+
+### `GET /v1/admin/telemetry/metrics-history`
+- **Descrição**: Série temporal das métricas operacionais, para correlacionar pico de erro
+  com deploy.
+
+### `POST /v1/admin/telemetry/test-error`
+- **Descrição**: Injeta um erro sintético para verificar ponta a ponta coleta, agrupamento
+  e alerta. Existe para que o caminho de erro não seja testado pela primeira vez durante
+  um incidente.
+
+---
+
+## 12. Chaves de API (`/v1/api-keys`)
+
+*Aliases: `/v1/public/keys`, `/public/keys`, `/api-keys` — mesmo handler.*
+
+A chave é a credencial de **servidor**. Nunca colocá-la no navegador: para pagamentos, o
+botão oficial recebe apenas o `checkoutUrl` que o seu backend já criou.
+
+### `POST /v1/api-keys`
+- **Autenticação**: Bearer JWT (a chave é emitida por uma sessão de usuário, não por outra chave).
+- **Body**:
+  ```json
+  {
+    "label": "loja-producao",
+    "scopes": ["deposits"],
+    "allowedIps": ["203.0.113.10"],
+    "expiresInDays": 365,
+    "requireSignature": true
+  }
+  ```
+- **Escopos efetivamente verificados**: `deposits` (gateway de cobranças), `send`
+  (`/v1/public/send`) e `*` (curinga, concede tudo). Um escopo fora dessa lista é
+  aceito e guardado, mas não habilita nada.
+- **`allowedIps`**: vazio = qualquer origem. Preenchido, a chave só vale a partir daqueles IPs.
+- **`requireSignature`**: exige HMAC em cada requisição — ver [`public-api-hmac.md`](public-api-hmac.md).
+- **Resposta**: a chave em claro aparece **uma única vez**, nesta resposta. Não há como
+  recuperá-la depois; perdida, rotacione.
+
+### `GET /v1/api-keys`
+- **Autenticação**: Bearer JWT
+- **Descrição**: Chaves do usuário com `keyPrefix`, escopos, allowlist, expiração, último uso
+  e data de desativação. **O segredo não é devolvido.**
+
+### `POST /v1/api-keys/:id/rotate`
+- **Autenticação**: Bearer JWT
+- **Descrição**: Gera um segredo novo mantendo id, escopos, allowlist, expiração e política
+  de assinatura. O segredo anterior para de valer imediatamente.
+
+### `DELETE /v1/api-keys/:id`
+- **Autenticação**: Bearer JWT
+- **Descrição**: Desativa a chave. A linha continua existindo para a auditoria não perder o
+  rastro de quem usou o quê.
+
+### `POST /v1/public/send`
+- **Autenticação**: `x-api-key` com escopo `send`; HMAC se a chave exigir.
+- **Body**: `{"coin": "USDT", "amount": "2500000000", "toEmail": "…", "idempotencyKey": "…"}`
+- **Descrição**: Transfere da carteira do dono da chave para outro usuário **pela plataforma**
+  (não é saque on-chain). `idempotencyKey` é obrigatório: repetir a mesma chave devolve a
+  operação original em vez de enviar de novo. Há limite diário por conta
+  (`PUBLIC_API_DAILY_SEND_LIMIT`).
+
+### `GET /v1/public/balance`
+- **Autenticação**: `x-api-key` (qualquer chave válida).
+- **Descrição**: Saldo do dono da chave, por moeda, em unidades de ledger.
+- **Atenção**: este endpoint **não verifica escopo**. Uma chave emitida só com `deposits`
+  lê o saldo completo da conta. Enquanto isso não mudar, trate toda chave como capaz de
+  ler saldo e prefira contas separadas para integrações de terceiros.
+
+---
+
+## 13. OAuth 2.0 e OpenID Connect (`/v1/oauth`)
+
+Fluxo *authorization code* com **PKCE obrigatório**. Serve para outro produto ("Entrar com
+BitcoSats") — não é o caminho do gateway de cobranças, que usa chave de API.
+
+### `GET /.well-known/openid-configuration`
+- **Autenticação**: Pública
+- **Descrição**: Documento de discovery OIDC — emissor, endpoints, algoritmos e escopos
+  suportados. É daqui que uma biblioteca OIDC se configura sozinha.
+
+### `GET /v1/oauth/authorize/info`
+- **Autenticação**: Bearer JWT opcional.
+- **Query**: `client_id`, `redirect_uri`, `scope`, `state`, `code_challenge`,
+  `code_challenge_method=S256`.
+- **Descrição**: Dados para desenhar a tela de consentimento (nome do app, escopos pedidos)
+  e validação antecipada dos parâmetros. Sem sessão, indica que é preciso autenticar antes.
+
+### `POST /v1/oauth/authorize`
+- **Autenticação**: Bearer JWT (o usuário que está consentindo).
+- **Descrição**: Registra o consentimento e devolve o `code` para o `redirect_uri`.
+  `redirect_uri` precisa bater **exatamente** com um dos cadastrados no app — prefixo não
+  basta, e é essa checagem que impede o código de vazar para um domínio do atacante.
+  O `state` volta intacto, para o cliente detectar CSRF.
+
+### `POST /v1/oauth/token`
+- **Autenticação**: Pública (autentica pelo `client_id`/`client_secret` ou PKCE).
+- **Body**: `grant_type=authorization_code` com `code`, `redirect_uri`, `client_id`,
+  `code_verifier`; ou `grant_type=refresh_token` com `refresh_token`.
+- **Descrição**: Troca o código por `access_token` (+ `refresh_token`, + `id_token` quando
+  o escopo `openid` foi pedido). O código é de uso único e expira em minutos.
+
+### `GET /v1/oauth/userinfo`
+- **Autenticação**: `Authorization: Bearer <access_token>` do OAuth.
+- **Descrição**: Reivindicações do usuário conforme os escopos concedidos. Devolve apenas
+  o que foi consentido.
+
+### `GET` / `POST /v1/oauth/apps`
+- **Autenticação**: Bearer JWT
+- **Descrição**: Aplicações OAuth do próprio desenvolvedor. Na criação, o
+  `client_secret` aparece **uma única vez**.
+
+### `PUT` / `DELETE /v1/oauth/apps/:id`
+- **Autenticação**: Bearer JWT (dono do app). De outro dono → `403`.
+- **Descrição**: Atualiza nome, logo e `redirect_uris`; ou remove o app.
+
+### `POST /v1/oauth/apps/:id/rotate-secret`
+- **Autenticação**: Bearer JWT (dono do app).
+- **Descrição**: Novo `client_secret`; o anterior deixa de valer na hora.
+
+### `GET /v1/oauth/authorized-apps`
+- **Autenticação**: Bearer JWT
+- **Descrição**: Aplicações às quais **este usuário** concedeu acesso — o outro lado da mesa.
+
+### `DELETE /v1/oauth/authorized-apps/:id`
+- **Autenticação**: Bearer JWT
+- **Descrição**: Revoga o consentimento e invalida os tokens daquele app.
+
+---
+
+## 14. Suporte (`/v1/support`)
+
+### `POST /v1/support/tickets`
+- **Autenticação**: Bearer JWT
+- **Body**: `{"subject": "…", "body": "…", "category": "…"}`
+- **Descrição**: Abre um tíquete.
+
+### `GET /v1/support/tickets` / `GET /v1/support/tickets/:id`
+- **Autenticação**: Bearer JWT. Tíquete de outro usuário → `403`.
+- **Descrição**: Tíquetes do próprio usuário e o histórico de mensagens de um deles.
+
+### `POST /v1/support/tickets/:id/messages`
+- **Autenticação**: Bearer JWT (autor do tíquete).
+- **Body**: `{"body": "texto"}`
+- **Descrição**: Acrescenta uma mensagem à conversa.
+
+---
+
+## 15. Indicação e Airdrop
+
+### `GET /v1/referral/stats`
+- **Autenticação**: Bearer JWT
+- **Descrição**: Código de indicação do usuário, total de indicados e comissão acumulada.
+
+### `GET /v1/referral/users` (alias `GET /v1/referral/list`)
+- **Autenticação**: Bearer JWT
+- **Descrição**: Quem este usuário indicou. Devolve identificação mínima do indicado — a
+  conta de terceiro não é exposta a quem indicou.
+
+### `GET /v1/referral/commissions`
+- **Autenticação**: Bearer JWT
+- **Descrição**: Comissões creditadas, com origem e data.
+
+### `GET /v1/airdrop/overview`, `GET /v1/airdrop/profile`, `GET /v1/airdrop/history`, `GET /v1/airdrop/logs`
+- **Autenticação**: Bearer JWT
+- **Descrição**: Pontuação do usuário na campanha, perfil de participação, créditos já
+  recebidos e trilha das ações pontuadas — todos restritos à própria conta.
+
+### `GET /v1/airdrop/leaderboard`
+- **Autenticação**: Bearer JWT (exige sessão, mas o ranking é o mesmo para todos).
+- **Descrição**: Classificação por pontos, identificando participantes por apelido.
+
+---
+
+## 16. Status e Telemetria de Cliente
+
+### `GET /v1/status/nodes`
+- **Autenticação**: Pública
+- **Descrição**: Latência e disponibilidade dos nós de cada rede que o gateway depende.
+  Alimenta a página de status: se o nó da rede está fora, é aqui que aparece antes de
+  virar fatura não confirmada.
+
+### `POST /v1/telemetry/client-error`
+- **Autenticação**: Pública (com limite de taxa).
+- **Body**: `{"message": "…", "stack": "…", "url": "…", "userAgent": "…"}`
+- **Descrição**: Erro de JavaScript do navegador, para o mesmo painel dos erros de backend.
+  O conteúdo passa por redação antes de ser gravado, e estas rotas são excluídas da
+  própria coleta de erros HTTP — senão uma falha na coleta se realimentaria.
+
+### `POST /v1/telemetry/client-errors`
+- **Autenticação**: Pública (com limite de taxa).
+- **Descrição**: Mesma coisa em lote, para o buffer da SPA descarregar de uma vez.

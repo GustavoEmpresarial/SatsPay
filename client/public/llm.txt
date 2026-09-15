@@ -1,7 +1,8 @@
 # SatsPay — machine-readable product brief
 # Also published at /ai.txt
 
-SatsPay is a multi-coin micropayments wallet & developer platform (BTC, LTC, DOGE, BCH, POL, SOL, USDT, USDC, DGB) with a public API.
+SatsPay is a multi-coin micropayments wallet & developer platform (BTC, LTC, DOGE, BCH,
+POL, SOL, USDT, USDC, DGB) with a public API and a hosted crypto checkout for merchants.
 
 Primary docs: https://www.satspay.pro/documentation
 API docs: https://www.satspay.pro/docs
@@ -12,12 +13,53 @@ Terms: https://www.satspay.pro/terms
 Cookies: https://www.satspay.pro/cookies
 Security: https://www.satspay.pro/security
 
+# Getting started, in order:
+# - POST /v1/merchant/apply, then GET /v1/merchant/status. The deposit gateway is
+#   closed until the merchant account is APPROVED.
+# - POST /v1/api-keys issues the server credential. The plaintext secret is returned
+#   in the `key` field and is shown ONCE. Scopes that are actually enforced:
+#   `deposits`, `send`, `*`.
+# - Then POST /v1/merchant/deposits to create the first invoice.
+
 # Integration facts that are easy to get wrong:
 # - Create a deposit invoice: POST /v1/merchant/deposits (201 Created).
 # - The response field for the hosted checkout is `checkoutUrl` (absolute);
 #   `payUrl` is the same path, relative.
 # - `amount` is an integer count of ledger units (1e-8), never a decimal
-#   amount of coins: 25 USDT = "2500000000".
+#   amount of coins: 25 USDT = "2500000000". Send it as a string.
+# - `amountUsd` is the ONE exception: it is decimal fiat ("25.00"), because it
+#   prices an invoice in dollars rather than in ledger units.
+# - Gateway fee is 0.25% (GATEWAY_FEE_BPS = 25), the same for every merchant.
+#   It is truncated to whole ledger units in the merchant's favour, so
+#   feeAmount + netAmount == amount exactly.
 # - Webhook event is `deposit.confirmed`, signed as
 #   `X-SatsPay-Signature: sha256=<hex HMAC-SHA256 of the raw body>`.
 # - BTC, LTC, DOGE and DGB deposits are temporarily paused (503 DEPOSIT_PAUSED).
+
+# Multi-coin invoices (the merchant picks what to accept, the customer picks what to pay):
+# - Price the invoice either with `coin` + `amount` (single coin, locked at creation)
+#   or with `amountUsd` + optional `acceptedCoins` (the customer chooses at checkout).
+#   Both together => 400 AMBIGUOUS_AMOUNT. Neither => 400 INVALID_AMOUNT.
+# - GET/PUT /v1/merchant/settings holds the merchant's accepted-coin list. An empty
+#   stored list means "every live coin", so a coin leaving pause is offered with no edit.
+# - POST /v1/public/pay/:id/select-coin is how the customer chooses. It is public and
+#   unauthenticated (whoever pays holds a link, not an account), idempotent per
+#   (invoice, coin), and refuses a coin outside the invoice's own accepted list.
+# - The quote locks when the customer selects, and holds until the invoice expires.
+#   Between the lock and the payment, price movement is the MERCHANT's, not the
+#   platform's. USD -> ledger units rounds UP, in the merchant's favour.
+# - A coin the customer abandoned keeps its address watched: money sent there is still
+#   honoured and confirms the invoice in that coin.
+
+# Public, unauthenticated endpoints a merchant's page can call from the browser:
+# - GET /v1/public/coins — symbol, name, ledger decimals, on-chain decimals,
+#   minConfirmations, depositsEnabled, logoUrl and priceUsd for every coin.
+#   Icons are served from this domain at /sdk/coins/<symbol>.svg.
+# - GET /v1/public/pay/demo — a synthetic invoice that renders the real checkout with
+#   no database row, no money and no webhook. Its addresses are deliberately invalid.
+
+# Payment button:
+# - /sdk/satspay-pay.js renders the official button from
+#   <div class="satspay-pay" data-checkout_url="..."></div>.
+# - The merchant's backend creates the invoice; the button only navigates to the
+#   checkoutUrl. NO API KEY EVER GOES TO THE BROWSER.

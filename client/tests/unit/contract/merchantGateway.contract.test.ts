@@ -149,3 +149,113 @@ describe('contract: error codes', () => {
     }
   });
 });
+
+describe('contract: public checkout payload', () => {
+  // The checkout is rendered from this payload by CheckoutPage and by the
+  // demo. When a field was added on one side only, the customer saw a blank
+  // picker on a merchant who had configured several coins.
+  /** Field names anywhere inside a function body (nested json! blocks included). */
+  function fieldsInFn(source: string, marker: string): string[] {
+    const start = source.indexOf(marker);
+    expect(start, `function not found: ${marker}`).toBeGreaterThan(-1);
+    // Up to the next top-level item, or the end of the file.
+    const rest = source.slice(start + marker.length);
+    const end = rest.search(/\n(?:pub )?(?:async )?fn |\n#\[cfg\(test\)\]/);
+    return [...(end === -1 ? rest : rest.slice(0, end)).matchAll(/"([a-zA-Z][a-zA-Z0-9]*)":/g)].map((m) => m[1]);
+  }
+
+  const fields = fieldsInFn(handler, 'fn public_invoice_json');
+  const demoFields = fieldsInFn(
+    readFileSync(path.join(repoRoot, 'crates/api-http/src/public_catalog.rs'), 'utf8'),
+    'fn demo_payload',
+  );
+
+  it('sends everything the picker and the QR need', () => {
+    for (const field of ['coin', 'amount', 'amountDisplay', 'depositAddress', 'qrCode', 'coinOptions', 'coinLocked', 'amountUsd', 'logoUrl']) {
+      expect(fields, `public_invoice_json must send ${field}`).toContain(field);
+    }
+  });
+
+  it('the demo speaks the same payload as a real invoice', () => {
+    // The demo is the one checkout an integrator looks at before signing up,
+    // so a field it omits reads as a feature that does not exist.
+    for (const field of fields) {
+      expect(demoFields, `demo is missing ${field}, so it renders a different checkout`).toContain(field);
+    }
+  });
+
+  it("never leaks the merchant's own integration fields to the payer", () => {
+    // The public payload is served to whoever holds the link.
+    for (const secret of ['callbackUrl', 'siteUserId', 'webhookAttempts']) {
+      expect(fields, `public payload must not expose ${secret}`).not.toContain(secret);
+    }
+  });
+});
+
+describe('contract: onboarding path', () => {
+  const merchant = readFileSync(path.join(repoRoot, 'crates/api-http/src/merchant.rs'), 'utf8');
+  const publicApi = readFileSync(path.join(repoRoot, 'crates/api-http/src/public_api.rs'), 'utf8');
+
+  it('documents the apply/status routes the server actually mounts', () => {
+    expect(merchant).toContain('"/v1/merchant/apply"');
+    expect(merchant).toContain('"/v1/merchant/status"');
+    expect(docs).toContain('path="/v1/merchant/apply"');
+    expect(docs).toContain('path="/v1/merchant/status"');
+  });
+
+  it('names the key-issuing body fields the handler deserializes', () => {
+    for (const field of ['label', 'scopes', 'allowedIps', 'expiresInDays', 'requireSignature']) {
+      expect(publicApi, `IssueKeyRequest must accept ${field}`).toContain(field);
+      expect(docs, `docs must document ${field}`).toContain(field);
+    }
+  });
+
+  it('tells integrators to read the field the response actually carries', () => {
+    // `IssuedKey` has no serde rename, so the secret arrives as `key`.
+    // The published guide said `apiKey`, which is simply absent.
+    const issued = readFileSync(path.join(repoRoot, 'crates/db/src/public_api.rs'), 'utf8');
+    const struct = issued.slice(issued.indexOf('pub struct IssuedKey'));
+    expect(struct.slice(0, struct.indexOf('}'))).toContain('pub key: String');
+    expect(docs).not.toContain('apiKey');
+  });
+
+  it('only advertises scopes the backend enforces', () => {
+    const enforced = [...publicApi.matchAll(/require_scope\(&\w+, "(\w+)"\)/g)].map((m) => m[1]);
+    expect(enforced).toContain('send');
+    // `balance` was advertised for years and is checked nowhere.
+    expect(enforced).not.toContain('balance');
+    expect(docs).not.toMatch(/scopes.*"balance"/);
+  });
+});
+
+describe('contract: the HMAC guide matches the verifier', () => {
+  const guide = readFileSync(path.join(repoRoot, 'docs/api/public-api-hmac.md'), 'utf8');
+  const dbApi = readFileSync(path.join(repoRoot, 'crates/db/src/public_api.rs'), 'utf8');
+  const httpApi = readFileSync(path.join(repoRoot, 'crates/api-http/src/public_api.rs'), 'utf8');
+
+  it('names the headers the extractor actually reads', () => {
+    for (const header of ['x-key-id', 'x-timestamp', 'x-signature', 'x-api-key']) {
+      expect(httpApi, `extractor must read ${header}`).toContain(`"${header}"`);
+      expect(guide, `guide must document ${header}`).toContain(header);
+    }
+  });
+
+  it('documents the canonical string in the order it is built', () => {
+    // `canonical_string` is `{timestamp}\n{METHOD}\n{path}\n{body_hash}`.
+    expect(dbApi).toContain('format!("{timestamp}\\n{}\\n{path}\\n{body_hash}"');
+    expect(guide).toContain('{TIMESTAMP}\\n{METHOD}\\n{PATH}\\n{SHA256_HEX(BODY)}');
+  });
+
+  it('does not resurrect the protocol that was never implemented', () => {
+    // Replay is stopped by reserving the signature itself, not by a nonce.
+    expect(dbApi).toContain('public_api_signature_nonces');
+    // The closing section exists to name the old claims and correct them, so
+    // check the instructional part of the guide, not the changelog.
+    const instructions = guide.split('## 7. O que mudou')[0];
+    expect(instructions).not.toContain('X-Nonce');
+    expect(instructions).not.toContain('127.0.0.1:4000');
+    expect(instructions).not.toContain('transactionId');
+    // …and the changelog must actually be there, or the correction is silent.
+    expect(guide).toContain('## 7. O que mudou');
+  });
+});

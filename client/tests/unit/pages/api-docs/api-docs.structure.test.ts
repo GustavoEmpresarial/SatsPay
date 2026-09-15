@@ -116,3 +116,68 @@ describe('API Docs — matches the real gateway contract', () => {
     expect(src).not.toContain('INSUFFICIENT_FUNDS');
   });
 });
+
+/**
+ * The page documented how to create an invoice without ever saying how to
+ * become a merchant or issue a key, and without the endpoints an integrator
+ * uses to test the integration. A reader following it from the top hit a 403
+ * and had to read the Rust source to find out why.
+ */
+describe('API Docs — covers the whole integrator path', () => {
+  it('opens with the onboarding trail, in the order it happens', () => {
+    expect(src).toContain("handleTabChange('start')");
+    expect(src).toContain('function OnboardingTab()');
+    const tab = src.slice(src.indexOf('function OnboardingTab()'), src.indexOf('export function ApiDocsPage'));
+    const order = ['/v1/merchant/apply', '/v1/merchant/status', '/v1/api-keys'];
+    let cursor = -1;
+    for (const step of order) {
+      const at = tab.indexOf(step);
+      expect(at, `onboarding must document ${step}`).toBeGreaterThan(-1);
+      expect(at, `${step} is out of order`).toBeGreaterThan(cursor);
+      cursor = at;
+    }
+  });
+
+  it('documents key rotation and revocation, not just issuing', () => {
+    expect(src).toContain('/v1/api-keys/:id/rotate');
+    expect(src).toContain('path="/v1/api-keys/:id"');
+    // The secret is unrecoverable; saying so is the whole point.
+    expect(src).toMatch(/uma única vez/);
+  });
+
+  it('documents how to test an integration before shipping it', () => {
+    expect(src).toContain('/v1/merchant/deposits/:id/test-webhook');
+    expect(src).toContain('/v1/public/pay/demo');
+    expect(src).toContain('/v1/public/pay/demo/select-coin');
+    expect(src).toContain('/v1/public/pay/:id/balance');
+  });
+
+  it('gives the manual OAuth flow its parameters, not just the SDK path', () => {
+    expect(src).toContain('/v1/oauth/authorize/info');
+    expect(src).toContain('path="/v1/oauth/authorize"');
+    for (const param of ['client_id', 'redirect_uri', 'code_challenge', 'code_challenge_method', 'state']) {
+      expect(src, `authorize must document ${param}`).toContain(param);
+    }
+    expect(src).toContain('S256');
+  });
+
+  it('documents managing OAuth apps and revoking consent', () => {
+    expect(src).toContain('/v1/oauth/apps');
+    expect(src).toContain('/v1/oauth/apps/:id/rotate-secret');
+    expect(src).toContain('/v1/oauth/authorized-apps');
+  });
+
+  it('never tells anyone to put a key in the browser', () => {
+    expect(src).not.toMatch(/data-api_?key/i);
+    // The button SDK takes a checkoutUrl the backend already created, and the
+    // page has to say so — a reader who guesses wrong exposes the key.
+    expect(src).toContain('Nenhuma chave vai para o navegador');
+    expect(src).toContain('data-checkout_url');
+  });
+
+  it('states the fee once, from the mirrored constant', () => {
+    expect(src).toContain('const GATEWAY_FEE_BPS = 25;');
+    // No hand-typed percentage that could drift from the constant.
+    expect(src.split('const GATEWAY_FEE_PERCENT')[1]).not.toContain('0,5%');
+  });
+});

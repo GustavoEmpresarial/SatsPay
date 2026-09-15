@@ -1,7 +1,8 @@
 # Alias of /llm.txt for crawlers that look for ai.txt
-# See https://www.satspay.pro/llm.txt
+# Full brief, kept in sync: https://www.satspay.pro/llm.txt
 
-SatsPay is a multi-coin micropayments wallet & developer platform (BTC, LTC, DOGE, BCH, POL, SOL, USDT, USDC, DGB) with a public API.
+SatsPay is a multi-coin micropayments wallet & developer platform (BTC, LTC, DOGE, BCH,
+POL, SOL, USDT, USDC, DGB) with a public API and a hosted crypto checkout for merchants.
 
 Primary docs: https://www.satspay.pro/documentation
 API docs: https://www.satspay.pro/docs
@@ -9,3 +10,13 @@ API base: https://www.satspay.pro/v1
 Privacy: https://www.satspay.pro/privacy
 Terms: https://www.satspay.pro/terms
 Cookies: https://www.satspay.pro/cookies
+
+# The four facts most often got wrong:
+# - `amount` is an integer of ledger units (1e-8): 25 USDT = "2500000000".
+#   `amountUsd` is the one decimal field, because it is fiat.
+# - Gateway fee is 0.25% (GATEWAY_FEE_BPS = 25), identical for every merchant.
+# - An invoice can accept several coins: the merchant configures the list
+#   (/v1/merchant/settings) and the customer chooses at checkout
+#   (POST /v1/public/pay/:id/select-coin), which locks the quote.
+# - The API key belongs on the server. The payment button only receives the
+#   `checkoutUrl` the merchant's backend already created.

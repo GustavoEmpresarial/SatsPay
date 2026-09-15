@@ -5,7 +5,7 @@ import { clsx } from 'clsx';
 import { COINS, COIN_CONFIG, INTERNAL_AMOUNT_DECIMALS, isDepositWithdrawPaused } from '@/shared';
 import { CodeBlock, EndpointHeader, MultiLangCodeBlock } from '../components/ApiSnippets.js';
 
-type MainTab = 'deposits' | 'payouts' | 'oauth' | 'security' | 'simulator';
+type MainTab = 'start' | 'deposits' | 'payouts' | 'oauth' | 'security' | 'simulator';
 
 /**
  * Canonical origin for every example on this page. The API is served from the
@@ -283,16 +283,228 @@ function WebhookSimulator() {
   );
 }
 
+/**
+ * Everything an integrator has to do *before* the first invoice.
+ *
+ * This whole path was undocumented: the page opened on "create an invoice"
+ * and mentioned `scopes`, `allowedIps` and `requireSignature` without ever
+ * saying how a key is issued, or that a merchant has to be approved first.
+ * Someone following the docs from the top hit `403` and had to read the
+ * Rust source to find out why.
+ */
+function OnboardingTab() {
+  return (
+    <motion.div
+      key="start"
+      initial={{ opacity: 0, y: 6 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: -6 }}
+      className="space-y-6"
+    >
+      <section className="rounded-3xl border border-border bg-paper p-6 sm:p-8 shadow-xs space-y-8">
+        <div className="flex items-center gap-3 border-b border-border/80 pb-4">
+          <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-sky-500/10 text-sky-600 text-2xl">
+            <i className="bi bi-signpost-split-fill" />
+          </div>
+          <div>
+            <h2 className="text-xl sm:text-2xl font-black text-ink">Começar do zero</h2>
+            <p className="text-xs sm:text-sm text-ink-muted">
+              Os quatro passos entre criar a conta e receber o primeiro pagamento — na ordem em que acontecem.
+            </p>
+          </div>
+        </div>
+
+        <ol className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {[
+            { n: '1', t: 'Pedir credenciamento', d: 'POST /v1/merchant/apply', i: 'bi-person-badge' },
+            { n: '2', t: 'Aguardar aprovação', d: 'GET /v1/merchant/status', i: 'bi-hourglass-split' },
+            { n: '3', t: 'Emitir a chave', d: 'POST /v1/api-keys', i: 'bi-key-fill' },
+            { n: '4', t: 'Criar a cobrança', d: 'POST /v1/merchant/deposits', i: 'bi-qr-code' },
+          ].map((s) => (
+            <li key={s.n} className="rounded-2xl border border-border bg-surface/50 p-4 space-y-1.5">
+              <div className="flex items-center gap-2">
+                <span className="flex h-6 w-6 items-center justify-center rounded-lg bg-sky-500/15 text-[11px] font-black text-sky-600">
+                  {s.n}
+                </span>
+                <i className={clsx('bi text-sky-600', s.i)} />
+              </div>
+              <div className="text-sm font-black text-ink">{s.t}</div>
+              <code className="block text-[10px] font-mono text-ink-muted break-all">{s.d}</code>
+            </li>
+          ))}
+        </ol>
+
+        {/* ---------------------------------------------------------------- */}
+        <div className="space-y-4">
+          <EndpointHeader method="POST" path="/v1/merchant/apply" title="1. Pedir credenciamento" badge="Bearer JWT" />
+          <p className="text-xs text-ink-muted leading-relaxed">
+            O gateway de cobranças não está aberto a toda conta: é preciso ser aprovado como comerciante.
+            Enquanto isso não acontece, uma chave com escopo <code className="font-mono">deposits</code> é
+            emitida normalmente, mas criar fatura responde <code className="font-mono">403</code>.
+          </p>
+          <MultiLangCodeBlock
+            snippets={{
+              curl: `curl -X POST ${API_BASE}/v1/merchant/apply \\
+  -H "Authorization: Bearer $SEU_JWT" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "businessName": "Loja Cripto",
+    "website": "https://lojacripto.com",
+    "description": "E-commerce aceitando pagamentos em cripto"
+  }'`,
+              js: `await fetch('${API_BASE}/v1/merchant/apply', {
+  method: 'POST',
+  headers: {
+    Authorization: \`Bearer \${seuJwt}\`,
+    'Content-Type': 'application/json',
+  },
+  body: JSON.stringify({
+    businessName: 'Loja Cripto',
+    website: 'https://lojacripto.com',
+    description: 'E-commerce aceitando pagamentos em cripto',
+  }),
+});`,
+            }}
+          />
+        </div>
+
+        {/* ---------------------------------------------------------------- */}
+        <div className="space-y-4">
+          <EndpointHeader method="GET" path="/v1/merchant/status" title="2. Consultar o credenciamento" badge="Bearer JWT" />
+          <p className="text-xs text-ink-muted leading-relaxed">
+            Responde o estado do pedido. Só com <code className="font-mono">APPROVED</code> as rotas de
+            <code className="font-mono"> /v1/merchant/deposits</code> passam a funcionar.
+          </p>
+          <CodeBlock
+            label="Resposta"
+            code={`{
+  "status": "APPROVED",        // PENDING | APPROVED | REJECTED
+  "businessName": "Loja Cripto",
+  "appliedAt": "2026-09-10T12:00:00Z",
+  "reviewedAt": "2026-09-11T09:30:00Z"
+}`}
+          />
+        </div>
+
+        {/* ---------------------------------------------------------------- */}
+        <div className="space-y-4">
+          <EndpointHeader method="POST" path="/v1/api-keys" title="3. Emitir a chave de API" badge="Bearer JWT" />
+          <div className="rounded-2xl border border-amber-500/30 bg-amber-500/5 p-4 text-xs text-amber-800 leading-relaxed">
+            <i className="bi bi-exclamation-triangle-fill mr-1.5" />
+            <strong>A chave em claro aparece uma única vez</strong>, nesta resposta. Não existe endpoint que
+            a recupere depois — guarde-a no cofre de segredos do seu servidor. Perdida, use a rotação abaixo.
+          </div>
+          <ParamsTable
+            params={[
+              { name: 'label', type: 'string', required: true, desc: 'Nome para você reconhecer a chave depois.', example: 'loja-producao' },
+              { name: 'scopes', type: 'string[]', required: true, desc: 'Permissões. Verificados de verdade: "deposits" (gateway), "send" (envio interno) e "*" (tudo).', example: '["deposits"]' },
+              { name: 'allowedIps', type: 'string[]', required: false, desc: 'Allowlist de IPs. Vazio = qualquer origem. Preenchido, a chave só vale a partir desses endereços.', example: '["203.0.113.10"]' },
+              { name: 'expiresInDays', type: 'number', required: false, desc: 'Validade. Ausente = sem expiração.', example: '365' },
+              { name: 'requireSignature', type: 'boolean', required: false, desc: 'Exige HMAC-SHA256 em cada requisição desta chave. Recomendado em produção.', example: 'true' },
+            ]}
+          />
+          <MultiLangCodeBlock
+            snippets={{
+              curl: `curl -X POST ${API_BASE}/v1/api-keys \\
+  -H "Authorization: Bearer $SEU_JWT" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "label": "loja-producao",
+    "scopes": ["deposits"],
+    "allowedIps": ["203.0.113.10"],
+    "expiresInDays": 365,
+    "requireSignature": true
+  }'`,
+              js: `const res = await fetch('${API_BASE}/v1/api-keys', {
+  method: 'POST',
+  headers: {
+    Authorization: \`Bearer \${seuJwt}\`,
+    'Content-Type': 'application/json',
+  },
+  body: JSON.stringify({
+    label: 'loja-producao',
+    scopes: ['deposits'],
+    allowedIps: ['203.0.113.10'],
+    expiresInDays: 365,
+    requireSignature: true,
+  }),
+});
+const { id, key, prefix } = await res.json();
+// o campo 'key' é o segredo em claro — guarde agora, não volta mais.`,
+              python: `import requests
+
+res = requests.post(
+    "${API_BASE}/v1/api-keys",
+    headers={"Authorization": f"Bearer {seu_jwt}"},
+    json={
+        "label": "loja-producao",
+        "scopes": ["deposits"],
+        "allowedIps": ["203.0.113.10"],
+        "expiresInDays": 365,
+        "requireSignature": True,
+    },
+)
+api_key = res.json()["key"]  # segredo em claro: guarde agora, não volta mais`,
+            }}
+          />
+        </div>
+
+        {/* ---------------------------------------------------------------- */}
+        <div className="space-y-4">
+          <EndpointHeader method="GET" path="/v1/api-keys" title="Listar suas chaves" badge="Bearer JWT" />
+          <p className="text-xs text-ink-muted leading-relaxed">
+            Devolve prefixo, escopos, allowlist, expiração, último uso e desativação — <strong>nunca o segredo</strong>.
+            Serve para auditar o que existe emitido, não para recuperar uma chave perdida.
+          </p>
+        </div>
+
+        <div className="space-y-4">
+          <EndpointHeader method="POST" path="/v1/api-keys/:id/rotate" title="Rotacionar uma chave" badge="Bearer JWT" />
+          <p className="text-xs text-ink-muted leading-relaxed">
+            Gera um segredo novo mantendo id, escopos, allowlist, expiração e política de assinatura.
+            <strong> O segredo anterior para de valer na hora</strong> — troque no servidor antes de rotacionar,
+            ou aceite a janela de falha.
+          </p>
+          <CodeBlock code={`curl -X POST ${API_BASE}/v1/api-keys/$KEY_ID/rotate \\
+  -H "Authorization: Bearer $SEU_JWT"`} />
+        </div>
+
+        <div className="space-y-4">
+          <EndpointHeader method="DELETE" path="/v1/api-keys/:id" title="Revogar uma chave" badge="Bearer JWT" />
+          <p className="text-xs text-ink-muted leading-relaxed">
+            Desativa imediatamente. O registro continua existindo para a auditoria não perder o rastro
+            de quem usou o quê — revogar não apaga histórico.
+          </p>
+          <CodeBlock code={`curl -X DELETE ${API_BASE}/v1/api-keys/$KEY_ID \\
+  -H "Authorization: Bearer $SEU_JWT"`} />
+        </div>
+
+        <div className="rounded-2xl border border-rose-500/25 bg-rose-500/5 p-4 space-y-2">
+          <div className="flex items-center gap-2 text-rose-700 font-bold text-xs">
+            <i className="bi bi-shield-exclamation text-base" />
+            <span>Nenhuma chave vai para o navegador</span>
+          </div>
+          <ul className="text-xs text-ink-muted leading-relaxed space-y-1 list-disc pl-5">
+            <li><strong>Pode</strong>: variável de ambiente ou cofre de segredos do seu servidor.</li>
+            <li><strong>Não pode</strong>: JavaScript da página, app mobile, repositório, ou qualquer lugar que o cliente leia. Quem tem a chave pode cobrar e movimentar em seu nome — no navegador, isso é qualquer visitante. O botão de pagamento oficial foi desenhado para isso — ele recebe só o <code className="font-mono">checkoutUrl</code> que o seu backend já criou.</li>
+            <li>Hoje <code className="font-mono">GET /v1/public/balance</code> aceita <strong>qualquer</strong> chave válida, sem checar escopo: uma chave de <code className="font-mono">deposits</code> lê o saldo inteiro da conta. Para integração de terceiro, use uma conta separada.</li>
+          </ul>
+        </div>
+      </section>
+    </motion.div>
+  );
+}
+
 export function ApiDocsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const initialTab = (searchParams.get('tab') as MainTab) || 'deposits';
   const [activeTab, setActiveTab] = useState<MainTab>(
-    ['deposits', 'payouts', 'oauth', 'security', 'simulator'].includes(initialTab) ? initialTab : 'deposits'
+    ['start', 'deposits', 'payouts', 'oauth', 'security', 'simulator'].includes(initialTab) ? initialTab : 'deposits'
   );
 
   useEffect(() => {
     const tabParam = searchParams.get('tab') as MainTab;
-    if (tabParam && ['deposits', 'payouts', 'oauth', 'security', 'simulator'].includes(tabParam)) {
+    if (tabParam && ['start', 'deposits', 'payouts', 'oauth', 'security', 'simulator'].includes(tabParam)) {
       setActiveTab(tabParam);
     }
   }, [searchParams]);
@@ -333,7 +545,21 @@ export function ApiDocsPage() {
       </header>
 
       {/* SELETOR DE ABAS PRINCIPAIS */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2 p-1.5 rounded-2xl bg-surface border border-border">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 p-1.5 rounded-2xl bg-surface border border-border">
+        <button
+          type="button"
+          onClick={() => handleTabChange('start')}
+          className={clsx(
+            'flex items-center justify-center gap-2 py-3 px-3 rounded-xl font-bold text-xs sm:text-sm transition-all',
+            activeTab === 'start'
+              ? 'bg-paper text-sky-600 shadow-sm border border-border'
+              : 'text-ink-muted hover:text-ink',
+          )}
+        >
+          <i className="bi bi-signpost-split-fill text-base" />
+          <span>0. Começar</span>
+        </button>
+
         <button
           type="button"
           onClick={() => handleTabChange('deposits')}
@@ -407,6 +633,8 @@ export function ApiDocsPage() {
 
       {/* CONTEÚDO DA ABA SELECIONADA */}
       <AnimatePresence mode="wait">
+        {activeTab === 'start' && <OnboardingTab />}
+
         {activeTab === 'deposits' && (
           /* ========================================================================= */
           /* ABA 1: API DE DEPÓSITOS & GATEWAY DE COBRANÇAS */
@@ -1074,6 +1302,103 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 </p>
               </div>
             </section>
+
+            {/* ===================================================================== */}
+            {/* TESTAR A INTEGRAÇÃO ANTES DE SUBIR                                     */}
+            {/* ===================================================================== */}
+            <section className="rounded-3xl border border-border bg-paper p-6 sm:p-8 shadow-xs space-y-8">
+              <div className="flex items-center gap-3 border-b border-border/80 pb-4">
+                <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-violet-500/10 text-violet-600 text-2xl">
+                  <i className="bi bi-beaker" />
+                </div>
+                <div>
+                  <h2 className="text-xl sm:text-2xl font-black text-ink">Testar antes de subir</h2>
+                  <p className="text-xs sm:text-sm text-ink-muted">
+                    Verifique o webhook e o checkout sem esperar uma transação real chegar na blockchain.
+                  </p>
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                <EndpointHeader
+                  method="POST"
+                  path="/v1/merchant/deposits/:id/test-webhook"
+                  title="Disparar um webhook de teste"
+                  badge="Bearer JWT"
+                />
+                <p className="text-xs text-ink-muted leading-relaxed">
+                  Envia para a sua <code className="font-mono">callbackUrl</code> uma entrega
+                  <strong> assinada exatamente como a real</strong>, com o mesmo header
+                  <code className="font-mono"> X-SatsPay-Signature</code>. É como confirmar que sua verificação
+                  de HMAC funciona sem depender de um pagamento on-chain — e a forma de descobrir que a
+                  assinatura está errada <em>antes</em> de um cliente pagar.
+                </p>
+                <div className="rounded-2xl border border-amber-500/30 bg-amber-500/5 p-3 text-[11px] text-amber-800 leading-relaxed">
+                  <i className="bi bi-info-circle-fill mr-1.5" />
+                  Exige sessão do painel (JWT), não chave de API: é uma ferramenta de quem está integrando,
+                  e não deve ser disparável por uma credencial de servidor comprometida.
+                </div>
+                <CodeBlock code={`curl -X POST ${API_BASE}/v1/merchant/deposits/$INVOICE_ID/test-webhook \\
+  -H "Authorization: Bearer $SEU_JWT"`} />
+              </div>
+
+              <div className="space-y-4">
+                <EndpointHeader method="GET" path="/v1/public/pay/demo" title="Checkout de demonstração" badge="Público" />
+                <p className="text-xs text-ink-muted leading-relaxed">
+                  Uma fatura sintética que renderiza o checkout <strong>real</strong> sem linha no banco, sem
+                  dinheiro e sem webhook. Oferece as moedas que você configurou como aceitas quando há sessão,
+                  e todas as ativas quando não há — serve para ver o seletor de moedas funcionando.
+                </p>
+                <p className="text-[11px] text-ink-muted leading-relaxed">
+                  Os endereços mostrados são <strong>propositalmente inválidos</strong> em suas redes (todos
+                  contêm <code className="font-mono">-DEMO-</code>), para que nenhuma carteira consiga enviar
+                  moeda de verdade para uma página de exemplo.
+                </p>
+                <CodeBlock code={`# abra no navegador
+${API_BASE}/pay/demo
+
+# ou consulte o JSON
+curl ${API_BASE}/v1/public/pay/demo`} />
+              </div>
+
+              <div className="space-y-4">
+                <EndpointHeader
+                  method="POST"
+                  path="/v1/public/pay/demo/select-coin"
+                  title="Trocar a moeda na demonstração"
+                  badge="Público"
+                />
+                <p className="text-xs text-ink-muted leading-relaxed">
+                  Mesmo contrato do <code className="font-mono">select-coin</code> real, mas não grava nada:
+                  não consome índice HD, não cria endereço e não trava cotação de dinheiro real.
+                </p>
+                <CodeBlock code={`curl -X POST ${API_BASE}/v1/public/pay/demo/select-coin \\
+  -H "Content-Type: application/json" \\
+  -d '{"coin": "POL"}'`} />
+              </div>
+
+              <div className="space-y-4">
+                <EndpointHeader
+                  method="POST"
+                  path="/v1/public/pay/:id/balance"
+                  title="Pagar a fatura com saldo SatsPay"
+                  badge="Bearer JWT"
+                />
+                <p className="text-xs text-ink-muted leading-relaxed">
+                  O cliente que já tem conta SatsPay pode quitar a cobrança com o saldo interno, sem transação
+                  on-chain e sem esperar confirmação. A fatura vai direto a
+                  <code className="font-mono"> CONFIRMED</code> e o webhook{' '}
+                  <code className="font-mono">deposit.confirmed</code> dispara igual — do seu lado,
+                  <strong> nada muda</strong>: mesma assinatura, mesmo corpo, mesma taxa de {GATEWAY_FEE_PERCENT}.
+                </p>
+                <p className="text-[11px] text-ink-muted leading-relaxed">
+                  Exige a sessão de <strong>quem paga</strong> (não a sua). Saldo insuficiente, fatura expirada
+                  ou já paga são recusados com <code className="font-mono">code</code> próprio.
+                </p>
+                <CodeBlock code={`curl -X POST ${API_BASE}/v1/public/pay/$INVOICE_ID/balance \\
+  -H "Authorization: Bearer $JWT_DO_CLIENTE"`} />
+              </div>
+            </section>
           </motion.div>
         )}
 
@@ -1592,6 +1917,137 @@ println!("Usuário: {}", user_info["username"]);`,
                 <code className="rounded-xl bg-paper px-3 py-1 font-mono text-xs font-bold text-bitcoin border border-border select-all">
                   {API_BASE}/.well-known/openid-configuration
                 </code>
+              </div>
+            </section>
+
+            {/* ===================================================================== */}
+            {/* FLUXO MANUAL: QUEM NÃO USA O SDK                                       */}
+            {/* ===================================================================== */}
+            <section className="rounded-3xl border border-border bg-paper p-6 sm:p-8 shadow-xs space-y-8">
+              <div className="flex items-center gap-3 border-b border-border/80 pb-4">
+                <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-indigo-500/10 text-indigo-600 text-2xl">
+                  <i className="bi bi-braces-asterisk" />
+                </div>
+                <div>
+                  <h2 className="text-xl sm:text-2xl font-black text-ink">Fluxo manual (sem o SDK)</h2>
+                  <p className="text-xs sm:text-sm text-ink-muted">
+                    Os parâmetros do <code className="font-mono">authorize</code> para quem implementa o
+                    <em> authorization code</em> na mão ou usa uma biblioteca OIDC genérica.
+                  </p>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-emerald-500/25 bg-emerald-500/5 p-4 text-xs text-emerald-800 leading-relaxed">
+                <i className="bi bi-shield-lock-fill mr-1.5" />
+                <strong>PKCE é obrigatório</strong> — <code className="font-mono">code_challenge_method=S256</code>.
+                Sem ele a autorização é recusada, inclusive para clientes confidenciais.
+              </div>
+
+              <div className="space-y-4">
+                <EndpointHeader method="GET" path="/v1/oauth/authorize/info" title="Dados da tela de consentimento" badge="JWT opcional" />
+                <p className="text-xs text-ink-muted leading-relaxed">
+                  Valida os parâmetros antes de mostrar qualquer coisa ao usuário e devolve o nome do app e os
+                  escopos pedidos, para você desenhar a tela de consentimento. Sem sessão, indica que é preciso
+                  autenticar primeiro.
+                </p>
+                <ParamsTable
+                  params={[
+                    { name: 'client_id', type: 'string', required: true, desc: 'ID do aplicativo OAuth.' },
+                    { name: 'redirect_uri', type: 'string', required: true, desc: 'Precisa bater EXATAMENTE com uma das URLs cadastradas no app. Prefixo não basta — é essa checagem que impede o código de vazar para outro domínio.' },
+                    { name: 'scope', type: 'string', required: true, desc: 'Escopos separados por espaço. Inclua "openid" para receber id_token.', example: 'openid profile email' },
+                    { name: 'state', type: 'string', required: true, desc: 'Valor opaco e aleatório. Volta intacto no redirect — é como você detecta CSRF.' },
+                    { name: 'code_challenge', type: 'string', required: true, desc: 'SHA-256 do code_verifier, em base64url sem padding.' },
+                    { name: 'code_challenge_method', type: 'string', required: true, desc: 'Sempre "S256". "plain" não é aceito.', example: 'S256' },
+                  ]}
+                />
+              </div>
+
+              <div className="space-y-4">
+                <EndpointHeader method="POST" path="/v1/oauth/authorize" title="Registrar o consentimento" badge="Bearer JWT" />
+                <p className="text-xs text-ink-muted leading-relaxed">
+                  Chamado quando o usuário aceita. Devolve o <code className="font-mono">code</code> para o
+                  <code className="font-mono"> redirect_uri</code>, junto com o <code className="font-mono">state</code>.
+                  O código é de <strong>uso único</strong> e expira em minutos.
+                </p>
+                <MultiLangCodeBlock
+                  snippets={{
+                    curl: `curl -X POST ${API_BASE}/v1/oauth/authorize \\
+  -H "Authorization: Bearer $JWT_DO_USUARIO" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "client_id": "app_123",
+    "redirect_uri": "https://sua-loja.com/callback",
+    "scope": "openid profile email",
+    "state": "$STATE_ALEATORIO",
+    "code_challenge": "$CODE_CHALLENGE",
+    "code_challenge_method": "S256"
+  }'`,
+                    js: `// 1. gere o verifier e o challenge
+const verifier = base64url(crypto.getRandomValues(new Uint8Array(32)));
+const challenge = base64url(
+  new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier))),
+);
+
+// 2. peça o consentimento
+const res = await fetch('${API_BASE}/v1/oauth/authorize', {
+  method: 'POST',
+  headers: { Authorization: \`Bearer \${jwt}\`, 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    client_id: 'app_123',
+    redirect_uri: 'https://sua-loja.com/callback',
+    scope: 'openid profile email',
+    state,
+    code_challenge: challenge,
+    code_challenge_method: 'S256',
+  }),
+});
+
+// 3. guarde o verifier: o token exchange vai precisar dele`,
+                  }}
+                />
+              </div>
+
+              <div className="space-y-4 pt-4 border-t border-border/80">
+                <h3 className="text-sm font-black text-ink">Gerenciar seus aplicativos</h3>
+                <div className="space-y-4">
+                  <EndpointHeader method="GET" path="/v1/oauth/apps" title="Listar / criar aplicativos" badge="Bearer JWT" />
+                  <p className="text-xs text-ink-muted leading-relaxed">
+                    <code className="font-mono">GET</code> lista os seus; <code className="font-mono">POST</code> cria
+                    um novo com <code className="font-mono">name</code>, <code className="font-mono">redirectUris</code> e
+                    logo. O <strong>client_secret aparece uma única vez</strong>, na resposta da criação.
+                  </p>
+                </div>
+                <div className="space-y-4">
+                  <EndpointHeader method="POST" path="/v1/oauth/apps/:id" title="Atualizar ou remover (PUT / DELETE)" badge="Bearer JWT" />
+                  <p className="text-xs text-ink-muted leading-relaxed">
+                    <code className="font-mono">PUT</code> altera nome, logo e
+                    <code className="font-mono"> redirectUris</code>; <code className="font-mono">DELETE</code> remove o
+                    app. App de outro dono responde <code className="font-mono">403</code>.
+                  </p>
+                </div>
+                <div className="space-y-4">
+                  <EndpointHeader method="POST" path="/v1/oauth/apps/:id/rotate-secret" title="Rotacionar o client secret" badge="Bearer JWT" />
+                  <p className="text-xs text-ink-muted leading-relaxed">
+                    Gera um segredo novo; o anterior deixa de valer imediatamente.
+                  </p>
+                </div>
+              </div>
+
+              <div className="space-y-4 pt-4 border-t border-border/80">
+                <h3 className="text-sm font-black text-ink">Do outro lado: o que o usuário autorizou</h3>
+                <div className="space-y-4">
+                  <EndpointHeader method="GET" path="/v1/oauth/authorized-apps" title="Aplicativos autorizados pelo usuário" badge="Bearer JWT" />
+                  <p className="text-xs text-ink-muted leading-relaxed">
+                    Lista os apps a que <strong>este</strong> usuário concedeu acesso. É o que alimenta a tela de
+                    "aplicativos conectados" da conta.
+                  </p>
+                </div>
+                <div className="space-y-4">
+                  <EndpointHeader method="DELETE" path="/v1/oauth/authorized-apps/:id" title="Revogar um consentimento" badge="Bearer JWT" />
+                  <p className="text-xs text-ink-muted leading-relaxed">
+                    Revoga o acesso e invalida os tokens daquele app. O usuário sempre pode desfazer o que autorizou.
+                  </p>
+                </div>
               </div>
             </section>
           </motion.div>
