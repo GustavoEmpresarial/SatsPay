@@ -14,7 +14,7 @@ Antes de realizar chamadas, o desenvolvedor deve emitir uma chave de API atravé
   ```json
   {
     "label": "Bot de Pagamento Produção",
-    "scopes": ["SEND", "BALANCE"],
+    "scopes": ["deposits", "send", "balance"],
     "allowedIps": ["203.0.113.10", "198.51.100.25"],
     "expiresInDays": 90,
     "requireSignature": true
@@ -26,7 +26,7 @@ Antes de realizar chamadas, o desenvolvedor deve emitir uma chave de API atravé
     "id": "uuid",
     "apiKey": "bts_live_a1b2c3d4e5f6g7h8i9j0...",
     "label": "Bot de Pagamento Produção",
-    "scopes": ["SEND", "BALANCE"],
+    "scopes": ["deposits", "send", "balance"],
     "requireSignature": true
   }
   ```

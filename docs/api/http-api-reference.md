@@ -278,6 +278,44 @@ A API HTTP do **BitcoSats** é implementada em Rust com o framework **Axum** (`c
   }
   ```
 
+### `POST /v1/merchant/deposits` — criar fatura do gateway
+- **Autenticação**: `x-api-key` (escopo `deposits`), requisição assinada HMAC, ou Bearer JWT (painel).
+- **Aliases**: `POST /v1/merchant/deposits/create`, `POST /v1/merchant/invoices`.
+- **Body**: `coin`, `amount`, `orderId`, `callbackUrl` obrigatórios; `siteUserId`, `siteName`,
+  `successUrl`, `cancelUrl`, `customerEmail`, `customerName`, `description`, `expiryMinutes` opcionais.
+- **`amount`**: inteiro em unidades de ledger (1e-8), como `/v1/public/send`. Valor com ponto/vírgula
+  → `400 AMOUNT_NOT_INTEGER`; valor que zera on-chain → `400 AMOUNT_BELOW_MINIMUM`.
+- **Idempotência**: `orderId` é único por comerciante. Repetir a mesma cobrança devolve `200` com a
+  fatura original; mesmo `orderId` com outro valor → `409 DUPLICATE_ORDER_ID`.
+- **Resposta `201`**: `id`, `status`, `coin`, `amount`, `feeAmount` (0,5%), `netAmount`,
+  `depositAddress`, `payUrl` (relativo), `checkoutUrl` (absoluto, via `PUBLIC_BASE_URL`),
+  `qrCode` (URI `moeda:endereço?amount=`), `orderId`, `expiresAt`, `createdAt`.
+- **Pausa**: BTC/LTC/DOGE/DGB → `503 DEPOSIT_PAUSED` (`shared::DEPOSIT_WITHDRAW_PAUSED_COINS`).
+
+### `GET /v1/merchant/deposits` / `GET /v1/merchant/deposits/:id`
+- **Autenticação**: igual à criação. `:id` de outro comerciante → `403 INVOICE_FORBIDDEN`.
+- Status: `PENDING → DETECTED → CONFIRMED | EXPIRED | CANCELLED` (não existe `PAID`).
+
+### `GET /v1/merchant/webhook-signing-secret`
+- **Autenticação**: Bearer JWT.
+- **Descrição**: devolve a chave HMAC do comerciante (derivada de `ENCRYPTION_KEY`), o header
+  (`X-SatsPay-Signature`), o formato (`sha256=<hex>`), o evento (`deposit.confirmed`), a janela
+  anti-replay e o número máximo de tentativas.
+
+### `POST /v1/merchant/deposits/:id/test-webhook`
+- **Autenticação**: Bearer JWT (dono da fatura). Dispara uma entrega de teste.
+
+### `GET /v1/public/pay/:id` e `POST /v1/public/pay/:id/balance`
+- Checkout público (sem `callbackUrl`/`siteUserId` na resposta) e pagamento com saldo SatsPay.
+
+### Webhook `deposit.confirmed`
+- `POST` na `callbackUrl` com `X-SatsPay-Signature: sha256=<hex HMAC-SHA256 do corpo cru>`,
+  `X-SatsPay-Event`, `X-SatsPay-Timestamp`, `X-SatsPay-Delivery`.
+- Corpo: `event`, `invoiceId`, `orderId`, `siteUserId`, `coin`, `amount`, `fee`, `netAmount`,
+  `txHash`, `status`, `paidAt`, `customerEmail`, `timestamp`, `attempt`.
+- Até `webhooks::MAX_WEBHOOK_ATTEMPTS` tentativas com backoff exponencial; o `timestamp` está
+  dentro do corpo assinado, para o receptor recusar replay fora de 300s.
+
 ---
 
 ## 11. Painel Administrativo (`/v1/admin`)

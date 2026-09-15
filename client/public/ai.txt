@@ -1,11 +1,11 @@
 # Alias of /llm.txt for crawlers that look for ai.txt
-# See https://satspay.io/llm.txt
+# See https://www.satspay.pro/llm.txt
 
 SatsPay is a multi-coin micropayments wallet & developer platform (BTC, LTC, DOGE, BCH, POL, SOL, USDT, USDC, DGB) with a public API.
 
-Primary docs: https://satspay.io/documentation
-API UI: https://satspay.io/api
-API base: https://api.satspay.io/v1
-Privacy: https://satspay.io/privacy
-Terms: https://satspay.io/terms
-Cookies: https://satspay.io/cookies
+Primary docs: https://www.satspay.pro/documentation
+API docs: https://www.satspay.pro/docs
+API base: https://www.satspay.pro/v1
+Privacy: https://www.satspay.pro/privacy
+Terms: https://www.satspay.pro/terms
+Cookies: https://www.satspay.pro/cookies

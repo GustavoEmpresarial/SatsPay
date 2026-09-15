@@ -3,10 +3,21 @@
 
 SatsPay is a multi-coin micropayments wallet & developer platform (BTC, LTC, DOGE, BCH, POL, SOL, USDT, USDC, DGB) with a public API.
 
-Primary docs: /documentation
-API UI: /api
-LLM page: /llm
-Privacy: /privacy
-Terms: /terms
-Cookies: /cookies
-Security: /security
+Primary docs: https://www.satspay.pro/documentation
+API docs: https://www.satspay.pro/docs
+API base: https://www.satspay.pro/v1
+LLM page: https://www.satspay.pro/llm
+Privacy: https://www.satspay.pro/privacy
+Terms: https://www.satspay.pro/terms
+Cookies: https://www.satspay.pro/cookies
+Security: https://www.satspay.pro/security
+
+# Integration facts that are easy to get wrong:
+# - Create a deposit invoice: POST /v1/merchant/deposits (201 Created).
+# - The response field for the hosted checkout is `checkoutUrl` (absolute);
+#   `payUrl` is the same path, relative.
+# - `amount` is an integer count of ledger units (1e-8), never a decimal
+#   amount of coins: 25 USDT = "2500000000".
+# - Webhook event is `deposit.confirmed`, signed as
+#   `X-SatsPay-Signature: sha256=<hex HMAC-SHA256 of the raw body>`.
+# - BTC, LTC, DOGE and DGB deposits are temporarily paused (503 DEPOSIT_PAUSED).

@@ -6,10 +6,11 @@
 
 ## Fluxo
 
-1. Merchant APPROVED cria API key  
-2. `POST /v1/public/…` (HMAC) cria invoice → endereço depósito  
-3. User paga on-chain (ou saldo autenticado) → worker / `pay_invoice_with_balance` confirma → ledger DEVELOPER + fee plataforma  
-4. Webhook `callback_url` assinado com HMAC-SHA256 por merchant (`X-SatsPay-Signature: sha256=…`). Segredo derivado de `ENCRYPTION_KEY` (HKDF `bitcosats:webhook:v1`) — `GET /v1/merchant/webhook-signing-secret`. **Não** usar `satspay_secret_default`. Sem sandbox público `simulate-payment`.
+1. Merchant APPROVED cria API key com escopo `deposits` (`x-api-key` ou requisição assinada; `requireSignature=true` exige a assinada)  
+2. `POST /v1/merchant/deposits` cria invoice → endereço HD dedicado (`hd_index` salvo na invoice). Aliases: `/deposits/create`, `/invoices`. `amount` é inteiro em unidades de ledger (1e-8); `orderId` é único por merchant (idempotente)  
+3. User paga on-chain → `worker::invoice_watcher` detecta, grava `received_amount`, confirma em `min_confirmations` e faz sweep; ou paga com saldo → `pay_invoice_with_balance`. Ambos creditam ledger MERCHANT (net) + fee 0,5% da plataforma  
+4. Webhook `deposit.confirmed` no `callback_url`, assinado com HMAC-SHA256 por merchant (`X-SatsPay-Signature: sha256=…`), com `timestamp`/`attempt` no corpo assinado e retry com backoff (`crates/webhooks`). Segredo derivado de `ENCRYPTION_KEY` (HKDF `bitcosats:webhook:v1`) — `GET /v1/merchant/webhook-signing-secret`. **Não** usar `satspay_secret_default`. Sem sandbox público `simulate-payment`.  
+5. `callback_url` passa por gate anti-SSRF (https público; localhost/IP interno recusados)
 
 ## Admin
 
@@ -24,4 +25,6 @@
 ## Schema
 
 `crates/db/migrations/0010_merchant_deposit_invoices.sql`  
-Statuses: PENDING → DETECTED → CONFIRMED | EXPIRED | CANCELLED  
++ `0026_merchant_invoice_order_unique.sql` (único `(merchant_id, order_id)`)  
++ `0027_merchant_invoice_onchain.sql` (`hd_index`, `received_amount`, `webhook_next_retry_at`)  
+Statuses: PENDING → DETECTED → CONFIRMED | EXPIRED | CANCELLED (não existe `PAID`)  

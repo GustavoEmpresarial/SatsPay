@@ -41,7 +41,7 @@ Página React `MerchantDepositsPage`. Chama 2 endpoint(s) via `api()`. Endereço
 
 Confirmação de invoice **somente** via watcher on-chain ou `POST /v1/public/pay/:id/balance` (debita o pagador). Não existe sandbox público `simulate-payment`. HMAC do webhook é derivado por `merchant_id` (`GET /v1/merchant/webhook-signing-secret`).
 
-**Pausa temporária:** gateway `POST /v1/merchant/deposits/create` para `BTC`/`LTC`/`DOGE`/`DGB` → `503` `DEPOSIT_PAUSED`. Envio ledger `/v1/public/send` **não** pausa.
+**Pausa temporária:** gateway `POST /v1/merchant/deposits` (e aliases `/deposits/create`, `/invoices`) para `BTC`/`LTC`/`DOGE`/`DGB` → `503` `DEPOSIT_PAUSED`. Envio ledger `/v1/public/send` **não** pausa.
 
 ## Notas de overview legado
 
