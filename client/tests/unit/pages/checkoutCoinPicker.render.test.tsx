@@ -107,6 +107,21 @@ describe('CheckoutPage — coin picker', () => {
     unmount();
   });
 
+  it('shows the picker on the demo invoice too', async () => {
+    // The demo was hardcoded to one coin, so a merchant who accepted several
+    // opened it, saw one, and concluded the picker did not work.
+    invoice = { ...multiCoin, demo: true, amountUsd: '25.00' };
+    const { container, unmount } = renderWithProviders(<CheckoutPage />, {
+      route: '/pay/demo',
+      routePath: '/pay/:id',
+    });
+    await waitFor(() => expect(container.textContent).toMatch(/Escolha como pagar/i), { timeout: 5000 });
+    expect(container.textContent).toMatch(/Demonstra/i);
+    // Still a demo: no real payment action.
+    expect(container.textContent).not.toMatch(/1-Clique/i);
+    unmount();
+  });
+
   it('shows no picker on a single-coin invoice', async () => {
     invoice = { ...multiCoin, coinOptions: [], coinLocked: true, amountUsd: null };
     const { container, unmount } = renderWithProviders(<CheckoutPage />, {
