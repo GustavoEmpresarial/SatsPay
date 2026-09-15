@@ -46,3 +46,7 @@ coverage/
 lcov.info
 *.profraw
 .security-audit/
+
+# Playwright (e2e runs against a live base URL and drops artifacts here)
+client/test-results/
+client/playwright-report/
