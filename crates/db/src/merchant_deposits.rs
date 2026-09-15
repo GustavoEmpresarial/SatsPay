@@ -31,7 +31,13 @@ fn is_unique_violation(e: &sqlx::Error) -> bool {
     matches!(e, sqlx::Error::Database(db) if db.code().as_deref() == Some("23505"))
 }
 
+/// Serialized straight to JSON by `GET /v1/merchant/deposits[/:id]`, so the
+/// field names are part of the public contract. camelCase matches every
+/// hand-built response in this domain (and what the merchant dashboard has
+/// always read) — without it the list returned `order_id`/`fee_amount` and
+/// the dashboard rendered blanks.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct MerchantDepositInvoice {
     pub id: Uuid,
     pub merchant_id: Uuid,
@@ -134,6 +140,22 @@ fn row_to_invoice(row: &sqlx::postgres::PgRow) -> MerchantDepositInvoice {
     }
 }
 
+/// Gateway fee in basis points: 0.5%.
+const GATEWAY_FEE_BPS: u32 = 50;
+
+/// Splits `amount` into (fee, net) in **whole** ledger units.
+///
+/// The ledger stores integer units of 1e-8, so the fee cannot carry a
+/// fractional part: `amount * 0.005` on 250001 is 1250.005, which would
+/// credit a fraction of the smallest representable unit and leave
+/// `fee + net != amount`. Truncating the fee keeps the identity exact and
+/// rounds in the merchant's favour by at most one unit.
+fn split_fee(amount: &BigDecimal) -> (BigDecimal, BigDecimal) {
+    let fee = (amount * BigDecimal::from(GATEWAY_FEE_BPS) / BigDecimal::from(10_000)).with_scale(0);
+    let net = amount - &fee;
+    (fee, net)
+}
+
 pub async fn create_invoice(
     pool: &PgPool,
     input: CreateDepositInvoiceInput,
@@ -141,10 +163,7 @@ pub async fn create_invoice(
     let expiry_mins = input.expiry_minutes.unwrap_or(60).max(5).min(1440);
     let expires_at = Utc::now() + chrono::Duration::minutes(expiry_mins);
     
-    // Default gateway fee: 0.5% (can be 0 or customizable)
-    let fee_pct = BigDecimal::from(5) / BigDecimal::from(1000); // 0.005
-    let fee_amount = &input.amount * &fee_pct;
-    let net_amount = &input.amount - &fee_amount;
+    let (fee_amount, net_amount) = split_fee(&input.amount);
 
     let row = sqlx::query(&format!(
         "INSERT INTO merchant_deposit_invoices (
@@ -589,4 +608,35 @@ pub async fn count_invoices_at_address(pool: &PgPool, address: &str) -> Result<i
     .await?;
 
     Ok(count)
+}
+
+#[cfg(test)]
+mod fee_tests {
+    use super::*;
+    use std::str::FromStr;
+
+    /// The ledger holds integer units of 1e-8, so a fee with a fractional
+    /// part would credit a fraction of the smallest unit and break the
+    /// identity `fee + net == amount`.
+    #[test]
+    fn fee_is_a_whole_number_of_ledger_units() {
+        for raw in ["250000", "250001", "1", "99999999", "2500000000"] {
+            let amount = BigDecimal::from_str(raw).unwrap();
+            let (fee, net) = split_fee(&amount);
+            assert_eq!(fee.fractional_digit_count().max(0), 0, "fee {fee} for amount {raw} is fractional");
+            assert_eq!(net.fractional_digit_count().max(0), 0, "net {net} for amount {raw} is fractional");
+            assert_eq!(&fee + &net, amount, "fee + net must equal amount for {raw}");
+            assert!(fee >= BigDecimal::from(0) && net >= BigDecimal::from(0), "no negative side for {raw}");
+        }
+    }
+
+    #[test]
+    fn fee_is_half_a_percent_truncated_down() {
+        assert_eq!(split_fee(&BigDecimal::from(250_000)).0, BigDecimal::from(1_250));
+        // 0.5% of 250001 is 1250.005 — truncating favours the merchant.
+        assert_eq!(split_fee(&BigDecimal::from(250_001)).0, BigDecimal::from(1_250));
+        // Amounts too small to owe a whole unit of fee owe nothing.
+        assert_eq!(split_fee(&BigDecimal::from(1)).0, BigDecimal::from(0));
+        assert_eq!(split_fee(&BigDecimal::from(1)).1, BigDecimal::from(1));
+    }
 }

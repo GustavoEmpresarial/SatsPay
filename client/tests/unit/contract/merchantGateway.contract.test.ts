@@ -15,6 +15,8 @@ const repoRoot = path.resolve(clientRoot, '..');
 const docs = readFileSync(path.join(clientRoot, 'src/pages/ApiDocsPage.tsx'), 'utf8');
 const handler = readFileSync(path.join(repoRoot, 'crates/api-http/src/merchant_deposits.rs'), 'utf8');
 const webhook = readFileSync(path.join(repoRoot, 'crates/webhooks/src/lib.rs'), 'utf8');
+const invoiceModel = readFileSync(path.join(repoRoot, 'crates/db/src/merchant_deposits.rs'), 'utf8');
+const dashboard = readFileSync(path.join(clientRoot, 'src/pages/MerchantDepositsPage.tsx'), 'utf8');
 
 /** Field names of a `json!({ ... })` block starting at `marker`. */
 function jsonFields(source: string, marker: string): string[] {
@@ -69,6 +71,29 @@ describe('contract: deposit.confirmed webhook', () => {
   it('uses the same 300s replay window on both sides', () => {
     expect(webhook).toContain('Duration::from_secs(300)');
     expect(docs).toContain('300s');
+  });
+});
+
+describe('contract: invoice list / detail casing', () => {
+  it('serializes the invoice struct as camelCase', () => {
+    // GET /v1/merchant/deposits[/:id] serializes this struct straight to
+    // JSON. Without the rename it emitted order_id / fee_amount and the
+    // merchant dashboard rendered blank rows.
+    const decl = invoiceModel.indexOf('pub struct MerchantDepositInvoice');
+    expect(decl).toBeGreaterThan(-1);
+    expect(invoiceModel.slice(Math.max(0, decl - 400), decl)).toContain('rename_all = "camelCase"');
+  });
+
+  it('gives the dashboard the field names it reads', () => {
+    const iface = dashboard.slice(dashboard.indexOf('interface InvoiceItem'), dashboard.indexOf('interface WebhookTestResult'));
+    const fields = [...iface.matchAll(/^\s{2}(\w+)\??:/gm)].map((m) => m[1]);
+    expect(fields.length).toBeGreaterThan(8);
+    // Every field the table reads must exist on the Rust struct (snake_case
+    // there, camelCase on the wire).
+    for (const field of fields) {
+      const snake = field.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`);
+      expect(invoiceModel, `dashboard reads ${field}, struct has no ${snake}`).toContain(`pub ${snake}:`);
+    }
   });
 });
 

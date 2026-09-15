@@ -377,6 +377,65 @@ async fn signed_requests_work_on_the_gateway(pool: PgPool) {
     assert_eq!(plain.1["code"], "KEY_REQUIRES_SIGNATURE");
 }
 
+/// Regression: the list/detail endpoints serialized the invoice struct
+/// directly, which emitted snake_case (`order_id`, `fee_amount`), while the
+/// merchant dashboard — and every hand-built response in this domain — uses
+/// camelCase. The dashboard's invoice table rendered blanks because of it.
+#[sqlx::test(migrations = "../db/migrations")]
+async fn list_and_detail_use_the_same_camel_case_as_create(pool: PgPool) {
+    let (state, token, _, _) = common::register_user(pool, "casing").await;
+    let (st, created) = create(
+        state.clone(),
+        &token,
+        serde_json::json!({
+            "coin": "POL",
+            "amount": "250000",
+            "orderId": "ORD-CASE-1",
+            "callbackUrl": "https://merchant.example/hook"
+        }),
+    )
+    .await;
+    assert_eq!(st, axum::http::StatusCode::CREATED, "{created}");
+    let id = created["id"].as_str().unwrap().to_string();
+
+    let get = fetch(state.clone(), &token, &format!("/v1/merchant/deposits/{id}")).await;
+    let list = fetch(state, &token, "/v1/merchant/deposits").await;
+    let first = &list["invoices"][0];
+
+    for field in ["orderId", "feeAmount", "netAmount", "depositAddress", "receivedAmount", "callbackUrl", "createdAt", "webhookDelivered", "webhookAttempts"] {
+        assert!(!get[field].is_null(), "GET must expose {field} (got {get})");
+        assert!(!first[field].is_null(), "list must expose {field} (got {first})");
+    }
+    // The snake_case spelling must be gone, not merely duplicated.
+    for field in ["order_id", "fee_amount", "net_amount", "deposit_address", "received_amount", "created_at"] {
+        assert!(get[field].is_null(), "GET still exposes {field}");
+    }
+    assert_eq!(get["orderId"], "ORD-CASE-1");
+    // 0.5% of 250000, in whole ledger units — never a fraction of 1e-8.
+    assert_eq!(get["feeAmount"], "1250");
+    assert_eq!(get["netAmount"], "248750");
+}
+
+async fn fetch(
+    state: AppState<PgAuthRepo>,
+    token: &str,
+    uri: &str,
+) -> serde_json::Value {
+    let res = api_http::app_without_metrics(state)
+        .oneshot(
+            axum::http::Request::builder()
+                .uri(uri)
+                .header("authorization", format!("Bearer {token}"))
+                .header("x-real-ip", "203.0.113.90")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null)
+}
+
 /// The gateway checks the `deposits` scope, like `/v1/public/send` checks `send`.
 #[sqlx::test(migrations = "../db/migrations")]
 async fn gateway_requires_the_deposits_scope(pool: PgPool) {
