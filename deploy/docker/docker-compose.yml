@@ -36,6 +36,9 @@ services:
       BIND_ADDR: "0.0.0.0:4000"
       RUST_LOG: info
       CORS_ORIGIN: ${CORS_ORIGIN:-https://www.satspay.pro,https://satspay.pro}
+      # Absolute origin used to build the hosted checkout link returned as
+      # `checkoutUrl`. Defaults to the first CORS_ORIGIN entry when unset.
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-https://www.satspay.pro}
       ADMIN_EMAILS: ${ADMIN_EMAILS:-}
       JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?Set JWT_ACCESS_SECRET}
       JWT_ACCESS_TTL_SECS: "900"
@@ -124,6 +127,7 @@ services:
       <<: *app_env
       HOSTNAME: bitcosats-worker
       DEPOSIT_WATCHER_INTERVAL_SECS: "15"
+      INVOICE_WATCHER_INTERVAL_SECS: "20"
       WITHDRAWAL_BROADCAST_INTERVAL_SECS: "10"
       WITHDRAWAL_REQUEUE_INTERVAL_SECS: "60"
       REWARDS_TICK_INTERVAL_SECS: "60"

@@ -1,11 +1,12 @@
 //! Worker entrypoint — paridade com `legacy/apps/api/src/worker.ts`.
-//! Roda jobs internos (deposit_watcher, withdrawal_reconciler) e o
+//! Roda jobs internos (deposit_watcher, invoice_watcher, withdrawal_reconciler) e o
 //! outbox_relay que publica eventos de domínio no Kafka.
 //!
 //! TODO(fase 5+): balance_reconciliation, lend_accrual, worker_heartbeat.
 
 mod deposit_watcher;
 mod dex_swap_runner;
+mod invoice_watcher;
 mod withdrawal_reconciler;
 
 use chain::ChainRegistry;
@@ -52,6 +53,34 @@ async fn main() {
         loop {
             interval.tick().await;
             deposit_watcher::run_once(&deposit_pool, &deposit_registry).await;
+        }
+    });
+
+    // Same HKDF-derived per-merchant webhook key the API signs with — both
+    // sides derive it from ENCRYPTION_KEY, nothing is stored.
+    let encryption_key = std::env::var("ENCRYPTION_KEY").expect("ENCRYPTION_KEY must be set (64 hex chars)");
+    let secrets = Arc::new(
+        crypto::SecretsService::from_hex(&encryption_key).expect("ENCRYPTION_KEY must be 64 hex chars"),
+    );
+
+    // Merchant gateway: confirm on-chain invoice payments, sweep, and retry
+    // webhooks. Optional interval with a default so an existing deployment
+    // does not fail to boot on a missing variable.
+    let invoice_interval = Duration::from_secs(
+        std::env::var("INVOICE_WATCHER_INTERVAL_SECS")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .filter(|s| *s > 0)
+            .unwrap_or(20),
+    );
+    let invoice_pool = pool.clone();
+    let invoice_registry = registry.clone();
+    let invoice_secrets = secrets.clone();
+    let invoice_task = tokio::spawn(async move {
+        let mut interval = tokio::time::interval(invoice_interval);
+        loop {
+            interval.tick().await;
+            invoice_watcher::run_once(&invoice_pool, &invoice_registry, &invoice_secrets).await;
         }
     });
 
@@ -190,5 +219,14 @@ async fn main() {
         tracing::warn!("KAFKA_BOOTSTRAP_SERVERS not set — outbox_relay disabled, events will accumulate unpublished");
     }
 
-    let _ = tokio::join!(deposit_task, withdrawal_task, dex_task, rewards_task, price_task, aave_task, metrics_task);
+    let _ = tokio::join!(
+        deposit_task,
+        invoice_task,
+        withdrawal_task,
+        dex_task,
+        rewards_task,
+        price_task,
+        aave_task,
+        metrics_task
+    );
 }

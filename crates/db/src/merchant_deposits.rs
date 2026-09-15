@@ -22,6 +22,13 @@ pub enum MerchantDepositError {
     MerchantWalletNotFound,
     #[error("payer wallet not found")]
     PayerWalletNotFound,
+    #[error("orderId already used for a different invoice")]
+    DuplicateOrderId,
+}
+
+/// True for a Postgres unique-constraint violation (SQLSTATE 23505).
+fn is_unique_violation(e: &sqlx::Error) -> bool {
+    matches!(e, sqlx::Error::Database(db) if db.code().as_deref() == Some("23505"))
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -37,8 +44,12 @@ pub struct MerchantDepositInvoice {
     pub fee_amount: BigDecimal,
     pub net_amount: BigDecimal,
     pub deposit_address: String,
+    /// Derivation index of `deposit_address` — needed to sweep the funds.
+    pub hd_index: Option<i64>,
     pub tx_hash: Option<String>,
     pub confirmations: i32,
+    /// Ledger units (1e-8) actually seen at `deposit_address` so far.
+    pub received_amount: BigDecimal,
     pub callback_url: String,
     pub success_url: Option<String>,
     pub cancel_url: Option<String>,
@@ -53,6 +64,7 @@ pub struct MerchantDepositInvoice {
     pub webhook_attempts: i32,
     pub webhook_last_error: Option<String>,
     pub webhook_last_attempt_at: Option<DateTime<Utc>>,
+    pub webhook_next_retry_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
 }
 
@@ -66,6 +78,7 @@ pub struct CreateDepositInvoiceInput {
     pub coin: shared::Coin,
     pub amount: BigDecimal,
     pub deposit_address: String,
+    pub hd_index: Option<i64>,
     pub callback_url: String,
     pub success_url: Option<String>,
     pub cancel_url: Option<String>,
@@ -73,6 +86,52 @@ pub struct CreateDepositInvoiceInput {
     pub customer_name: Option<String>,
     pub description: Option<String>,
     pub expiry_minutes: Option<i64>,
+}
+
+/// Every column [`row_to_invoice`] reads, in one place — the three read
+/// paths (create/get/list) used to keep three hand-maintained copies of this
+/// list and of the mapping below.
+const INVOICE_COLUMNS: &str = "id, merchant_id, api_key_id, site_user_id, order_id, site_name, \
+     coin::text as coin, amount, fee_amount, net_amount, deposit_address, hd_index, \
+     tx_hash, confirmations, received_amount, callback_url, success_url, cancel_url, \
+     customer_email, customer_name, description, status::text as status, \
+     expires_at, paid_at, webhook_delivered, webhook_status_code, \
+     webhook_attempts, webhook_last_error, webhook_last_attempt_at, webhook_next_retry_at, created_at";
+
+fn row_to_invoice(row: &sqlx::postgres::PgRow) -> MerchantDepositInvoice {
+    MerchantDepositInvoice {
+        id: row.get("id"),
+        merchant_id: row.get("merchant_id"),
+        api_key_id: row.get("api_key_id"),
+        site_user_id: row.get("site_user_id"),
+        order_id: row.get("order_id"),
+        site_name: row.get("site_name"),
+        coin: row.get("coin"),
+        amount: row.get("amount"),
+        fee_amount: row.get("fee_amount"),
+        net_amount: row.get("net_amount"),
+        deposit_address: row.get("deposit_address"),
+        hd_index: row.get("hd_index"),
+        tx_hash: row.get("tx_hash"),
+        confirmations: row.get("confirmations"),
+        received_amount: row.get("received_amount"),
+        callback_url: row.get("callback_url"),
+        success_url: row.get("success_url"),
+        cancel_url: row.get("cancel_url"),
+        customer_email: row.get("customer_email"),
+        customer_name: row.get("customer_name"),
+        description: row.get("description"),
+        status: row.get("status"),
+        expires_at: row.get("expires_at"),
+        paid_at: row.get("paid_at"),
+        webhook_delivered: row.get("webhook_delivered"),
+        webhook_status_code: row.get("webhook_status_code"),
+        webhook_attempts: row.get("webhook_attempts"),
+        webhook_last_error: row.get("webhook_last_error"),
+        webhook_last_attempt_at: row.get("webhook_last_attempt_at"),
+        webhook_next_retry_at: row.get("webhook_next_retry_at"),
+        created_at: row.get("created_at"),
+    }
 }
 
 pub async fn create_invoice(
@@ -87,25 +146,19 @@ pub async fn create_invoice(
     let fee_amount = &input.amount * &fee_pct;
     let net_amount = &input.amount - &fee_amount;
 
-    let row = sqlx::query(
+    let row = sqlx::query(&format!(
         "INSERT INTO merchant_deposit_invoices (
             merchant_id, api_key_id, site_user_id, order_id, site_name,
             coin, amount, fee_amount, net_amount, deposit_address,
             callback_url, success_url, cancel_url, customer_email, customer_name,
-            description, status, expires_at
+            description, status, expires_at, hd_index
         ) VALUES (
             $1, $2, $3, $4, $5,
             $6::coin, $7, $8, $9, $10,
             $11, $12, $13, $14, $15,
-            $16, 'PENDING'::deposit_invoice_status, $17
-        ) RETURNING 
-            id, merchant_id, api_key_id, site_user_id, order_id, site_name,
-            coin::text as coin, amount, fee_amount, net_amount, deposit_address,
-            tx_hash, confirmations, callback_url, success_url, cancel_url,
-            customer_email, customer_name, description, status::text as status,
-            expires_at, paid_at, webhook_delivered, webhook_status_code,
-            webhook_attempts, webhook_last_error, webhook_last_attempt_at, created_at"
-    )
+            $16, 'PENDING'::deposit_invoice_status, $17, $18
+        ) RETURNING {INVOICE_COLUMNS}"
+    ))
     .bind(input.merchant_id)
     .bind(input.api_key_id)
     .bind(input.site_user_id)
@@ -123,87 +176,49 @@ pub async fn create_invoice(
     .bind(input.customer_name)
     .bind(input.description)
     .bind(expires_at)
+    .bind(input.hd_index)
     .fetch_one(pool)
-    .await?;
+    .await
+    .map_err(|e| {
+        // Unique (merchant_id, order_id) — the caller decides whether this is
+        // an idempotent replay or a genuine conflict.
+        if is_unique_violation(&e) {
+            MerchantDepositError::DuplicateOrderId
+        } else {
+            MerchantDepositError::Db(e)
+        }
+    })?;
 
-    Ok(MerchantDepositInvoice {
-        id: row.get("id"),
-        merchant_id: row.get("merchant_id"),
-        api_key_id: row.get("api_key_id"),
-        site_user_id: row.get("site_user_id"),
-        order_id: row.get("order_id"),
-        site_name: row.get("site_name"),
-        coin: row.get("coin"),
-        amount: row.get("amount"),
-        fee_amount: row.get("fee_amount"),
-        net_amount: row.get("net_amount"),
-        deposit_address: row.get("deposit_address"),
-        tx_hash: row.get("tx_hash"),
-        confirmations: row.get("confirmations"),
-        callback_url: row.get("callback_url"),
-        success_url: row.get("success_url"),
-        cancel_url: row.get("cancel_url"),
-        customer_email: row.get("customer_email"),
-        customer_name: row.get("customer_name"),
-        description: row.get("description"),
-        status: row.get("status"),
-        expires_at: row.get("expires_at"),
-        paid_at: row.get("paid_at"),
-        webhook_delivered: row.get("webhook_delivered"),
-        webhook_status_code: row.get("webhook_status_code"),
-        webhook_attempts: row.get("webhook_attempts"),
-        webhook_last_error: row.get("webhook_last_error"),
-        webhook_last_attempt_at: row.get("webhook_last_attempt_at"),
-        created_at: row.get("created_at"),
-    })
+    Ok(row_to_invoice(&row))
 }
 
 pub async fn get_invoice_by_id(pool: &PgPool, id: Uuid) -> Result<MerchantDepositInvoice, MerchantDepositError> {
-    let row = sqlx::query(
-        "SELECT 
-            id, merchant_id, api_key_id, site_user_id, order_id, site_name,
-            coin::text as coin, amount, fee_amount, net_amount, deposit_address,
-            tx_hash, confirmations, callback_url, success_url, cancel_url,
-            customer_email, customer_name, description, status::text as status,
-            expires_at, paid_at, webhook_delivered, webhook_status_code,
-            webhook_attempts, webhook_last_error, webhook_last_attempt_at, created_at
-        FROM merchant_deposit_invoices WHERE id = $1"
-    )
-    .bind(id)
+    let row = sqlx::query(&format!("SELECT {INVOICE_COLUMNS} FROM merchant_deposit_invoices WHERE id = $1"))
+        .bind(id)
+        .fetch_optional(pool)
+        .await?;
+
+    let row = row.ok_or(MerchantDepositError::NotFound)?;
+    Ok(row_to_invoice(&row))
+}
+
+/// Looks up an invoice by its merchant-supplied `order_id` — the idempotency
+/// key of the create endpoint.
+pub async fn get_invoice_by_order_id(
+    pool: &PgPool,
+    merchant_id: Uuid,
+    order_id: &str,
+) -> Result<MerchantDepositInvoice, MerchantDepositError> {
+    let row = sqlx::query(&format!(
+        "SELECT {INVOICE_COLUMNS} FROM merchant_deposit_invoices WHERE merchant_id = $1 AND order_id = $2"
+    ))
+    .bind(merchant_id)
+    .bind(order_id)
     .fetch_optional(pool)
     .await?;
 
     let row = row.ok_or(MerchantDepositError::NotFound)?;
-    Ok(MerchantDepositInvoice {
-        id: row.get("id"),
-        merchant_id: row.get("merchant_id"),
-        api_key_id: row.get("api_key_id"),
-        site_user_id: row.get("site_user_id"),
-        order_id: row.get("order_id"),
-        site_name: row.get("site_name"),
-        coin: row.get("coin"),
-        amount: row.get("amount"),
-        fee_amount: row.get("fee_amount"),
-        net_amount: row.get("net_amount"),
-        deposit_address: row.get("deposit_address"),
-        tx_hash: row.get("tx_hash"),
-        confirmations: row.get("confirmations"),
-        callback_url: row.get("callback_url"),
-        success_url: row.get("success_url"),
-        cancel_url: row.get("cancel_url"),
-        customer_email: row.get("customer_email"),
-        customer_name: row.get("customer_name"),
-        description: row.get("description"),
-        status: row.get("status"),
-        expires_at: row.get("expires_at"),
-        paid_at: row.get("paid_at"),
-        webhook_delivered: row.get("webhook_delivered"),
-        webhook_status_code: row.get("webhook_status_code"),
-        webhook_attempts: row.get("webhook_attempts"),
-        webhook_last_error: row.get("webhook_last_error"),
-        webhook_last_attempt_at: row.get("webhook_last_attempt_at"),
-        created_at: row.get("created_at"),
-    })
+    Ok(row_to_invoice(&row))
 }
 
 pub async fn list_invoices_by_merchant(
@@ -212,57 +227,19 @@ pub async fn list_invoices_by_merchant(
     limit: i64,
     offset: i64,
 ) -> Result<Vec<MerchantDepositInvoice>, MerchantDepositError> {
-    let rows = sqlx::query(
-        "SELECT 
-            id, merchant_id, api_key_id, site_user_id, order_id, site_name,
-            coin::text as coin, amount, fee_amount, net_amount, deposit_address,
-            tx_hash, confirmations, callback_url, success_url, cancel_url,
-            customer_email, customer_name, description, status::text as status,
-            expires_at, paid_at, webhook_delivered, webhook_status_code,
-            webhook_attempts, webhook_last_error, webhook_last_attempt_at, created_at
-        FROM merchant_deposit_invoices 
-        WHERE merchant_id = $1 
-        ORDER BY created_at DESC 
-        LIMIT $2 OFFSET $3"
-    )
+    let rows = sqlx::query(&format!(
+        "SELECT {INVOICE_COLUMNS} FROM merchant_deposit_invoices \
+         WHERE merchant_id = $1 \
+         ORDER BY created_at DESC \
+         LIMIT $2 OFFSET $3"
+    ))
     .bind(merchant_id)
-    .bind(limit.max(1).min(100))
+    .bind(limit.clamp(1, 100))
     .bind(offset.max(0))
     .fetch_all(pool)
     .await?;
 
-    let list = rows.into_iter().map(|row| MerchantDepositInvoice {
-        id: row.get("id"),
-        merchant_id: row.get("merchant_id"),
-        api_key_id: row.get("api_key_id"),
-        site_user_id: row.get("site_user_id"),
-        order_id: row.get("order_id"),
-        site_name: row.get("site_name"),
-        coin: row.get("coin"),
-        amount: row.get("amount"),
-        fee_amount: row.get("fee_amount"),
-        net_amount: row.get("net_amount"),
-        deposit_address: row.get("deposit_address"),
-        tx_hash: row.get("tx_hash"),
-        confirmations: row.get("confirmations"),
-        callback_url: row.get("callback_url"),
-        success_url: row.get("success_url"),
-        cancel_url: row.get("cancel_url"),
-        customer_email: row.get("customer_email"),
-        customer_name: row.get("customer_name"),
-        description: row.get("description"),
-        status: row.get("status"),
-        expires_at: row.get("expires_at"),
-        paid_at: row.get("paid_at"),
-        webhook_delivered: row.get("webhook_delivered"),
-        webhook_status_code: row.get("webhook_status_code"),
-        webhook_attempts: row.get("webhook_attempts"),
-        webhook_last_error: row.get("webhook_last_error"),
-        webhook_last_attempt_at: row.get("webhook_last_attempt_at"),
-        created_at: row.get("created_at"),
-    }).collect();
-
-    Ok(list)
+    Ok(rows.iter().map(row_to_invoice).collect())
 }
 
 /// Confirm an invoice: updates status to CONFIRMED and credits the merchant's MERCHANT wallet in ledger.
@@ -442,6 +419,7 @@ pub async fn pay_invoice_with_balance(
         "UPDATE merchant_deposit_invoices 
          SET status = 'CONFIRMED'::deposit_invoice_status,
              tx_hash = 'internal_satspay',
+             received_amount = amount,
              paid_at = now(),
              updated_at = now()
          WHERE id = $1"
@@ -478,6 +456,124 @@ pub async fn record_webhook_delivery(
     .bind(error_msg)
     .execute(pool)
     .await?;
+
+    Ok(())
+}
+
+/// Invoices the on-chain watcher still has to look at: not yet paid and not
+/// yet past `expires_at`.
+pub async fn list_open_invoices(
+    pool: &PgPool,
+    limit: i64,
+) -> Result<Vec<MerchantDepositInvoice>, MerchantDepositError> {
+    let rows = sqlx::query(&format!(
+        "SELECT {INVOICE_COLUMNS} FROM merchant_deposit_invoices \
+         WHERE status IN ('PENDING'::deposit_invoice_status, 'DETECTED'::deposit_invoice_status) \
+           AND expires_at > now() \
+         ORDER BY expires_at ASC \
+         LIMIT $1"
+    ))
+    .bind(limit.clamp(1, 1000))
+    .fetch_all(pool)
+    .await?;
+
+    Ok(rows.iter().map(row_to_invoice).collect())
+}
+
+/// Records what the chain shows for an invoice that is not yet payable in
+/// full (or not yet deeply enough confirmed). Never moves a CONFIRMED
+/// invoice back — confirmation is terminal for the credit.
+pub async fn mark_invoice_detected(
+    pool: &PgPool,
+    invoice_id: Uuid,
+    received: BigDecimal,
+    confirmations: i32,
+    tx_hash: Option<&str>,
+) -> Result<(), MerchantDepositError> {
+    sqlx::query(
+        "UPDATE merchant_deposit_invoices
+         SET status = 'DETECTED'::deposit_invoice_status,
+             received_amount = $2,
+             confirmations = $3,
+             tx_hash = COALESCE($4, tx_hash),
+             updated_at = now()
+         WHERE id = $1
+           AND status IN ('PENDING'::deposit_invoice_status, 'DETECTED'::deposit_invoice_status)",
+    )
+    .bind(invoice_id)
+    .bind(received)
+    .bind(confirmations)
+    .bind(tx_hash)
+    .execute(pool)
+    .await?;
+
+    Ok(())
+}
+
+/// Expires invoices whose window closed without a confirmed payment.
+/// Returns how many were expired. DETECTED (underpaid/unconfirmed) invoices
+/// expire too — the funds stay recorded in `received_amount` for support.
+pub async fn expire_due_invoices(pool: &PgPool) -> Result<u64, MerchantDepositError> {
+    let done = sqlx::query(
+        "UPDATE merchant_deposit_invoices
+         SET status = 'EXPIRED'::deposit_invoice_status, updated_at = now()
+         WHERE status IN ('PENDING'::deposit_invoice_status, 'DETECTED'::deposit_invoice_status)
+           AND expires_at <= now()",
+    )
+    .execute(pool)
+    .await?;
+
+    Ok(done.rows_affected())
+}
+
+/// Confirmed invoices whose webhook has not been delivered yet and whose
+/// backoff window has elapsed. `max_attempts` caps redelivery so a merchant
+/// endpoint that is permanently broken stops consuming the worker.
+pub async fn list_webhook_retries(
+    pool: &PgPool,
+    max_attempts: i32,
+    limit: i64,
+) -> Result<Vec<MerchantDepositInvoice>, MerchantDepositError> {
+    let rows = sqlx::query(&format!(
+        "SELECT {INVOICE_COLUMNS} FROM merchant_deposit_invoices \
+         WHERE status = 'CONFIRMED'::deposit_invoice_status \
+           AND webhook_delivered = FALSE \
+           AND webhook_attempts < $1 \
+           AND webhook_next_retry_at IS NOT NULL \
+           AND webhook_next_retry_at <= now() \
+         ORDER BY webhook_next_retry_at ASC \
+         LIMIT $2"
+    ))
+    .bind(max_attempts)
+    .bind(limit.clamp(1, 200))
+    .fetch_all(pool)
+    .await?;
+
+    Ok(rows.iter().map(row_to_invoice).collect())
+}
+
+/// Schedules (or clears) the next webhook redelivery attempt.
+pub async fn schedule_webhook_retry(
+    pool: &PgPool,
+    invoice_id: Uuid,
+    next_retry_at: Option<DateTime<Utc>>,
+) -> Result<(), MerchantDepositError> {
+    sqlx::query("UPDATE merchant_deposit_invoices SET webhook_next_retry_at = $2, updated_at = now() WHERE id = $1")
+        .bind(invoice_id)
+        .bind(next_retry_at)
+        .execute(pool)
+        .await?;
+
+    Ok(())
+}
+
+/// Marks the invoice address as swept so the watcher does not re-broadcast a
+/// sweep every tick once the funds already moved to the hot wallet.
+pub async fn mark_invoice_swept(pool: &PgPool, invoice_id: Uuid) -> Result<(), MerchantDepositError> {
+    sqlx::query("UPDATE merchant_deposit_invoices SET hd_index = NULL, updated_at = now() WHERE id = $1")
+        .bind(invoice_id)
+        .execute(pool)
+        .await?;
 
     Ok(())
 }

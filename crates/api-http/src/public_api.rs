@@ -15,7 +15,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, post};
 use axum::{async_trait, Json, Router};
 use bigdecimal::BigDecimal;
-use db::public_api::{ApiKeyRecord, VerifySignedRequestInput};
+use db::public_api::{ApiKeyRecord, PublicApiError, VerifySignedRequestInput};
 use domain::auth::AuthRepo;
 use serde::Deserialize;
 use serde_json::json;
@@ -94,16 +94,102 @@ async fn list_keys<R: AuthRepo>(State(state): State<AppState<R>>, user: AuthUser
 /// signature's body hash) and hands it back as `Bytes` for handlers to parse.
 struct ApiKeyAuth(ApiKeyRecord, Bytes);
 
-pub struct ApiKeyRejection(StatusCode, String);
+/// Rejection carrying a stable machine-readable `code` alongside the human
+/// message — the shape `client/src/lib/api.ts::adaptRustError` reads.
+pub struct ApiKeyRejection(StatusCode, &'static str, String);
 
 impl IntoResponse for ApiKeyRejection {
     fn into_response(self) -> Response {
-        (self.0, Json(json!({ "error": self.1 }))).into_response()
+        (self.0, Json(json!({ "error": self.2, "code": self.1 }))).into_response()
     }
 }
 
-fn unauthorized(msg: &str) -> ApiKeyRejection {
-    ApiKeyRejection(StatusCode::UNAUTHORIZED, msg.to_string())
+fn unauthorized(code: &'static str, msg: &str) -> ApiKeyRejection {
+    ApiKeyRejection(StatusCode::UNAUTHORIZED, code, msg.to_string())
+}
+
+/// Stable error code for every `PublicApiError` variant. Documented on
+/// `/docs`; never invent a message-only error for these.
+pub(crate) fn public_api_error_code(e: &PublicApiError) -> &'static str {
+    match e {
+        PublicApiError::Db(_) => "INTERNAL_ERROR",
+        PublicApiError::KeyNotFound | PublicApiError::InvalidKey => "INVALID_API_KEY",
+        PublicApiError::KeyExpired => "API_KEY_EXPIRED",
+        PublicApiError::IpNotAllowed => "IP_NOT_ALLOWED",
+        PublicApiError::RequiresSignature => "KEY_REQUIRES_SIGNATURE",
+        PublicApiError::MissingScope(_) => "MISSING_SCOPE",
+        PublicApiError::IneligibleTarget => "TARGET_INELIGIBLE",
+        PublicApiError::SendToSelf => "SEND_TO_SELF",
+        PublicApiError::WalletNotFound => "WALLET_NOT_FOUND",
+        PublicApiError::DailyLimitReached => "DAILY_LIMIT_REACHED",
+        PublicApiError::BadTimestamp => "BAD_TIMESTAMP",
+        PublicApiError::TimestampOutOfWindow => "TIMESTAMP_OUT_OF_WINDOW",
+        PublicApiError::SignatureMismatch => "SIGNATURE_MISMATCH",
+        PublicApiError::SignatureReplay => "SIGNATURE_REPLAY",
+    }
+}
+
+pub(crate) fn key_rejection(e: &PublicApiError) -> ApiKeyRejection {
+    let code = public_api_error_code(e);
+    let status = if code == "INTERNAL_ERROR" { StatusCode::INTERNAL_SERVER_ERROR } else { StatusCode::UNAUTHORIZED };
+    ApiKeyRejection(status, code, e.to_string())
+}
+
+/// Largest request body the API-key paths buffer. The signature covers a
+/// hash of the raw body, so it has to be read fully before auth can run —
+/// cap it so an unauthenticated caller cannot make the server buffer
+/// unbounded bytes.
+const MAX_SIGNED_BODY_BYTES: usize = 1024 * 1024;
+
+/// Splits a request into parts + fully-buffered body, which both API-key auth
+/// modes need (the HMAC signature covers a hash of the raw body).
+pub(crate) async fn split_request(req: Request) -> Result<(axum::http::request::Parts, Bytes), ApiKeyRejection> {
+    let (parts, body_stream) = req.into_parts();
+    let body = axum::body::to_bytes(body_stream, MAX_SIGNED_BODY_BYTES)
+        .await
+        .map_err(|_| ApiKeyRejection(StatusCode::PAYLOAD_TOO_LARGE, "BODY_TOO_LARGE", "request body too large or unreadable".to_string()))?;
+    Ok((parts, body))
+}
+
+/// Authenticates an API-key request from already-split `parts` + raw `body`,
+/// accepting either auth mode. Shared by the `/v1/public/*` extractor and the
+/// merchant gateway (`merchant_deposits`), so both apply the same IP,
+/// expiry, `require_signature` and replay gates — a merchant-only copy of
+/// this logic is how the gateway ended up authenticating against a hardcoded
+/// `0.0.0.0` source IP.
+pub(crate) async fn authenticate_api_request<R: AuthRepo + 'static>(
+    parts: &axum::http::request::Parts,
+    body: &Bytes,
+    state: &AppState<R>,
+) -> Result<ApiKeyRecord, ApiKeyRejection> {
+    let source_ip = resolve_client_ip(parts)
+        .ok_or_else(|| ApiKeyRejection(StatusCode::INTERNAL_SERVER_ERROR, "INTERNAL_ERROR", "client IP unavailable".into()))?;
+    let method = parts.method.to_string();
+    let path_and_query = parts.uri.path_and_query().map(|pq| pq.as_str().to_string()).unwrap_or_default();
+    let key_id = parts.headers.get("x-key-id").and_then(|v| v.to_str().ok());
+    let timestamp = parts.headers.get("x-timestamp").and_then(|v| v.to_str().ok());
+    let signature = parts.headers.get("x-signature").and_then(|v| v.to_str().ok());
+    let api_key_header = parts.headers.get("x-api-key").and_then(|v| v.to_str().ok());
+
+    if let (Some(key_id), Some(timestamp), Some(signature)) = (key_id, timestamp, signature) {
+        let key_id = key_id.parse::<Uuid>().map_err(|_| unauthorized("INVALID_KEY_ID", "invalid x-key-id"))?;
+        return db::public_api::verify_signed_request(
+            &state.pool,
+            &state.secrets,
+            VerifySignedRequestInput { key_id, timestamp, signature, method: &method, path: &path_and_query, raw_body: body, source_ip: &source_ip },
+            state.settings.public_api_signature_max_skew,
+        )
+        .await
+        .map_err(|e| key_rejection(&e));
+    }
+
+    let key = api_key_header.ok_or_else(|| unauthorized("INVALID_API_KEY", "missing or invalid API key"))?;
+    if key.len() != 64 || !key.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Err(unauthorized("INVALID_API_KEY", "missing or invalid API key"));
+    }
+    db::public_api::authenticate_by_hash(&state.pool, &state.secrets, key, &source_ip)
+        .await
+        .map_err(|e| key_rejection(&e))
 }
 
 #[async_trait]
@@ -111,37 +197,8 @@ impl<R: AuthRepo + 'static> FromRequest<AppState<R>> for ApiKeyAuth {
     type Rejection = ApiKeyRejection;
 
     async fn from_request(req: Request, state: &AppState<R>) -> Result<Self, Self::Rejection> {
-        let (parts, body_stream) = req.into_parts();
-        let source_ip = resolve_client_ip(&parts)
-            .ok_or_else(|| ApiKeyRejection(StatusCode::INTERNAL_SERVER_ERROR, "client IP unavailable".into()))?;
-        let method = parts.method.to_string();
-        let path_and_query = parts.uri.path_and_query().map(|pq| pq.as_str().to_string()).unwrap_or_default();
-        let key_id = parts.headers.get("x-key-id").and_then(|v| v.to_str().ok()).map(str::to_string);
-        let timestamp = parts.headers.get("x-timestamp").and_then(|v| v.to_str().ok()).map(str::to_string);
-        let signature = parts.headers.get("x-signature").and_then(|v| v.to_str().ok()).map(str::to_string);
-        let api_key_header = parts.headers.get("x-api-key").and_then(|v| v.to_str().ok()).map(str::to_string);
-
-        let req = Request::from_parts(parts, body_stream);
-        let body = Bytes::from_request(req, state).await.map_err(|_| ApiKeyRejection(StatusCode::BAD_REQUEST, "invalid body".to_string()))?;
-
-        if let (Some(key_id), Some(timestamp), Some(signature)) = (&key_id, &timestamp, &signature) {
-            let key_id = key_id.parse::<Uuid>().map_err(|_| unauthorized("invalid x-key-id"))?;
-            let record = db::public_api::verify_signed_request(
-                &state.pool,
-                &state.secrets,
-                VerifySignedRequestInput { key_id, timestamp, signature, method: &method, path: &path_and_query, raw_body: &body, source_ip: &source_ip },
-                state.settings.public_api_signature_max_skew,
-            )
-            .await
-            .map_err(|e| unauthorized(&e.to_string()))?;
-            return Ok(ApiKeyAuth(record, body));
-        }
-
-        let key = api_key_header.ok_or_else(|| unauthorized("missing or invalid API key"))?;
-        if key.len() != 64 || !key.chars().all(|c| c.is_ascii_hexdigit()) {
-            return Err(unauthorized("missing or invalid API key"));
-        }
-        let record = db::public_api::authenticate_by_hash(&state.pool, &state.secrets, &key, &source_ip).await.map_err(|e| unauthorized(&e.to_string()))?;
+        let (parts, body) = split_request(req).await?;
+        let record = authenticate_api_request(&parts, &body, state).await?;
         Ok(ApiKeyAuth(record, body))
     }
 }
@@ -158,7 +215,7 @@ struct SendRequest {
 
 async fn send<R: AuthRepo>(State(state): State<AppState<R>>, ApiKeyAuth(key, raw_body): ApiKeyAuth) -> Response {
     if db::public_api::require_scope(&key, "send").is_err() {
-        return (StatusCode::FORBIDDEN, Json(json!({ "error": "missing required scope: send" }))).into_response();
+        return (StatusCode::FORBIDDEN, Json(json!({ "error": "missing required scope: send", "code": "MISSING_SCOPE" }))).into_response();
     }
     let Ok(body) = serde_json::from_slice::<SendRequest>(&raw_body) else {
         return (StatusCode::BAD_REQUEST, Json(json!({ "error": "invalid request" }))).into_response();

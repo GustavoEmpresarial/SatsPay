@@ -12,6 +12,7 @@ members = [
     "crates/captcha",
     "crates/pricing",
     "crates/swapkit",
+    "crates/webhooks",
     "crates/api-http",
     "crates/worker",
     "crates/api-server",
@@ -46,4 +47,5 @@ notify = { path = "crates/notify" }
 captcha = { path = "crates/captcha" }
 pricing = { path = "crates/pricing" }
 swapkit = { path = "crates/swapkit" }
+webhooks = { path = "crates/webhooks" }
 wiremock = "0.6"
