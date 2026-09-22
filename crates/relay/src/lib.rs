@@ -91,6 +91,21 @@ pub enum RelayError {
     Serde(#[from] serde_json::Error),
 }
 
+impl RelayError {
+    /// Relay puts a machine-readable `errorCode` in its 4xx bodies, e.g.
+    /// `AMOUNT_TOO_LOW` when route fees would exceed the swap output. Callers
+    /// map it to their own stable code — the raw body carries a requestId and
+    /// provider internals that should never reach an end user.
+    pub fn upstream_code(&self) -> Option<String> {
+        let Self::Http { body, .. } = self else { return None };
+        serde_json::from_str::<Value>(body)
+            .ok()?
+            .get("errorCode")?
+            .as_str()
+            .map(str::to_string)
+    }
+}
+
 #[derive(Clone)]
 pub struct RelayClient {
     http: reqwest::Client,
@@ -823,5 +838,26 @@ mod tests {
         assert_eq!(s.outbound_tx.as_deref(), Some("b"));
         let f = RelayIntentStatus::from_value(&json!({"status":"failed"}));
         assert!(f.is_failed());
+    }
+
+    #[test]
+    fn upstream_code_extracts_relay_error_code() {
+        // Real body shape returned for a dust SOL → PEPE bridge.
+        let e = RelayError::Http {
+            status: 400,
+            body: r#"{"message":"Swap output amount is too small to cover fees required to execute swap","errorCode":"AMOUNT_TOO_LOW","requestId":"0x179009"}"#
+                .into(),
+        };
+        assert_eq!(e.upstream_code().as_deref(), Some("AMOUNT_TOO_LOW"));
+    }
+
+    #[test]
+    fn upstream_code_is_none_for_non_http_and_unparseable() {
+        assert_eq!(RelayError::NotConfigured.upstream_code(), None);
+        assert_eq!(RelayError::Msg("boom".into()).upstream_code(), None);
+        let garbage = RelayError::Http { status: 502, body: "<html>bad gateway</html>".into() };
+        assert_eq!(garbage.upstream_code(), None);
+        let no_code = RelayError::Http { status: 400, body: r#"{"message":"nope"}"#.into() };
+        assert_eq!(no_code.upstream_code(), None);
     }
 }

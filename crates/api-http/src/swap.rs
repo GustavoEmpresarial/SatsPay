@@ -412,6 +412,24 @@ fn map_dex_route(client: &swapkit::SwapKitClient, from: Coin, to: Coin, from_amo
     })
 }
 
+/// Turns a Relay failure into a stable code plus a message safe to show.
+///
+/// Relay's 4xx body carries a requestId and provider internals, so it is logged
+/// rather than returned — the user gets the code and an action to take.
+fn map_relay_error(e: &relay::RelayError) -> (&'static str, &'static str) {
+    match e.upstream_code().as_deref() {
+        Some("AMOUNT_TOO_LOW") | Some("INSUFFICIENT_FUNDS") => (
+            "AMOUNT_TOO_LOW",
+            "valor baixo demais para esta rota: os custos de rede consumiriam tudo que seria recebido. Aumente a quantia ou escolha outro par.",
+        ),
+        Some("NO_QUOTES") | Some("NO_SWAP_ROUTES_FOUND") => (
+            "NO_ROUTE",
+            "nenhum provedor cotou esta rota agora. Tente outro par ou um valor diferente.",
+        ),
+        _ => ("RELAY_ERROR", "o provedor da rota recusou esta operação. Peça uma nova cotação e tente de novo."),
+    }
+}
+
 /// Floor the re-quote may land on before execute refuses with SLIPPAGE.
 ///
 /// Relay and ChangeNOW do not return a max-slippage figure the way SwapKit
@@ -1138,7 +1156,17 @@ async fn execute_relay<R: AuthRepo>(
     {
         Ok(q) => q,
         Err(e) => {
-            return (StatusCode::BAD_REQUEST, Json(json!({ "error": format!("relay: {e}") }))).into_response()
+            let (code, message) = map_relay_error(&e);
+            tracing::warn!(
+                error = %e,
+                code,
+                from = %from_coin.as_str(),
+                to = %to_coin.as_str(),
+                %from_amount,
+                "relay quote rejected on execute"
+            );
+            return (StatusCode::BAD_REQUEST, Json(json!({ "error": message, "code": code })))
+                .into_response();
         }
     };
     // Fresh quote always gets a new requestId — keep client's routeId only as selection

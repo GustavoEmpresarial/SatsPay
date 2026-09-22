@@ -5,6 +5,8 @@ const MERCHANT_BLOCKED_MSG =
   'Saques on-chain saem da carteira pessoal. Transfira o saldo do caixa de comerciante para a conta pessoal antes de sacar.';
 const SLIPPAGE_MSG =
   'O preço da rota mudou enquanto você confirmava e ficou abaixo do mínimo garantido. Peça uma nova cotação e tente de novo.';
+const AMOUNT_TOO_LOW_MSG =
+  'Valor baixo demais para esta rota: os custos de rede consumiriam tudo que seria recebido. Aumente a quantia ou escolha outro par.';
 
 const ERROR_TRANSLATIONS: Record<string, string> = {
   unauthorized: 'Sessão expirada ou não autenticada. Por favor, atualize a página ou entre novamente.',
@@ -52,6 +54,10 @@ export function formatApiError(err: unknown, fallback = 'Erro inesperado. Tente 
 
   if (err.code === 'SLIPPAGE') {
     return SLIPPAGE_MSG;
+  }
+
+  if (err.code === 'AMOUNT_TOO_LOW') {
+    return AMOUNT_TOO_LOW_MSG;
   }
 
   if (err.code === 'VALIDATION_ERROR' && err.details && typeof err.details === 'object') {
