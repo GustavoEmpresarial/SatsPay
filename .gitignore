@@ -37,7 +37,10 @@ target/
 # Logs and temp
 *.log
 /tmp/
+.tmp/
 storage/tmp/
+scripts/__pycache__/
+target-bookworm/
 storage/backups/
 storage/logs/
 
