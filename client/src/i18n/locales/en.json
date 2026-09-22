@@ -603,13 +603,7 @@
     "pausedSection": "Temporarily paused",
     "pausedNetworks": "Temporarily paused: {{list}}",
     "personalBalance": "Personal balance",
-    "debitedFrom": "Debited from your personal wallet",
-    "merchantNoticeTitle": "Your merchant cash balance holds {{amount}} {{coin}}",
-    "merchantNoticeBody": "This is money your sales brought in, and it does not go straight to an external wallet. Move it to your personal wallet first — on-chain sends cannot be undone.",
-    "merchantTransferCta": "Move to personal",
-    "merchantTransferAll": "All",
-    "merchantTransferSuccess": "Moved {{amount}} {{coin}} from your merchant cash to your personal wallet.",
-    "merchantBlocked": "On-chain withdrawals leave from your personal wallet. Move the merchant balance to personal before withdrawing."
+    "debitedFrom": "Debited from your personal wallet"
   },
   "settings": {
     "title": "Settings",

@@ -1,10 +1,10 @@
 /**
  * @vitest-environment jsdom
- * The merchant caixa must never become the on-chain withdrawal source on its own.
+ * The personal withdrawal page is personal-only: merchant caixa must not be
+ * read, shown, or reachable from here.
  */
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
 import { renderWithProviders } from '../../../helpers/renderWithProviders.js';
 import i18n from '../../../../src/i18n/index.js';
 
@@ -27,58 +27,38 @@ vi.mock('../../../../src/components/ModernCaptcha.js', () => ({ ModernCaptcha: (
 
 import { WithdrawPage } from '../../../../src/pages/WithdrawPage.js';
 
-// USDT is funded by the shared mock for both kinds (personal 20000000000 /
-// merchant 10000000000) and is not a deposit/withdraw-paused network, so the
-// caixa notice renders here. BTC and LTC are paused and would fall back to POL.
-describe('Withdraw — merchant caixa', () => {
+// The shared mock funds the merchant wallet too, so if the page asked for it the
+// balance would surface. USDT is funded and is not a paused network.
+describe('Withdraw — merchant infra stays out', () => {
   beforeAll(async () => {
     await i18n.changeLanguage('pt');
   });
 
-  it('shows the caixa as a notice and keeps the withdrawal on the personal balance', async () => {
+  it('never queries the merchant wallet', async () => {
+    apiSpy.mockClear();
     const w = renderWithProviders(<WithdrawPage />, { route: '/withdraw?coin=USDT', loggedIn: true });
 
-    await waitFor(() => expect(w.container.textContent).toMatch(/caixa de comerciante/i), {
-      timeout: 5000,
-    });
+    await waitFor(() => expect(w.container.textContent).toMatch(/Saldo pessoal/i), { timeout: 5000 });
 
-    // Personal balance drives the form, not the caixa.
-    expect(w.container.textContent).toMatch(/Saldo pessoal/i);
-    expect(w.container.textContent).not.toMatch(/Saldo \(caixa\)/i);
+    const paths = apiSpy.mock.calls.map(([p]) => String(p));
+    expect(paths.some((p) => p.includes('MERCHANT'))).toBe(false);
+    expect(paths.some((p) => p.includes('/wallet/transfer'))).toBe(false);
+    expect(paths.some((p) => p.includes('kind=PERSONAL'))).toBe(true);
 
     w.unmount();
   });
 
-  it('moves the caixa to personal through /wallet/transfer', async () => {
-    apiSpy.mockClear();
+  it('shows no merchant balance, notice, or transfer control', async () => {
     const w = renderWithProviders(<WithdrawPage />, { route: '/withdraw?coin=USDT', loggedIn: true });
 
-    await waitFor(() => expect(w.container.textContent).toMatch(/caixa de comerciante/i), {
-      timeout: 5000,
-    });
+    await waitFor(() => expect(w.container.textContent).toMatch(/Saldo pessoal/i), { timeout: 5000 });
 
-    const transferBtn = Array.from(w.container.querySelectorAll('button')).find(
-      (b) => b.textContent?.trim() === 'Transferir para pessoal'
-    );
-    expect(transferBtn).toBeTruthy();
-    // Nothing typed yet, so there is nothing to move.
-    expect(transferBtn).toBeDisabled();
-
-    const allBtn = Array.from(w.container.querySelectorAll('button')).find(
-      (b) => b.textContent?.trim() === 'Tudo'
-    );
-    await userEvent.click(allBtn!);
-    await waitFor(() => expect(transferBtn).toBeEnabled());
-    await userEvent.click(transferBtn!);
-
-    await waitFor(() => {
-      const call = apiSpy.mock.calls.find(([p]) => String(p).includes('/wallet/transfer'));
-      expect(call).toBeTruthy();
-      expect(call![1]).toMatchObject({
-        method: 'POST',
-        json: { coin: 'USDT', amount: '10000000000', toDeveloper: false },
-      });
-    });
+    const text = w.container.textContent ?? '';
+    expect(text).not.toMatch(/caixa/i);
+    expect(text).not.toMatch(/comerciante/i);
+    expect(text).not.toMatch(/Transferir para pessoal/i);
+    // The merchant USDT balance from the mock must not appear anywhere.
+    expect(text).not.toContain('100.00000000');
 
     w.unmount();
   });

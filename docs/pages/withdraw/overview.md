@@ -19,17 +19,19 @@ Página **Withdraw** (`WithdrawPage.tsx`).
 
 Preferir chaves em `client/src/i18n/locales/{pt,en}.json` quando a página for traduzida.
 
-## Carteira de origem
+## Carteira de origem — página é PERSONAL-only
 
-O saque on-chain debita **sempre a carteira `PERSONAL`**. O caixa do comerciante
-(`MERCHANT`, onde caem os créditos líquidos de invoice) aparece na página só como
-aviso informativo, com um botão que chama `POST /v1/wallet/transfer`
-(`toDeveloper: false`) para mover o saldo para a pessoal.
+O saque on-chain debita **sempre a carteira `PERSONAL`**, e esta página **não
+toca a infraestrutura de comerciante em nada**: não consulta `/wallet?kind=MERCHANT`,
+não exibe saldo de caixa e não oferece caminho para movê-lo. O caixa (`MERCHANT`,
+onde caem os créditos líquidos de invoice) é gerenciado exclusivamente no painel
+de Comerciante, que já tem a transferência para a pessoal.
 
 Motivo: envio em blockchain é irreversível, e o caixa é capital de giro do
-negócio — gastá-lo tem que ser um passo deliberado e separado. A página já
-selecionou `MERCHANT` sozinha quando a pessoal estava zerada, o que fez usuário
-mandar dinheiro do negócio para fora sem perceber.
+negócio. A página já selecionou `MERCHANT` sozinha quando a pessoal estava
+zerada, o que fez usuário mandar dinheiro do negócio para fora sem perceber.
+Depois disso o caixa ainda apareceu aqui como aviso com botão de transferência —
+também removido: lado pessoal e lado comerciante ficam separados, sem ponte.
 
 A trava é no servidor: `walletKind: "MERCHANT"` devolve `403`
 `WITHDRAWAL_MERCHANT_BLOCKED` sem debitar nada (um SPA em cache ainda manda esse

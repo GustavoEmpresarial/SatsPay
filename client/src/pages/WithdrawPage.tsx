@@ -84,8 +84,6 @@ export function WithdrawPage() {
   const [showAddressBook, setShowAddressBook] = useState(false);
   const [newLabel, setNewLabel] = useState('');
 
-  const [merchantTransferVal, setMerchantTransferVal] = useState('');
-
   const addressBookQ = useQuery({
     queryKey: ['withdrawal-addresses'],
     queryFn: () => api<{ addresses: SavedAddress[] }>('/withdrawals/addresses'),
@@ -115,12 +113,6 @@ export function WithdrawPage() {
     queryFn: () => api<WalletsResp>('/wallet?kind=PERSONAL'),
     enabled: Boolean(user),
   });
-  const merchantQ = useQuery({
-    queryKey: ['wallets', 'MERCHANT'],
-    queryFn: () => api<WalletsResp>('/wallet?kind=MERCHANT'),
-    enabled: Boolean(user),
-  });
-
   // Fetch real-time withdrawal history with 5s polling
   const {
     data: historyData,
@@ -148,17 +140,9 @@ export function WithdrawPage() {
       return acc;
     }, {});
   }, [walletsQ.data]);
-  const merchantMap = useMemo(() => {
-    return (merchantQ.data?.wallets ?? []).reduce<Record<string, WalletBalance>>((acc, w) => {
-      acc[w.coin] = w;
-      return acc;
-    }, {});
-  }, [merchantQ.data]);
-
-  // On-chain withdrawals always spend the personal wallet. The merchant caixa is
-  // shown read-only below, with an explicit transfer step.
+  // This page is personal-only. Merchant caixa lives in the merchant panel and
+  // is never read here.
   const currentBal = walletMap[coin] ? safeBigInt(walletMap[coin]!.balance) : 0n;
-  const merchantBal = merchantMap[coin] ? safeBigInt(merchantMap[coin]!.balance) : 0n;
 
   const cfg = COIN_CONFIG[coin] || COIN_CONFIG.BTC;
   const fee = cfg.withdrawalFee || 0n;
@@ -236,7 +220,6 @@ export function WithdrawPage() {
       }
       qc.invalidateQueries({ queryKey: ['wallets'] });
       qc.invalidateQueries({ queryKey: ['wallets', 'PERSONAL'] });
-      qc.invalidateQueries({ queryKey: ['wallets', 'MERCHANT'] });
       qc.invalidateQueries({ queryKey: ['ledger'] });
       qc.invalidateQueries({ queryKey: ['withdrawals-history'] });
       setAddress('');
@@ -251,34 +234,6 @@ export function WithdrawPage() {
     onError: (err) => {
       setMsg({ type: 'error', text: formatApiError(err) });
     },
-  });
-
-  const merchantTransferAmount = useMemo(
-    () => parseHumanAmount(merchantTransferVal, coin),
-    [merchantTransferVal, coin]
-  );
-
-  const merchantTransferMut = useMutation({
-    mutationFn: () =>
-      api('/wallet/transfer', {
-        method: 'POST',
-        json: { coin, amount: merchantTransferAmount.toString(), toDeveloper: false },
-      }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['wallets'] });
-      qc.invalidateQueries({ queryKey: ['wallets', 'PERSONAL'] });
-      qc.invalidateQueries({ queryKey: ['wallets', 'MERCHANT'] });
-      qc.invalidateQueries({ queryKey: ['ledger'] });
-      setMsg({
-        type: 'success',
-        text: t('withdraw.merchantTransferSuccess', {
-          amount: formatAmount(merchantTransferAmount, coin),
-          coin,
-        }),
-      });
-      setMerchantTransferVal('');
-    },
-    onError: (err) => setMsg({ type: 'error', text: formatApiError(err) }),
   });
 
   const setPercentage = (pct: number) => {
@@ -541,63 +496,6 @@ export function WithdrawPage() {
                     </AnimatePresence>
                   </div>
                 </div>
-
-                {/* MERCHANT CAIXA — read-only, needs an explicit move to personal */}
-                {merchantBal > 0n && (
-                  <div className="rounded-2xl border border-sky-500/30 bg-sky-500/10 p-4 space-y-3">
-                    <div className="flex items-start gap-2.5">
-                      <i className="bi bi-shop text-sky-700 text-base shrink-0 mt-0.5" />
-                      <div className="space-y-1">
-                        <p className="text-sm font-bold text-ink">
-                          {t('withdraw.merchantNoticeTitle', {
-                            amount: formatAmount(merchantBal, coin),
-                            coin,
-                          })}
-                        </p>
-                        <p className="text-xs text-ink-muted leading-relaxed">
-                          {t('withdraw.merchantNoticeBody')}
-                        </p>
-                      </div>
-                    </div>
-                    <div className="flex flex-col sm:flex-row gap-2">
-                      <input
-                        type="text"
-                        inputMode="decimal"
-                        value={merchantTransferVal}
-                        onChange={(e) => {
-                          const val = e.target.value.replace(/[^0-9.]/g, '');
-                          if ((val.match(/\./g) || []).length <= 1) setMerchantTransferVal(val);
-                        }}
-                        className="input flex-1 font-mono text-sm py-2"
-                        placeholder={formatAmount(merchantBal, coin)}
-                        aria-label={t('withdraw.merchantTransferCta')}
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setMerchantTransferVal(formatAmount(merchantBal, coin))}
-                        className="btn-secondary text-xs px-3 py-2 font-bold shrink-0"
-                      >
-                        {t('withdraw.merchantTransferAll')}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => merchantTransferMut.mutate()}
-                        disabled={
-                          merchantTransferAmount <= 0n ||
-                          merchantTransferAmount > merchantBal ||
-                          merchantTransferMut.isPending
-                        }
-                        className="btn-primary text-xs px-4 py-2 font-bold shrink-0 disabled:opacity-40 disabled:pointer-events-none"
-                      >
-                        {merchantTransferMut.isPending ? (
-                          <i className="bi bi-arrow-repeat animate-spin" />
-                        ) : (
-                          t('withdraw.merchantTransferCta')
-                        )}
-                      </button>
-                    </div>
-                  </div>
-                )}
 
                 {withdrawPaused && (
                   <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 text-center space-y-1">

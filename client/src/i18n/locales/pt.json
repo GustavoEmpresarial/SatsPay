@@ -603,13 +603,7 @@
     "pausedSection": "Temporariamente pausadas",
     "pausedNetworks": "Temporariamente pausadas: {{list}}",
     "personalBalance": "Saldo pessoal",
-    "debitedFrom": "Debitado da carteira pessoal",
-    "merchantNoticeTitle": "Seu caixa de comerciante tem {{amount}} {{coin}}",
-    "merchantNoticeBody": "Esse é o dinheiro que suas vendas receberam, e ele não sai direto para uma carteira externa. Transfira para a sua carteira pessoal primeiro — envios on-chain são irreversíveis.",
-    "merchantTransferCta": "Transferir para pessoal",
-    "merchantTransferAll": "Tudo",
-    "merchantTransferSuccess": "{{amount}} {{coin}} transferidos do caixa para a sua carteira pessoal.",
-    "merchantBlocked": "Saques on-chain saem da carteira pessoal. Transfira o saldo do caixa para a conta pessoal antes de sacar."
+    "debitedFrom": "Debitado da carteira pessoal"
   },
   "settings": {
     "title": "Configurações",

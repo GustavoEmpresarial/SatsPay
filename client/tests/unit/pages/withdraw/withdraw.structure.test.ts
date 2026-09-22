@@ -46,11 +46,13 @@ describe('Withdraw — structure', () => {
     expect(src).not.toMatch(/walletKind\s*[,:]/);
   });
 
-  it('shows the merchant caixa read-only with an explicit transfer to personal', () => {
+  it('keeps merchant infrastructure entirely out of the personal page', () => {
     const src = readFileSync(pagePath, 'utf8');
-    expect(src).toContain('merchantNoticeTitle');
-    expect(src).toContain('merchantTransferCta');
-    expect(src).toContain('/wallet/transfer');
-    expect(src).toContain('toDeveloper: false');
+    // Merchant caixa belongs to the merchant panel. This page must not read it,
+    // render it, or offer a path into it.
+    expect(src).not.toContain("kind=MERCHANT");
+    expect(src).not.toContain("'MERCHANT'");
+    expect(src).not.toContain('/wallet/transfer');
+    expect(src).not.toMatch(/merchantBal|merchantMap|merchantQ/);
   });
 });
