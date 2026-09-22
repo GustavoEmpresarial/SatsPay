@@ -333,6 +333,28 @@ pub async fn get_invoice_by_id(pool: &PgPool, id: Uuid) -> Result<MerchantDeposi
     Ok(row_to_invoice(&row))
 }
 
+/// Row-locks the invoice inside `tx` and returns it. Both settlement paths
+/// (watcher `confirm_invoice`, checkout `pay_invoice_with_balance`) read the
+/// status through here, so they serialize and only the first one credits.
+async fn lock_invoice(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    id: Uuid,
+) -> Result<MerchantDepositInvoice, MerchantDepositError> {
+    let row = sqlx::query(&format!("SELECT {INVOICE_COLUMNS} FROM merchant_deposit_invoices WHERE id = $1 FOR UPDATE"))
+        .bind(id)
+        .fetch_optional(&mut **tx)
+        .await?;
+
+    let row = row.ok_or(MerchantDepositError::NotFound)?;
+    Ok(row_to_invoice(&row))
+}
+
+/// Ledger key for the merchant credit. One per invoice, whatever settled it,
+/// so the ledger's unique index is a second guard against a double credit.
+fn merchant_credit_ref(invoice_id: Uuid) -> String {
+    format!("merchant_dep:{invoice_id}")
+}
+
 /// Looks up an invoice by its merchant-supplied `order_id` — the idempotency
 /// key of the create endpoint.
 pub async fn get_invoice_by_order_id(
@@ -381,7 +403,7 @@ pub async fn confirm_invoice(
 ) -> Result<MerchantDepositInvoice, MerchantDepositError> {
     let mut tx = pool.begin().await?;
 
-    let inv = get_invoice_by_id(pool, invoice_id).await?;
+    let inv = lock_invoice(&mut tx, invoice_id).await?;
     if inv.status == "CONFIRMED" {
         return Ok(inv);
     }
@@ -426,7 +448,7 @@ pub async fn confirm_invoice(
 
     // 2. Lock merchant wallet and credit net amount
     lock_wallet(&mut tx, merchant_wallet_id).await?;
-    let ref_key = format!("merchant_dep:{}:{}", inv.id, tx_hash.unwrap_or("internal"));
+    let ref_key = merchant_credit_ref(inv.id);
     let memo_str = format!("Deposit from Site X (Order: {})", inv.order_id);
 
     apply_ledger_entry(
@@ -470,7 +492,7 @@ pub async fn pay_invoice_with_balance(
 ) -> Result<MerchantDepositInvoice, MerchantDepositError> {
     let mut tx = pool.begin().await?;
 
-    let inv = get_invoice_by_id(pool, invoice_id).await?;
+    let inv = lock_invoice(&mut tx, invoice_id).await?;
     if inv.status != "PENDING" && inv.status != "DETECTED" {
         return Err(MerchantDepositError::InvalidStatus);
     }
@@ -549,7 +571,7 @@ pub async fn pay_invoice_with_balance(
 
     // 5. Lock and credit merchant wallet
     lock_wallet(&mut tx, merchant_wallet_id).await?;
-    let credit_ref = format!("merchant_dep:{}:internal", inv.id);
+    let credit_ref = merchant_credit_ref(inv.id);
     let credit_memo = format!("Deposit from Site X (Order: {})", inv.order_id);
     apply_ledger_entry(
         &mut tx,

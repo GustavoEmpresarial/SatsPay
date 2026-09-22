@@ -54,4 +54,23 @@ describe('formatApiError', () => {
       formatApiError(new ApiError(400, 'ERROR', 'platform inventory for Btc is insufficient for this operation')),
     ).toMatch(/Inventário da plataforma/i);
   });
+
+  it.each([
+    ['BNB_GAS_REQUIRED', /BNB/],
+    ['WITHDRAWAL_MERCHANT_BLOCKED', /caixa de comerciante/],
+    ['SLIPPAGE', /nova cotação/],
+    ['AMOUNT_TOO_LOW', /Valor baixo demais/],
+  ])('maps stable code %s regardless of the raw message', (code, expected) => {
+    expect(formatApiError(new ApiError(400, code, '{"raw":"provider json"}'))).toMatch(expected);
+  });
+
+  it('translates plain Errors and passes unknown ones through', () => {
+    expect(formatApiError(new Error('Insufficient balance on wallet'))).toMatch(/Saldo insuficiente/);
+    expect(formatApiError(new Error('boom'))).toBe('boom');
+  });
+
+  it('falls back for non-Error values and empty messages', () => {
+    expect(formatApiError('nope', 'fb')).toBe('fb');
+    expect(formatApiError(new ApiError(500, 'ERROR', ''), 'fb')).toBe('fb');
+  });
 });

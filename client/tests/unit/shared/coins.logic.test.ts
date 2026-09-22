@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
+  coinsForMode,
+  defaultPairForMode,
+  DEX_SWAP_COINS,
+  SWAP_COINS,
   asWalletBalances,
   computeSwap,
   formatAmount,
@@ -304,3 +308,16 @@ describe('toLedgerUnits', () => {
     }
   });
 });
+
+describe('swap mode helpers', () => {
+  it('swap tab lists DEX coins, bridge tab lists every swap coin', () => {
+    expect(coinsForMode('swap')).toBe(DEX_SWAP_COINS);
+    expect(coinsForMode('bridge')).toBe(SWAP_COINS);
+  });
+
+  it('default pair is a valid pair for its own mode', () => {
+    expect(defaultPairForMode('swap')).toEqual({ from: 'POL', to: 'USDT' });
+    expect(defaultPairForMode('bridge')).toEqual({ from: 'SOL', to: 'USDT' });
+  });
+});
+

@@ -87,21 +87,47 @@ async fn detection_records_partial_payment_without_confirming(pool: PgPool) {
     assert!(open.iter().any(|i| i.id == created.id));
 }
 
+async fn merchant_wallet(pool: &PgPool, user_id: Uuid, coin: Coin) -> Uuid {
+    sqlx::query_scalar("SELECT id FROM wallets WHERE user_id = $1 AND coin = $2::coin AND kind = 'MERCHANT'")
+        .bind(user_id)
+        .bind(coin.as_str())
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
+async fn merchant_credit_count(pool: &PgPool, invoice_id: Uuid) -> i64 {
+    sqlx::query_scalar("SELECT count(*) FROM ledger_entries WHERE type = 'MERCHANT_DEPOSIT' AND reference_id = $1")
+        .bind(invoice_id)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
 #[sqlx::test(migrations = "../db/migrations")]
 async fn confirming_twice_credits_once(pool: PgPool) {
     let merchant = common::insert_user(&pool, "inv-confirm").await;
-    let wallet = common::insert_personal_wallet(&pool, merchant, Coin::Pol).await;
+    let personal = common::insert_personal_wallet(&pool, merchant, Coin::Pol).await;
     let created = inv_db::create_invoice(&pool, input(merchant, "ORD-CONF", 500_000)).await.unwrap();
 
     inv_db::confirm_invoice(&pool, created.id, Some("0xdeadbeef")).await.unwrap();
+    let wallet = merchant_wallet(&pool, merchant, Coin::Pol).await;
     let after_first = common::wallet_balance(&pool, wallet).await;
 
-    // A repeated watcher tick must not credit the merchant a second time.
+    // A repeated watcher tick must not credit the merchant a second time,
+    // not even when it reports a different tx hash.
     inv_db::confirm_invoice(&pool, created.id, Some("0xdeadbeef")).await.unwrap();
+    inv_db::confirm_invoice(&pool, created.id, Some("0xother")).await.unwrap();
     let after_second = common::wallet_balance(&pool, wallet).await;
 
-    assert_eq!(after_first, created.net_amount, "merchant is credited net of the fee");
+    assert_eq!(after_first, created.net_amount, "merchant cash is credited net of the fee");
     assert_eq!(after_first, after_second, "second confirmation must be a no-op");
+    assert_eq!(
+        common::wallet_balance(&pool, personal).await,
+        BigDecimal::from(0),
+        "gateway income lands in the merchant wallet, never the personal one"
+    );
+    assert_eq!(merchant_credit_count(&pool, created.id).await, 1);
 
     let got = inv_db::get_invoice_by_id(&pool, created.id).await.unwrap();
     assert_eq!(got.status, "CONFIRMED");
@@ -167,4 +193,51 @@ async fn webhook_retry_queue_respects_schedule_and_attempt_cap(pool: PgPool) {
     inv_db::record_webhook_delivery(&pool, created.id, true, Some(200), None).await.unwrap();
     inv_db::schedule_webhook_retry(&pool, created.id, None).await.unwrap();
     assert!(inv_db::list_webhook_retries(&pool, 8, 10).await.unwrap().is_empty());
+}
+
+#[sqlx::test(migrations = "../db/migrations")]
+async fn concurrent_confirmations_credit_once(pool: PgPool) {
+    let merchant = common::insert_user(&pool, "inv-race").await;
+    let created = inv_db::create_invoice(&pool, input(merchant, "ORD-RACE", 500_000)).await.unwrap();
+
+    // Two watcher ticks racing with different hashes (e.g. a reorg-replaced tx).
+    let (a, b) = tokio::join!(
+        inv_db::confirm_invoice(&pool, created.id, Some("0xaaa")),
+        inv_db::confirm_invoice(&pool, created.id, Some("0xbbb")),
+    );
+    a.unwrap();
+    b.unwrap();
+
+    let wallet = merchant_wallet(&pool, merchant, Coin::Pol).await;
+    assert_eq!(common::wallet_balance(&pool, wallet).await, created.net_amount);
+    assert_eq!(merchant_credit_count(&pool, created.id).await, 1);
+}
+
+#[sqlx::test(migrations = "../db/migrations")]
+async fn watcher_and_balance_checkout_racing_credit_once(pool: PgPool) {
+    let merchant = common::insert_user(&pool, "inv-race-m").await;
+    let payer = common::insert_user(&pool, "inv-race-p").await;
+    let payer_wallet = common::insert_personal_wallet(&pool, payer, Coin::Pol).await;
+    common::credit_wallet(&pool, payer_wallet, 1_000_000, "seed").await;
+    let created = inv_db::create_invoice(&pool, input(merchant, "ORD-RACE2", 500_000)).await.unwrap();
+
+    let (onchain, checkout) = tokio::join!(
+        inv_db::confirm_invoice(&pool, created.id, Some("0xchain")),
+        inv_db::pay_invoice_with_balance(&pool, created.id, payer),
+    );
+    onchain.unwrap();
+
+    let wallet = merchant_wallet(&pool, merchant, Coin::Pol).await;
+    assert_eq!(common::wallet_balance(&pool, wallet).await, created.net_amount);
+    assert_eq!(merchant_credit_count(&pool, created.id).await, 1, "exactly one settlement wins");
+
+    // The payer is charged only if their checkout was the one that settled it.
+    let payer_balance = common::wallet_balance(&pool, payer_wallet).await;
+    match checkout {
+        Ok(_) => assert_eq!(payer_balance, BigDecimal::from(500_000u64)),
+        Err(inv_db::MerchantDepositError::InvalidStatus) => {
+            assert_eq!(payer_balance, BigDecimal::from(1_000_000u64), "losing checkout must not debit")
+        }
+        Err(e) => panic!("unexpected checkout error: {e:?}"),
+    }
 }
