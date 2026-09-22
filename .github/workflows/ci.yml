@@ -11,6 +11,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - name: System libs for rdkafka-sys (cmake-build needs curl headers)
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq libcurl4-openssl-dev
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
@@ -49,6 +51,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: llvm-tools-preview
+      - name: System libs for rdkafka-sys (cmake-build needs curl headers)
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq libcurl4-openssl-dev
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@cargo-llvm-cov
       - name: Core pure crates line coverage ≥90%
@@ -74,6 +78,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - name: System libs for rdkafka-sys (cmake-build needs curl headers)
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq libcurl4-openssl-dev
       - name: Compile worker + api-server + notify
         run: cargo check -p worker -p api-server -p notify --quiet
       - name: Worker + notify unit
@@ -116,6 +122,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: llvm-tools-preview
+      - name: System libs for rdkafka-sys (cmake-build needs curl headers)
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq libcurl4-openssl-dev
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@cargo-llvm-cov
       - name: db sqlx integration
@@ -179,7 +187,9 @@ jobs:
           grep -q 'COOKIE_SECURE' deploy/docker/docker-compose.yml
       - name: Deploy script must not embed an SSH password
         run: |
-          if grep -nE '@Contaapp|DEPLOY_SSH_PASSWORD.+\bor\b' scripts/deploy_to_vm.py; then
+          # Fails on any non-empty string literal assigned/defaulted as a credential.
+          # `env.get("DEPLOY_SSH_PASSWORD") or ""` (empty default) is allowed.
+          if grep -nE '(PASSWORD|PASS|SECRET)[A-Z_]*\s*=\s*["'"'"'][^"'"'"']+["'"'"']|DEPLOY_SSH_PASSWORD.+\bor\s+["'"'"'][^"'"'"']+["'"'"']' scripts/deploy_to_vm.py; then
             echo "FAIL: deploy_to_vm.py still has a password fallback"
             exit 1
           fi

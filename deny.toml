@@ -1,14 +1,39 @@
 [advisories]
 yanked = "warn"
-ignore = []
+# Accepted risk — every entry is transitive and must be re-checked on each dep bump.
+# Keep in sync with .cargo/audit.toml.
+ignore = [
+  # solana-sdk 2.x umbrella pins ed25519-dalek 1 / curve25519-dalek 3. We only sign via
+  # solana Keypair (secret+public kept together), so the oracle API misuse is not reachable;
+  # the Scalar sub timing leak is local-only. Fix: migrate chain crate to split solana 3.x crates.
+  { id = "RUSTSEC-2022-0093", reason = "ed25519-dalek 1 via solana-sdk 2.x; Keypair-only signing" },
+  { id = "RUSTSEC-2024-0344", reason = "curve25519-dalek 3 via solana-sdk 2.x; no fixed path until solana 3.x" },
+  # rsa comes in via jsonwebtoken; crypto/jwt.rs only uses HS256, no RSA key is ever loaded.
+  { id = "RUSTSEC-2023-0071", reason = "rsa via jsonwebtoken, RSA algorithms unused (HS256 only)" },
+  # Unmaintained / unsound, all pulled only by solana-sdk 2.x.
+  { id = "RUSTSEC-2024-0375", reason = "atty via solana-logger" },
+  { id = "RUSTSEC-2021-0145", reason = "atty via solana-logger (Windows-only unaligned read)" },
+  { id = "RUSTSEC-2025-0141", reason = "bincode 1 via solana-sdk" },
+  { id = "RUSTSEC-2024-0388", reason = "derivative via solana-bn254" },
+  { id = "RUSTSEC-2025-0161", reason = "libsecp256k1 via solana-secp256k1-*" },
+  { id = "RUSTSEC-2024-0436", reason = "paste via solana-bn254" },
+  { id = "RUSTSEC-2026-0186", reason = "memmap2 0.5 via solana-genesis-config" },
+  { id = "RUSTSEC-2026-0097", reason = "rand 0.7 via solana-sdk; no custom logger with rand::rng()" },
+]
 
 [licenses]
 allow = [
   "MIT", "Apache-2.0", "Apache-2.0 WITH LLVM-exception", "BSD-2-Clause", "BSD-3-Clause",
   "ISC", "Unicode-3.0", "Unicode-DFS-2016", "Zlib", "MPL-2.0", "OpenSSL", "CC0-1.0",
-  "0BSD", "BSL-1.0", "Unlicense", "MIT-0", "NCSA"
+  "0BSD", "BSL-1.0", "Unlicense", "MIT-0", "NCSA",
+  "CDLA-Permissive-2.0", # webpki-roots (Mozilla CA bundle data)
+  "MITNFA",              # hex_lit (MIT + no-false-attribs)
 ]
 confidence-threshold = 0.8
+
+# Workspace crates are `publish = false` / "UNLICENSED" (proprietary) — don't lint them.
+[licenses.private]
+ignore = true
 
 [bans]
 multiple-versions = "warn"
