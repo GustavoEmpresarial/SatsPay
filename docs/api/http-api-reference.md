@@ -198,6 +198,12 @@ Integre contra o `code`, nunca contra o texto.
     "requiresApproval": false
   }
   ```
+- **Carteira de origem**: sempre a `PERSONAL`. O campo opcional `walletKind`
+  (alias `kind`) só aceita `"PERSONAL"`; `"MERCHANT"` devolve
+  `403 { "error", "code": "WITHDRAWAL_MERCHANT_BLOCKED", "coin" }` sem debitar
+  nada, e qualquer outro valor devolve `400`. O caixa do comerciante precisa ser
+  movido com `POST /v1/wallet/transfer` (`toDeveloper: false`) antes de sair
+  on-chain — envio em blockchain é irreversível.
 
 ### `GET /v1/deposits/history`
 - **Autenticação**: Bearer JWT

@@ -93,8 +93,10 @@ pub struct WithdrawalRow {
     pub requires_approval: bool,
 }
 
-/// Debits PERSONAL. Invoice net credits live on MERCHANT — pass that kind to
-/// [`request_withdrawal_from`].
+/// Debits PERSONAL, always. Invoice net credits live on MERCHANT and must be
+/// moved with [`crate::wallet::transfer_between_kinds`] before they can be sent
+/// on-chain — an on-chain send is irreversible, so spending business float has
+/// to be a deliberate, separate step.
 #[allow(clippy::too_many_arguments)]
 pub async fn request_withdrawal(
     pool: &PgPool,
@@ -107,37 +109,6 @@ pub async fn request_withdrawal(
     idempotency_key: Option<&str>,
     secrets: Option<&SecretsService>,
 ) -> Result<(WithdrawalRow, bool), WithdrawalsError> {
-    request_withdrawal_from(
-        pool,
-        user_id,
-        coin,
-        to_address,
-        amount,
-        chain,
-        requested_ip,
-        idempotency_key,
-        secrets,
-        "PERSONAL",
-    )
-    .await
-}
-
-/// Same as [`request_withdrawal`], but debits `wallet_kind` (`PERSONAL` or
-/// `MERCHANT` only; anything else is treated as PERSONAL).
-#[allow(clippy::too_many_arguments)]
-pub async fn request_withdrawal_from(
-    pool: &PgPool,
-    user_id: Uuid,
-    coin: Coin,
-    to_address: &str,
-    amount: BigDecimal,
-    chain: &dyn ChainClient,
-    requested_ip: &str,
-    idempotency_key: Option<&str>,
-    secrets: Option<&SecretsService>,
-    wallet_kind: &str,
-) -> Result<(WithdrawalRow, bool), WithdrawalsError> {
-    let wallet_kind = if wallet_kind == "MERCHANT" { "MERCHANT" } else { "PERSONAL" };
     if !chain.validate_address(to_address) {
         return Err(WithdrawalsError::InvalidAddress);
     }
@@ -171,11 +142,10 @@ pub async fn request_withdrawal_from(
     }
 
     let wallet_id: Option<Uuid> = sqlx::query_scalar(
-        "SELECT id FROM wallets WHERE user_id = $1 AND coin = $2::coin AND kind = $3::wallet_kind",
+        "SELECT id FROM wallets WHERE user_id = $1 AND coin = $2::coin AND kind = 'PERSONAL'::wallet_kind",
     )
     .bind(user_id)
     .bind(coin.as_str())
-    .bind(wallet_kind)
     .fetch_optional(&mut *tx)
     .await?;
     let wallet_id = wallet_id.ok_or(WithdrawalsError::NotFound)?;

@@ -84,7 +84,7 @@ export function WithdrawPage() {
   const [showAddressBook, setShowAddressBook] = useState(false);
   const [newLabel, setNewLabel] = useState('');
 
-  const [walletKind, setWalletKind] = useState<'PERSONAL' | 'MERCHANT'>('PERSONAL');
+  const [merchantTransferVal, setMerchantTransferVal] = useState('');
 
   const addressBookQ = useQuery({
     queryKey: ['withdrawal-addresses'],
@@ -155,14 +155,11 @@ export function WithdrawPage() {
     }, {});
   }, [merchantQ.data]);
 
-  const personalBal = walletMap[coin] ? safeBigInt(walletMap[coin]!.balance) : 0n;
+  // On-chain withdrawals always spend the personal wallet. The merchant caixa is
+  // shown read-only below, with an explicit transfer step.
+  const currentBal = walletMap[coin] ? safeBigInt(walletMap[coin]!.balance) : 0n;
   const merchantBal = merchantMap[coin] ? safeBigInt(merchantMap[coin]!.balance) : 0n;
-  const currentBal = walletKind === 'MERCHANT' ? merchantBal : personalBal;
 
-  useEffect(() => {
-    if (merchantBal > 0n && personalBal === 0n) setWalletKind('MERCHANT');
-    else if (merchantBal === 0n) setWalletKind('PERSONAL');
-  }, [coin, merchantBal, personalBal]);
   const cfg = COIN_CONFIG[coin] || COIN_CONFIG.BTC;
   const fee = cfg.withdrawalFee || 0n;
   const faucetFee = cfg.faucetPayFee || 0n;
@@ -225,7 +222,6 @@ export function WithdrawPage() {
           coin,
           toAddress: address.trim(),
           amount: smallestAmount.toString(),
-          walletKind,
           ...(emailCode ? { emailCode: emailCode.trim() } : {}),
         },
       }),
@@ -255,6 +251,34 @@ export function WithdrawPage() {
     onError: (err) => {
       setMsg({ type: 'error', text: formatApiError(err) });
     },
+  });
+
+  const merchantTransferAmount = useMemo(
+    () => parseHumanAmount(merchantTransferVal, coin),
+    [merchantTransferVal, coin]
+  );
+
+  const merchantTransferMut = useMutation({
+    mutationFn: () =>
+      api('/wallet/transfer', {
+        method: 'POST',
+        json: { coin, amount: merchantTransferAmount.toString(), toDeveloper: false },
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['wallets'] });
+      qc.invalidateQueries({ queryKey: ['wallets', 'PERSONAL'] });
+      qc.invalidateQueries({ queryKey: ['wallets', 'MERCHANT'] });
+      qc.invalidateQueries({ queryKey: ['ledger'] });
+      setMsg({
+        type: 'success',
+        text: t('withdraw.merchantTransferSuccess', {
+          amount: formatAmount(merchantTransferAmount, coin),
+          coin,
+        }),
+      });
+      setMerchantTransferVal('');
+    },
+    onError: (err) => setMsg({ type: 'error', text: formatApiError(err) }),
   });
 
   const setPercentage = (pct: number) => {
@@ -418,7 +442,7 @@ export function WithdrawPage() {
                             </span>
                           </div>
                           <div className="text-xs text-ink-muted mt-0.5">
-                            Saldo ({walletKind === 'MERCHANT' ? 'caixa' : 'pessoal'}): <strong className="font-mono text-ink">{formatAmount(currentBal, coin)} {coin}</strong>
+                            {t('withdraw.personalBalance')}: <strong className="font-mono text-ink">{formatAmount(currentBal, coin)} {coin}</strong>
                           </div>
                         </div>
                       </div>
@@ -517,6 +541,63 @@ export function WithdrawPage() {
                     </AnimatePresence>
                   </div>
                 </div>
+
+                {/* MERCHANT CAIXA — read-only, needs an explicit move to personal */}
+                {merchantBal > 0n && (
+                  <div className="rounded-2xl border border-sky-500/30 bg-sky-500/10 p-4 space-y-3">
+                    <div className="flex items-start gap-2.5">
+                      <i className="bi bi-shop text-sky-700 text-base shrink-0 mt-0.5" />
+                      <div className="space-y-1">
+                        <p className="text-sm font-bold text-ink">
+                          {t('withdraw.merchantNoticeTitle', {
+                            amount: formatAmount(merchantBal, coin),
+                            coin,
+                          })}
+                        </p>
+                        <p className="text-xs text-ink-muted leading-relaxed">
+                          {t('withdraw.merchantNoticeBody')}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex flex-col sm:flex-row gap-2">
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        value={merchantTransferVal}
+                        onChange={(e) => {
+                          const val = e.target.value.replace(/[^0-9.]/g, '');
+                          if ((val.match(/\./g) || []).length <= 1) setMerchantTransferVal(val);
+                        }}
+                        className="input flex-1 font-mono text-sm py-2"
+                        placeholder={formatAmount(merchantBal, coin)}
+                        aria-label={t('withdraw.merchantTransferCta')}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setMerchantTransferVal(formatAmount(merchantBal, coin))}
+                        className="btn-secondary text-xs px-3 py-2 font-bold shrink-0"
+                      >
+                        {t('withdraw.merchantTransferAll')}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => merchantTransferMut.mutate()}
+                        disabled={
+                          merchantTransferAmount <= 0n ||
+                          merchantTransferAmount > merchantBal ||
+                          merchantTransferMut.isPending
+                        }
+                        className="btn-primary text-xs px-4 py-2 font-bold shrink-0 disabled:opacity-40 disabled:pointer-events-none"
+                      >
+                        {merchantTransferMut.isPending ? (
+                          <i className="bi bi-arrow-repeat animate-spin" />
+                        ) : (
+                          t('withdraw.merchantTransferCta')
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                )}
 
                 {withdrawPaused && (
                   <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 text-center space-y-1">
@@ -663,25 +744,7 @@ export function WithdrawPage() {
                     {/* PERCENTAGE QUICK SHORTCUTS */}
                     <div className="mt-3.5 flex items-center justify-between gap-2 pt-3 border-t border-border/50">
                       <div className="text-[11px] text-ink-muted font-medium">
-                        Disponível: <span className="font-mono font-bold text-ink">{formatAmount(currentBal, coin)}</span>
-                        {merchantBal > 0n && (
-                          <span className="ml-2 inline-flex gap-1">
-                            <button
-                              type="button"
-                              onClick={() => setWalletKind('MERCHANT')}
-                              className={`rounded-md px-1.5 py-0.5 font-bold ${walletKind === 'MERCHANT' ? 'bg-bitcoin/15 text-bitcoin-dark' : 'text-ink-muted'}`}
-                            >
-                              Caixa
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setWalletKind('PERSONAL')}
-                              className={`rounded-md px-1.5 py-0.5 font-bold ${walletKind === 'PERSONAL' ? 'bg-bitcoin/15 text-bitcoin-dark' : 'text-ink-muted'}`}
-                            >
-                              Pessoal
-                            </button>
-                          </span>
-                        )}
+                        {t('withdraw.personalBalance')}: <span className="font-mono font-bold text-ink">{formatAmount(currentBal, coin)}</span>
                       </div>
                       <div className="flex items-center gap-1.5">
                         {[25, 50, 75, 100].map((pct) => (
@@ -818,7 +881,9 @@ export function WithdrawPage() {
                   <div className="pt-2 border-t border-border/80 flex justify-between items-center">
                     <div>
                       <div className="text-ink font-bold">Total Debitado da Conta:</div>
-                      <div className="text-[10px] text-ink-muted">Montante + Taxa de rede</div>
+                      <div className="text-[10px] text-ink-muted">
+                        {t('withdraw.debitedFrom')} · Montante + Taxa de rede
+                      </div>
                     </div>
                     <div className="font-mono text-lg font-black text-bitcoin-dark">
                       {formatAmount(totalDebit, coin)} {coin}

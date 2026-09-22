@@ -37,4 +37,20 @@ describe('Withdraw — structure', () => {
     expect(src).toContain('aria-disabled="true"');
     expect(src).toContain('pausedBadge');
   });
+
+  it('never picks the merchant wallet as the withdrawal source', () => {
+    const src = readFileSync(pagePath, 'utf8');
+    // The page used to auto-switch to MERCHANT whenever the personal wallet was
+    // empty, so business float left on-chain without the user ever choosing it.
+    expect(src).not.toContain('setWalletKind');
+    expect(src).not.toMatch(/walletKind\s*[,:]/);
+  });
+
+  it('shows the merchant caixa read-only with an explicit transfer to personal', () => {
+    const src = readFileSync(pagePath, 'utf8');
+    expect(src).toContain('merchantNoticeTitle');
+    expect(src).toContain('merchantTransferCta');
+    expect(src).toContain('/wallet/transfer');
+    expect(src).toContain('toDeveloper: false');
+  });
 });

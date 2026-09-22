@@ -37,7 +37,9 @@ struct WithdrawRequest {
     totp_code: Option<String>,
     #[serde(rename = "idempotencyKey")]
     idempotency_key: Option<String>,
-    /// `PERSONAL` (default) or `MERCHANT`. Invoice net credits land on MERCHANT.
+    /// Only `PERSONAL` (the default) is accepted. Invoice net credits land on
+    /// the MERCHANT wallet, which must be moved to PERSONAL before it can leave
+    /// the platform on-chain.
     #[serde(rename = "walletKind", alias = "kind")]
     wallet_kind: Option<String>,
 }
@@ -68,6 +70,39 @@ async fn request_withdrawal<R: AuthRepo>(State(state): State<AppState<R>>, user:
     let Ok(amount) = BigDecimal::from_str(&body.amount) else {
         return (StatusCode::BAD_REQUEST, Json(json!({ "error": "invalid amount" }))).into_response();
     };
+
+    let ip_fp = state.secrets.ip_fingerprint(&ip);
+
+    // On-chain withdrawals always debit the personal wallet. Merchant caixa is
+    // business float: it has to be moved to PERSONAL deliberately before any of
+    // it can leave the platform, since an on-chain send cannot be undone.
+    // Gated before the OTP step so a blocked attempt never sends a code email.
+    match body.wallet_kind.as_deref().unwrap_or("PERSONAL").to_ascii_uppercase().as_str() {
+        "PERSONAL" => {}
+        "MERCHANT" => {
+            db::audit::record_log_spawned(
+                state.pool.clone(),
+                Some(user.id),
+                "WITHDRAWAL_MERCHANT_BLOCKED".into(),
+                "Withdrawal".into(),
+                None,
+                Some(ip_fp),
+                Some(json!({ "coin": coin.as_str(), "walletKind": "MERCHANT" })),
+            );
+            return (
+                StatusCode::FORBIDDEN,
+                Json(json!({
+                    "error": "on-chain withdrawals debit the personal wallet; transfer the merchant balance to personal first",
+                    "code": "WITHDRAWAL_MERCHANT_BLOCKED",
+                    "coin": coin.as_str(),
+                })),
+            )
+                .into_response();
+        }
+        _ => {
+            return (StatusCode::BAD_REQUEST, Json(json!({ "error": "walletKind must be PERSONAL" }))).into_response();
+        }
+    }
 
     let account = match state.auth.get_user_by_id(user.id).await {
         Ok(Some(u)) => u,
@@ -113,19 +148,7 @@ async fn request_withdrawal<R: AuthRepo>(State(state): State<AppState<R>>, user:
         }
     }
 
-    let wallet_kind = match body.wallet_kind.as_deref().unwrap_or("PERSONAL").to_ascii_uppercase().as_str() {
-        "MERCHANT" => "MERCHANT",
-        "PERSONAL" => "PERSONAL",
-        _ => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({ "error": "walletKind must be PERSONAL or MERCHANT" })),
-            )
-                .into_response();
-        }
-    };
-    let ip_fp = state.secrets.ip_fingerprint(&ip);
-    let result = db::withdrawals::request_withdrawal_from(
+    let result = db::withdrawals::request_withdrawal(
         &state.pool,
         user.id,
         coin,
@@ -135,7 +158,6 @@ async fn request_withdrawal<R: AuthRepo>(State(state): State<AppState<R>>, user:
         &ip,
         body.idempotency_key.as_deref(),
         Some(&state.secrets),
-        wallet_kind,
     )
     .await;
 
@@ -152,7 +174,6 @@ async fn request_withdrawal<R: AuthRepo>(State(state): State<AppState<R>>, user:
                     "coin": coin.as_str(),
                     "amount": body.amount,
                     "requiresApproval": withdrawal.requires_approval,
-                    "walletKind": wallet_kind
                 })),
             );
             if freshly_created && !withdrawal.requires_approval {
