@@ -213,14 +213,14 @@ export function DocumentationPage() {
                 <h3 className="text-base font-bold text-ink pt-2">Swap vs Bridge</h3>
                 <ul className="list-disc pl-5 space-y-1">
                   <li><strong>Swap</strong> (aba Swap): mesma rede — só POL ↔ USDT ↔ USDC na Polygon (DEX / 1inch).</li>
-                  <li><strong>Bridge</strong> (aba Bridge): redes distintas — Solana ↔ Polygon (Relay) ou L1 nativa ↔ outra moeda (ChangeNOW).</li>
+                  <li><strong>Bridge</strong> (aba Bridge): redes distintas — Solana ↔ Polygon (Relay), <strong>PEPE (BSC) ↔ Polygon/SOL (Relay)</strong>, ou L1 nativa ↔ outra moeda (ChangeNOW). Gas do PEPE = BNB na hot.</li>
                 </ul>
                 <h3 className="text-base font-bold text-ink pt-2">Rede de cada moeda na SatsPay</h3>
                 <ul className="list-disc pl-5 space-y-1">
                   <li><strong>POL, USDT, USDC:</strong> Polygon PoS (não Ethereum).</li>
                   <li><strong>SOL:</strong> Solana.</li>
                   <li><strong>BTC, LTC, DOGE, BCH, DGB:</strong> rede nativa de cada uma (ChangeNOW).</li>
-                  <li><strong>PEPE:</strong> BNB Smart Chain (BEP-20). Depósito/saque ativos; gas em BNB. Swap cross-chain em breve.</li>
+                  <li><strong>PEPE:</strong> BNB Smart Chain (BEP-20). Bridge via Relay; gas em BNB na hot (mín. ~0,005).</li>
                 </ul>
                 <h3 className="text-base font-bold text-ink pt-2">Taxas transparentes</h3>
                 <ul className="list-disc pl-5 space-y-1">

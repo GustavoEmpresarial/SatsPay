@@ -20,12 +20,13 @@ export const SWAP_COINS = [
   'POL',
   'USDT',
   'USDC',
+  'PEPE',
 ] as const;
 export type SwapCoin = (typeof SWAP_COINS)[number];
 
 /**
  * Same-network DEX swap (aba Swap): só Polygon — POL ↔ USDT ↔ USDC.
- * Bridge (cross-rede) usa o allowlist completo `SWAP_COINS`.
+ * Bridge (cross-rede) usa o allowlist completo `SWAP_COINS` (inclui PEPE na BSC via Relay).
  */
 export const DEX_SWAP_COINS = ['POL', 'USDT', 'USDC'] as const;
 export type DexSwapCoin = (typeof DEX_SWAP_COINS)[number];

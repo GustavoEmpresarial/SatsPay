@@ -69,9 +69,10 @@ fn swap_full_allowlist_includes_l1() {
     assert!(is_swap_l1_coin(Coin::Btc));
     assert!(is_swap_coin(Coin::Btc));
     assert!(is_swap_coin(Coin::Usdt));
-    assert!(!is_swap_coin(Coin::Pepe));
+    assert!(is_swap_coin(Coin::Pepe));
     assert!(is_swap_pair(Coin::Btc, Coin::Ltc));
     assert!(is_swap_pair(Coin::Btc, Coin::Usdt));
+    assert!(is_swap_pair(Coin::Pepe, Coin::Usdt));
     assert!(!is_swap_pair(Coin::Btc, Coin::Btc));
 }
 
@@ -95,7 +96,9 @@ fn swap_vs_bridge_pairs() {
     assert!(!is_bridge_pair(Coin::Pol, Coin::Usdt));
     assert!(is_bridge_pair(Coin::Sol, Coin::Usdt));
     assert!(is_bridge_pair(Coin::Btc, Coin::Ltc));
+    assert!(is_bridge_pair(Coin::Pepe, Coin::Usdt));
     assert!(!is_dex_swap_pair(Coin::Sol, Coin::Usdt));
+    assert!(!is_dex_swap_pair(Coin::Pepe, Coin::Usdt));
 }
 
 #[test]

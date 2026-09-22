@@ -45,7 +45,7 @@ Este documento cataloga todas as variáveis de ambiente utilizadas pelos serviç
 | `BSC_RPC_URL` | `api-server`, `worker` | Prod (PEPE) | `https://bsc-rpc.publicnode.com` | JSON-RPC da BNB Smart Chain (chain id 56). Só PEPE. Nunca reusar `EVM_RPC_URL` (Polygon). |
 | `BSC_DEPOSIT_LOOKBACK_BLOCKS` | `worker` | Não | `2000` | Blocos BSC varridos no `eth_getLogs` do contrato PEPE (~100 min). |
 
-A hot de PEPE é o mesmo endereço `0x` da hot de POL (`m/44'/60'/0'/0/0`). O gas do `transfer` BEP-20 é BNB nativo nessa carteira — sem saldo de BNB o saque falha fechado e o ledger é revertido.
+A hot de PEPE é o mesmo endereço `0x` da hot de POL (`m/44'/60'/0'/0/0`). O gas do `transfer` BEP-20 e do bridge Relay (approve+deposit) é **BNB** nativo nessa carteira — sem saldo de BNB o saque/swap PEPE→* falha fechado (`BNB_GAS_REQUIRED`, mínimo ~0,005 BNB) e o ledger é revertido.
 
 ---
 

@@ -595,7 +595,8 @@ impl ChainClient for RealChainClient {
 
     async fn broadcast_evm_contract_call(&self, call: EvmContractCall) -> Result<BroadcastResult, BroadcastError> {
         match self.coin {
-            Coin::Pol | Coin::Usdt | Coin::Usdc => self.broadcast_polygon_contract_call(call).await,
+            // Polygon DEX/Relay + BSC PEPE Relay (same EIP-155 signer; chain id from params).
+            Coin::Pol | Coin::Usdt | Coin::Usdc | Coin::Pepe => self.broadcast_evm_dex_call(call).await,
             other => Err(BroadcastError {
                 message: format!("contractCall not supported for {}", other.as_str()),
                 safe_to_reverse: true,
@@ -622,6 +623,18 @@ impl ChainClient for RealChainClient {
 }
 
 impl RealChainClient {
+    /// Sign + broadcast SwapKit/1inch/Relay-style calldata on the coin's EVM chain
+    /// (Polygon 137 or BSC 56 for PEPE).
+    async fn broadcast_evm_dex_call(&self, call: EvmContractCall) -> Result<BroadcastResult, BroadcastError> {
+        if self.coin == Coin::Pepe {
+            self.pepe_mainnet_ready().map_err(|message| BroadcastError {
+                message,
+                safe_to_reverse: true,
+            })?;
+        }
+        self.broadcast_polygon_contract_call(call).await
+    }
+
     /// Sign + broadcast SwapKit/1inch-style calldata on Polygon (chain id from params).
     async fn broadcast_polygon_contract_call(&self, call: EvmContractCall) -> Result<BroadcastResult, BroadcastError> {
         let chain_id = self.coin_params().evm_chain_id.ok_or_else(|| BroadcastError {

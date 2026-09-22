@@ -32,12 +32,35 @@ fn reject_unsupported_pair(from: Coin, to: Coin) -> Option<Response> {
         (
             StatusCode::BAD_REQUEST,
             Json(json!({
-                "error": "swap limited to L1 (BTC, LTC, DOGE, BCH, DGB) via ChangeNOW and Polygon L2 (POL, USDT, USDC) + SOL",
+                "error": "swap/bridge: L1 via ChangeNOW; Polygon DEX; SOL↔Polygon or PEPE(BSC)↔Polygon/SOL via Relay",
                 "code": "SWAP_PAIR_UNSUPPORTED",
             })),
         )
             .into_response(),
     )
+}
+
+/// Floor BNB on the EVM hot before PEPE→* Relay (approve + deposit on BSC).
+const MIN_BNB_WEI_FOR_PEPE_SWAP: u128 = 5_000_000_000_000_000; // 0.005 BNB
+
+async fn ensure_hot_bnb_for_pepe_swap(hot_mnemonic: Option<&str>) -> Result<(), String> {
+    let address = resolve_hot_address(Coin::Pepe, hot_mnemonic)?;
+    let rpc = std::env::var("BSC_RPC_URL")
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| "https://bsc-rpc.publicnode.com".to_string());
+    let client = chain::evm_client::EvmClient::new(&rpc);
+    let wei = tokio::time::timeout(std::time::Duration::from_secs(8), client.get_balance(&address))
+        .await
+        .map_err(|_| "consulta de saldo BNB expirou".to_string())?
+        .map_err(|e| e.to_string())?;
+    if wei < MIN_BNB_WEI_FOR_PEPE_SWAP {
+        return Err(format!(
+            "hot wallet sem BNB para gas do PEPE na BSC (tem {:.6} BNB, mínimo 0.005). Abasteça a hot.",
+            wei as f64 / 1e18
+        ));
+    }
+    Ok(())
 }
 
 pub fn routes<R: AuthRepo + 'static>() -> Router<AppState<R>> {
@@ -69,7 +92,15 @@ fn resolve_hot_address(coin: Coin, hot_mnemonic: Option<&str>) -> Result<String,
     if let Some(m) = mnemonic {
         return chain::hd_wallet::hot_address_from_mnemonic(&m, coin, network).map_err(|e| e.to_string());
     }
-    Err(format!("HOT_MNEMONIC not configured for {}", coin.as_str()))
+    // Prod may ship encrypted mnemonic empty and rely on HOT_WALLET_PRIVATE_KEY / POL_HOT_WALLET_KEY
+    // (same fallback as admin treasury). Required for PEPE BNB gas guard on BSC.
+    let key = std::env::var("HOT_WALLET_PRIVATE_KEY")
+        .ok()
+        .or_else(|| std::env::var("POL_HOT_WALLET_KEY").ok())
+        .or_else(|| std::env::var("HOT_WALLET_WIF").ok())
+        .filter(|s| !s.trim().is_empty())
+        .ok_or_else(|| format!("HOT_MNEMONIC not configured for {}", coin.as_str()))?;
+    chain::hot_wallet_address(coin, network, &key)
 }
 
 #[derive(Serialize)]
@@ -552,9 +583,14 @@ async fn build_quotes<R: AuthRepo>(state: &AppState<R>, from_coin: Coin, to_coin
     }
     if !is_swap_pair(from_coin, to_coin) {
         return Err(
-            "swap limited to L1 (BTC, LTC, DOGE, BCH, DGB) via ChangeNOW and Polygon L2 (POL, USDT, USDC) + SOL"
+            "swap/bridge: L1 via ChangeNOW; Polygon POL/USDT/USDC DEX; SOL↔Polygon or PEPE(BSC)↔Polygon/SOL via Relay"
                 .into(),
         );
+    }
+
+    // PEPE origin spends BNB gas on BSC (approve + deposit). Fail closed before quoting.
+    if from_coin == Coin::Pepe {
+        ensure_hot_bnb_for_pepe_swap(state.hot_mnemonic.as_deref()).await?;
     }
 
     let mut routes: Vec<QuoteRouteResp> = Vec::new();
@@ -682,7 +718,7 @@ async fn quote_get<R: AuthRepo>(State(state): State<AppState<R>>, Query(q): Quer
     };
     match build_quotes(&state, from_coin, to_coin, from_amount).await {
         Ok(resp) => Json(resp).into_response(),
-        Err(e) => (StatusCode::BAD_REQUEST, Json(json!({ "error": e }))).into_response(),
+        Err(e) => quote_err_response(e),
     }
 }
 
@@ -696,8 +732,25 @@ async fn quote_post<R: AuthRepo>(State(state): State<AppState<R>>, Json(body): J
     };
     match build_quotes(&state, from_coin, to_coin, from_amount).await {
         Ok(resp) => Json(resp).into_response(),
-        Err(e) => (StatusCode::BAD_REQUEST, Json(json!({ "error": e }))).into_response(),
+        Err(e) => quote_err_response(e),
     }
+}
+
+fn quote_err_response(e: String) -> Response {
+    let code = if e.contains("no routes") {
+        "NO_ROUTES"
+    } else if e.contains("BNB") && e.contains("gas") {
+        "BNB_GAS_REQUIRED"
+    } else if e.contains("not configured") {
+        "SWAP_NOT_CONFIGURED"
+    } else {
+        "QUOTE_FAILED"
+    };
+    (
+        StatusCode::BAD_REQUEST,
+        Json(json!({ "error": e, "code": code })),
+    )
+        .into_response()
 }
 
 #[derive(Deserialize)]
@@ -1033,6 +1086,16 @@ async fn execute_relay<R: AuthRepo>(
             Json(json!({ "error": "Relay not configured (set RELAY_ENABLED=true)" })),
         )
             .into_response();
+    }
+
+    if from_coin == Coin::Pepe {
+        if let Err(e) = ensure_hot_bnb_for_pepe_swap(state.hot_mnemonic.as_deref()).await {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({ "error": e, "code": "BNB_GAS_REQUIRED" })),
+            )
+                .into_response();
+        }
     }
 
     let _route_id = match &body.route_id {
@@ -1497,6 +1560,17 @@ mod tests {
         std::env::set_var("CHAIN_NETWORK", "testnet");
         let _ = resolve_hot_address(Coin::Btc, None); // exercise testnet branch
         std::env::remove_var("HOT_MNEMONIC");
+        std::env::remove_var("CHAIN_NETWORK");
+
+        // Private-key fallback (prod EVM hot) — same key derives POL/PEPE address.
+        std::env::set_var(
+            "HOT_WALLET_PRIVATE_KEY",
+            "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
+        );
+        std::env::set_var("CHAIN_NETWORK", "mainnet");
+        let pepe = resolve_hot_address(Coin::Pepe, None).expect("pepe from privkey");
+        assert!(pepe.starts_with("0x"));
+        std::env::remove_var("HOT_WALLET_PRIVATE_KEY");
         std::env::remove_var("CHAIN_NETWORK");
     }
 }

@@ -10,9 +10,12 @@ use thiserror::Error;
 const DEFAULT_BASE_URL: &str = "https://api.relay.link";
 pub const POLYGON_CHAIN_ID: u64 = 137;
 pub const SOLANA_CHAIN_ID: u64 = 792_703_809;
+pub const BSC_CHAIN_ID: u64 = 56;
 const EVM_NATIVE: &str = "0x0000000000000000000000000000000000000000";
 /// Relay docs: native SOL mint sentinel (not wSOL).
 const SOL_NATIVE: &str = "11111111111111111111111111111111";
+/// Binance-Peg PEPE (BEP-20) — SatsPay custodial PEPE, not Ethereum PEPE.
+const BSC_PEPE: &str = "0x25d887ce7a35172c62febfd67a1856f20faebb00";
 
 #[derive(Debug, Clone, Copy)]
 pub struct RelayAsset {
@@ -38,6 +41,10 @@ pub fn relay_asset(coin: Coin) -> Option<RelayAsset> {
             chain_id: SOLANA_CHAIN_ID,
             currency: SOL_NATIVE,
         }),
+        Coin::Pepe => Some(RelayAsset {
+            chain_id: BSC_CHAIN_ID,
+            currency: BSC_PEPE,
+        }),
         _ => None,
     }
 }
@@ -46,8 +53,26 @@ pub fn is_polygon_l2(coin: Coin) -> bool {
     matches!(coin, Coin::Pol | Coin::Usdt | Coin::Usdc)
 }
 
+pub fn is_bsc_pepe(coin: Coin) -> bool {
+    coin == Coin::Pepe
+}
+
 pub fn is_bridge_pair(from: Coin, to: Coin) -> bool {
-    (from == Coin::Sol && is_polygon_l2(to)) || (to == Coin::Sol && is_polygon_l2(from))
+    if from == to {
+        return false;
+    }
+    // SOL ↔ Polygon (existing)
+    if (from == Coin::Sol && is_polygon_l2(to)) || (to == Coin::Sol && is_polygon_l2(from)) {
+        return true;
+    }
+    // PEPE (BSC) ↔ Polygon or SOL
+    if is_bsc_pepe(from) && (is_polygon_l2(to) || to == Coin::Sol) {
+        return true;
+    }
+    if is_bsc_pepe(to) && (is_polygon_l2(from) || from == Coin::Sol) {
+        return true;
+    }
+    false
 }
 
 #[derive(Debug, Error)]
@@ -779,8 +804,16 @@ mod tests {
         assert!(RelayClient::supports_pair(Coin::Usdt, Coin::Usdc));
         assert!(RelayClient::supports_pair(Coin::Sol, Coin::Usdt));
         assert!(RelayClient::supports_pair(Coin::Pol, Coin::Sol));
+        assert!(RelayClient::supports_pair(Coin::Pepe, Coin::Usdt));
+        assert!(RelayClient::supports_pair(Coin::Usdc, Coin::Pepe));
+        assert!(RelayClient::supports_pair(Coin::Pepe, Coin::Sol));
+        assert!(RelayClient::supports_pair(Coin::Sol, Coin::Pepe));
         assert!(!RelayClient::supports_pair(Coin::Btc, Coin::Usdt));
         assert!(!RelayClient::supports_pair(Coin::Sol, Coin::Sol));
+        assert!(!RelayClient::supports_pair(Coin::Pepe, Coin::Btc));
+        let pepe = relay_asset(Coin::Pepe).unwrap();
+        assert_eq!(pepe.chain_id, BSC_CHAIN_ID);
+        assert!(pepe.currency.eq_ignore_ascii_case(BSC_PEPE));
     }
 
     #[test]

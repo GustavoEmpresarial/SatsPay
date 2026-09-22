@@ -48,8 +48,8 @@ pub const SWAP_L2_COINS: [Coin; 4] = [Coin::Pol, Coin::Usdt, Coin::Usdc, Coin::S
 /// Layer-1 UTXO coins swapped via ChangeNOW (deposit-address flow).
 pub const SWAP_L1_COINS: [Coin; 5] = [Coin::Btc, Coin::Ltc, Coin::Doge, Coin::Bch, Coin::Dgb];
 
-/// Full swap picker: L1 (ChangeNOW) + L2/SOL (DEX/Relay). SOL near top for UX.
-pub const SWAP_COINS: [Coin; 9] = [
+/// Full swap picker: L1 (ChangeNOW) + L2/SOL (DEX/Relay) + PEPE (Relay BSC bridge).
+pub const SWAP_COINS: [Coin; 10] = [
     Coin::Btc,
     Coin::Sol,
     Coin::Ltc,
@@ -59,6 +59,7 @@ pub const SWAP_COINS: [Coin; 9] = [
     Coin::Pol,
     Coin::Usdt,
     Coin::Usdc,
+    Coin::Pepe,
 ];
 
 /// Same-network DEX (UI "Swap" tab): Polygon only — POL ↔ USDT ↔ USDC.

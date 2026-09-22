@@ -160,9 +160,9 @@
     "tabBridge": "Bridge",
     "subtitle": "Troque entre BTC, LTC, DOGE, BCH, DGB, SOL e Polygon (POL, USDT, USDC). Cada moeda tem a rede da SatsPay marcada no seletor.",
     "subtitleSwap": "Troca na mesma rede. Na SatsPay: POL, USDT e USDC na Polygon (DEX / 1inch).",
-    "subtitleBridge": "Cruza redes distintas: Solana ↔ Polygon (Relay) ou L1 nativa ↔ outra moeda (ChangeNOW).",
+    "subtitleBridge": "Cruza redes distintas: Solana ↔ Polygon (Relay), PEPE (BSC) ↔ Polygon/SOL (Relay), ou L1 nativa ↔ outra moeda (ChangeNOW).",
     "swapHint": "Só Polygon: POL ↔ USDT ↔ USDC. Para mudar de rede, use a aba Bridge.",
-    "bridgeHint": "Origem e destino em redes diferentes. Ex.: SOL (Solana) → USDT (Polygon), ou BTC → POL.",
+    "bridgeHint": "Origem e destino em redes diferentes. Ex.: SOL → USDT (Polygon), PEPE (BSC) → USDT, ou BTC → POL.",
     "from": "Você envia",
     "to": "Você recebe",
     "flip": "Inverter moedas",
@@ -184,8 +184,13 @@
     "trustLineSwap": "Swap Polygon · taxa SatsPay 0,25%",
     "trustLineBridge": "Bridge cross-rede · taxa SatsPay 0,25%",
     "pickCoin": "Selecione a criptomoeda",
-    "networkLegend": "USDT, USDC e POL na SatsPay = Polygon. SOL = Solana. L1 (BTC/LTC/…) = rede nativa. PEPE = BNB Smart Chain (depósito/saque; swap em breve).",
-    "networkOn": "Rede SatsPay: {{network}}"
+    "networkLegend": "USDT, USDC e POL na SatsPay = Polygon. SOL = Solana. L1 = rede nativa. PEPE = BNB Smart Chain — bridge Relay (gas BNB na hot).",
+    "networkOn": "Rede SatsPay: {{network}}",
+    "noRoutesTitle": "Sem rota pra este par",
+    "noRoutesSwap": "Não achamos liquidez DEX pra {{from}} → {{to}} na Polygon agora. Tente outro par (POL, USDT ou USDC) ou um valor diferente.",
+    "noRoutesBridge": "Nenhum provedor cotou {{from}} ({{fromNet}}) → {{to}} ({{toNet}}) neste momento. Tente SOL ↔ USDT/POL, PEPE ↔ USDT/POL, ou aumente a quantia.",
+    "noRoutesHint": "Taxa SatsPay só aparece quando há rota. Isso não é saldo insuficiente.",
+    "bnbGasRequired": "Hot sem BNB suficiente pra gas do PEPE na BSC. Abasteça a carteira quente (mín. ~0,005 BNB)."
   },
   "stake": {
     "title": "Staking",
@@ -596,7 +601,15 @@
     "pausedHint": "Saques desta rede estão desabilitados por enquanto. Escolha outra moeda no seletor.",
     "pickerTitle": "Escolha uma moeda para sacar",
     "pausedSection": "Temporariamente pausadas",
-    "pausedNetworks": "Temporariamente pausadas: {{list}}"
+    "pausedNetworks": "Temporariamente pausadas: {{list}}",
+    "personalBalance": "Saldo pessoal",
+    "debitedFrom": "Debitado da carteira pessoal",
+    "merchantNoticeTitle": "Seu caixa de comerciante tem {{amount}} {{coin}}",
+    "merchantNoticeBody": "Esse é o dinheiro que suas vendas receberam, e ele não sai direto para uma carteira externa. Transfira para a sua carteira pessoal primeiro — envios on-chain são irreversíveis.",
+    "merchantTransferCta": "Transferir para pessoal",
+    "merchantTransferAll": "Tudo",
+    "merchantTransferSuccess": "{{amount}} {{coin}} transferidos do caixa para a sua carteira pessoal.",
+    "merchantBlocked": "Saques on-chain saem da carteira pessoal. Transfira o saldo do caixa para a conta pessoal antes de sacar."
   },
   "settings": {
     "title": "Configurações",

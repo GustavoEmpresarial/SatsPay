@@ -160,9 +160,9 @@
     "tabBridge": "Bridge",
     "subtitle": "Trade BTC, LTC, DOGE, BCH, DGB, SOL, and Polygon assets (POL, USDT, USDC). Each coin shows its SatsPay network in the picker.",
     "subtitleSwap": "Same-network trade. On SatsPay: POL, USDT, and USDC on Polygon (DEX / 1inch).",
-    "subtitleBridge": "Cross-network: Solana ↔ Polygon (Relay) or native L1 ↔ another coin (ChangeNOW).",
+    "subtitleBridge": "Cross-network: Solana ↔ Polygon (Relay), PEPE (BSC) ↔ Polygon/SOL (Relay), or native L1 ↔ another coin (ChangeNOW).",
     "swapHint": "Polygon only: POL ↔ USDT ↔ USDC. To change networks, use the Bridge tab.",
-    "bridgeHint": "Source and destination on different networks. E.g. SOL (Solana) → USDT (Polygon), or BTC → POL.",
+    "bridgeHint": "Source and destination on different networks. E.g. SOL → USDT (Polygon), PEPE (BSC) → USDT, or BTC → POL.",
     "from": "You pay",
     "to": "You receive",
     "flip": "Flip pair",
@@ -184,8 +184,13 @@
     "trustLineSwap": "Polygon swap · SatsPay fee 0.25%",
     "trustLineBridge": "Cross-network bridge · SatsPay fee 0.25%",
     "pickCoin": "Select cryptocurrency",
-    "networkLegend": "On SatsPay, USDT/USDC/POL are Polygon. SOL is Solana. L1 coins use their native chain. PEPE is BNB Smart Chain (deposit/withdraw; swap soon).",
-    "networkOn": "SatsPay network: {{network}}"
+    "networkLegend": "On SatsPay, USDT/USDC/POL are Polygon. SOL is Solana. L1 is native. PEPE is BNB Smart Chain — Relay bridge (hot pays BNB gas).",
+    "networkOn": "SatsPay network: {{network}}",
+    "noRoutesTitle": "No route for this pair",
+    "noRoutesSwap": "No DEX liquidity for {{from}} → {{to}} on Polygon right now. Try another pair (POL, USDT, or USDC) or a different amount.",
+    "noRoutesBridge": "No provider quoted {{from}} ({{fromNet}}) → {{to}} ({{toNet}}) right now. Try SOL ↔ USDT/POL, PEPE ↔ USDT/POL, or increase the amount.",
+    "noRoutesHint": "The SatsPay fee only shows when a route exists. This is not an insufficient-balance error.",
+    "bnbGasRequired": "Hot wallet lacks BNB for PEPE gas on BSC. Top up the hot wallet (min ~0.005 BNB)."
   },
   "stake": {
     "title": "Staking",
@@ -596,7 +601,15 @@
     "pausedHint": "Withdrawals on this network are disabled for now. Pick another coin in the selector.",
     "pickerTitle": "Choose a coin to withdraw",
     "pausedSection": "Temporarily paused",
-    "pausedNetworks": "Temporarily paused: {{list}}"
+    "pausedNetworks": "Temporarily paused: {{list}}",
+    "personalBalance": "Personal balance",
+    "debitedFrom": "Debited from your personal wallet",
+    "merchantNoticeTitle": "Your merchant cash balance holds {{amount}} {{coin}}",
+    "merchantNoticeBody": "This is money your sales brought in, and it does not go straight to an external wallet. Move it to your personal wallet first — on-chain sends cannot be undone.",
+    "merchantTransferCta": "Move to personal",
+    "merchantTransferAll": "All",
+    "merchantTransferSuccess": "Moved {{amount}} {{coin}} from your merchant cash to your personal wallet.",
+    "merchantBlocked": "On-chain withdrawals leave from your personal wallet. Move the merchant balance to personal before withdrawing."
   },
   "settings": {
     "title": "Settings",

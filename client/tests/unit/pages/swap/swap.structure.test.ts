@@ -45,4 +45,11 @@ describe('Swap — structure', () => {
     expect(src).toContain('tabSwap');
     expect(src).toContain('tabBridge');
   });
+
+  it('shows a friendly empty state when quote has no routes', () => {
+    const src = readFileSync(pagePath, 'utf8');
+    expect(src).toContain('noRoutes');
+    expect(src).toContain('swap.noRoutesTitle');
+    expect(src).toContain('isNoRoutesError');
+  });
 });

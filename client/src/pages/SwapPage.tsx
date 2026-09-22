@@ -124,6 +124,20 @@ function pickPreferredRoute(routes: QuoteRoute[]): QuoteRoute | null {
   })[0]!;
 }
 
+function isNoRoutesError(err: unknown): boolean {
+  if (err && typeof err === 'object' && 'code' in err) {
+    const code = String((err as { code?: unknown }).code ?? '');
+    if (code === 'NO_ROUTES') return true;
+  }
+  const msg = formatApiError(err).toLowerCase();
+  return (
+    msg.includes('no routes') ||
+    msg.includes('no route') ||
+    msg.includes('sem rota') ||
+    msg.includes('routes available')
+  );
+}
+
 function feeTypeLabel(type: string): string {
   switch (type.toLowerCase()) {
     case 'deposit':
@@ -456,6 +470,16 @@ export function SwapPage() {
     );
   }, [historyQ.data, mode]);
 
+  const noRoutes = useMemo(() => {
+    if (!pairValid || smallestAmount <= 0n || quoteQ.isFetching) return false;
+    if (routes.length > 0) return false;
+    if (quoteQ.isError) return isNoRoutesError(quoteQ.error);
+    // Success with empty routes (defensive).
+    return quoteQ.isSuccess;
+  }, [pairValid, smallestAmount, quoteQ.isFetching, quoteQ.isError, quoteQ.isSuccess, quoteQ.error, routes.length]);
+
+  const quoteOtherError = quoteQ.isError && !isNoRoutesError(quoteQ.error);
+
   return (
     <div className="space-y-6 max-w-6xl mx-auto pb-16">
       <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
@@ -779,9 +803,46 @@ export function SwapPage() {
               </div>
             )}
 
-            {quoteQ.isError && (
-              <div className="rounded-2xl bg-rose-50 p-3.5 text-xs font-semibold text-rose-700 border border-rose-200">
-                {formatApiError(quoteQ.error)}
+            {noRoutes && (
+              <div className="rounded-2xl border border-amber-500/35 bg-gradient-to-br from-amber-500/10 via-surface to-paper px-4 py-4 text-left shadow-xs">
+                <div className="flex items-start gap-3">
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-amber-500/30 bg-paper text-amber-700">
+                    <i className="bi bi-signpost-2 text-lg" />
+                  </div>
+                  <div className="min-w-0 space-y-1.5">
+                    <div className="text-sm font-black text-ink">
+                      {t('swap.noRoutesTitle', { defaultValue: 'Sem rota pra este par' })}
+                    </div>
+                    <p className="text-[12px] leading-relaxed text-ink-muted">
+                      {mode === 'swap'
+                        ? t('swap.noRoutesSwap', {
+                            from: fromCoin,
+                            to: toCoin,
+                            defaultValue: `Não achamos liquidez DEX pra ${fromCoin} → ${toCoin} na Polygon agora. Tente outro par (POL, USDT ou USDC) ou um valor diferente.`,
+                          })
+                        : t('swap.noRoutesBridge', {
+                            from: fromCoin,
+                            to: toCoin,
+                            fromNet: coinNetwork(fromCoin).short,
+                            toNet: coinNetwork(toCoin).short,
+                            defaultValue: `Nenhum provedor cotou ${fromCoin} (${coinNetwork(fromCoin).short}) → ${toCoin} (${coinNetwork(toCoin).short}) neste momento. Em bridges L1 o valor mínimo costuma ser maior — tente SOL ↔ USDT/USDC/POL, ou aumente a quantia.`,
+                          })}
+                    </p>
+                    <p className="text-[10px] font-medium text-ink-muted/90">
+                      {t('swap.noRoutesHint', {
+                        defaultValue:
+                          'Taxa SatsPay só aparece quando há rota. Isso não é saldo insuficiente.',
+                      })}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {quoteOtherError && (
+              <div className="rounded-2xl bg-rose-50 p-3.5 text-xs font-semibold text-rose-700 border border-rose-200 flex items-center gap-2.5">
+                <i className="bi bi-exclamation-triangle-fill text-base shrink-0" />
+                <span>{formatApiError(quoteQ.error)}</span>
               </div>
             )}
 

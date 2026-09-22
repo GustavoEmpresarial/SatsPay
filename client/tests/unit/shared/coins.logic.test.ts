@@ -70,13 +70,15 @@ describe('swap L2 allowlist', () => {
     expect(isSwapL1Coin('BTC')).toBe(true);
     expect(isSwapCoin('BTC')).toBe(true);
     expect(isSwapCoin('USDT')).toBe(true);
-    expect(isSwapCoin('PEPE')).toBe(false);
+    expect(isSwapCoin('PEPE')).toBe(true);
     expect(isSwapPair('BTC', 'LTC')).toBe(true);
     expect(isSwapPair('BTC', 'USDT')).toBe(true);
+    expect(isSwapPair('PEPE', 'USDT')).toBe(true);
     expect(isSwapPair('BTC', 'BTC')).toBe(false);
     expect(SWAP_L1_COINS).toEqual(['BTC', 'LTC', 'DOGE', 'BCH', 'DGB']);
     expect(SWAP_COINS).toContain('BTC');
     expect(SWAP_COINS).toContain('SOL');
+    expect(SWAP_COINS).toContain('PEPE');
   });
 });
 
@@ -97,7 +99,9 @@ describe('coin custodial networks', () => {
     expect(isBridgePair('POL', 'USDT')).toBe(false);
     expect(isBridgePair('SOL', 'USDT')).toBe(true);
     expect(isBridgePair('BTC', 'LTC')).toBe(true);
+    expect(isBridgePair('PEPE', 'USDT')).toBe(true);
     expect(isDexSwapPair('SOL', 'USDT')).toBe(false);
+    expect(isDexSwapPair('PEPE', 'USDT')).toBe(false);
   });
 });
 
