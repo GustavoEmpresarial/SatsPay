@@ -3,6 +3,8 @@ import { ApiError } from './api.js';
 const BNB_GAS_MSG = 'Hot sem BNB suficiente pra gas do PEPE na BSC. Abasteça a carteira quente (mín. ~0,005 BNB).';
 const MERCHANT_BLOCKED_MSG =
   'Saques on-chain saem da carteira pessoal. Transfira o saldo do caixa de comerciante para a conta pessoal antes de sacar.';
+const SLIPPAGE_MSG =
+  'O preço da rota mudou enquanto você confirmava e ficou abaixo do mínimo garantido. Peça uma nova cotação e tente de novo.';
 
 const ERROR_TRANSLATIONS: Record<string, string> = {
   unauthorized: 'Sessão expirada ou não autenticada. Por favor, atualize a página ou entre novamente.',
@@ -46,6 +48,10 @@ export function formatApiError(err: unknown, fallback = 'Erro inesperado. Tente 
 
   if (err.code === 'WITHDRAWAL_MERCHANT_BLOCKED') {
     return MERCHANT_BLOCKED_MSG;
+  }
+
+  if (err.code === 'SLIPPAGE') {
+    return SLIPPAGE_MSG;
   }
 
   if (err.code === 'VALIDATION_ERROR' && err.details && typeof err.details === 'object') {

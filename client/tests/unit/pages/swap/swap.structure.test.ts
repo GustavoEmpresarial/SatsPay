@@ -52,4 +52,14 @@ describe('Swap — structure', () => {
     expect(src).toContain('swap.noRoutesTitle');
     expect(src).toContain('isNoRoutesError');
   });
+
+  it('warns when route costs eat a large share of the value', () => {
+    const src = readFileSync(pagePath, 'utf8');
+    expect(src).toContain('valueLossWarning');
+    expect(src).toContain('swap.valueLossTitle');
+    expect(src).toContain('swap.valueLossBody');
+    // Compares USD in vs USD out, so it catches any provider, not just ChangeNOW.
+    expect(src).toContain('fromUsdNum');
+    expect(src).toContain('toUsdNum');
+  });
 });

@@ -190,7 +190,9 @@
     "noRoutesSwap": "Não achamos liquidez DEX pra {{from}} → {{to}} na Polygon agora. Tente outro par (POL, USDT ou USDC) ou um valor diferente.",
     "noRoutesBridge": "Nenhum provedor cotou {{from}} ({{fromNet}}) → {{to}} ({{toNet}}) neste momento. Tente SOL ↔ USDT/POL, PEPE ↔ USDT/POL, ou aumente a quantia.",
     "noRoutesHint": "Taxa SatsPay só aparece quando há rota. Isso não é saldo insuficiente.",
-    "bnbGasRequired": "Hot sem BNB suficiente pra gas do PEPE na BSC. Abasteça a carteira quente (mín. ~0,005 BNB)."
+    "bnbGasRequired": "Hot sem BNB suficiente pra gas do PEPE na BSC. Abasteça a carteira quente (mín. ~0,005 BNB).",
+    "valueLossTitle": "Você perde ~{{pct}}% do valor nesta rota",
+    "valueLossBody": "Você envia {{from}} e recebe {{to}}. Os custos de rota (relayer, gas, spread) são quase fixos, então em valores baixos eles consomem a maior parte. Aumentar a quantia costuma melhorar muito essa proporção."
   },
   "stake": {
     "title": "Staking",

@@ -72,7 +72,7 @@ A hot de PEPE é o mesmo endereço `0x` da hot de POL (`m/44'/60'/0'/0/0`). O ga
 | `CHANGENOW_BASE_URL` | `api-server`, `worker` | Não | `https://api.changenow.io/v2` | Base URL ChangeNOW API v2 |
 | `SWAP_PLATFORM_FEE_BPS_SAME` | `api-server`, `worker` | Não | `25` | Taxa SatsPay same-chain (bps) — 0,25% diferencial |
 | `SWAP_PLATFORM_FEE_BPS_CROSS` | `api-server`, `worker` | Não | `25` | Taxa SatsPay cross-chain / ChangeNOW / Relay (bps) — 0,25% |
-| `SWAP_SLIPPAGE_PCT` | `api-server`, `worker` | Não | `2` | Slippage máximo nas quotes SwapKit (%) |
+| `SWAP_SLIPPAGE_PCT` | `api-server`, `worker` | Não | `2` | Slippage máximo (%). Vai para as quotes SwapKit e também define o `minReceive` das rotas Relay e ChangeNOW, que não devolvem esse número — sem essa folga o execute re-cota e falha com `SLIPPAGE` em toda bridge. |
 | `DEX_SWAP_INTERVAL_SECS` | `worker` | Não | `15` | Intervalo do worker de broadcast/track DEX |
 | `COINGECKO_API_BASE_URL` | `worker` | Sim | `https://api.coingecko.com/api/v3` | URL da API do CoinGecko |
 | `COINGECKO_TIMEOUT_SECS` | `worker` | Sim | `10` | Timeout de requisições ao CoinGecko |

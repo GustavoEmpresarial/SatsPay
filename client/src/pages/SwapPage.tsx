@@ -358,19 +358,33 @@ export function SwapPage() {
   const toPriceScaled = pricesQ.data?.prices?.[toCoin] ? safeBigInt(pricesQ.data.prices[toCoin]!) : 0n;
   const priceDecimals = pricesQ.data?.priceDecimals ?? 8;
 
-  const fromUsdVal = useMemo(() => {
+  const usd = (n: number | null) =>
+    n !== null && n > 0 ? n.toLocaleString('en-US', { style: 'currency', currency: 'USD' }) : null;
+
+  const fromUsdNum = useMemo(() => {
     if (smallestAmount <= 0n || fromPriceScaled <= 0n) return null;
-    const num =
-      (Number(smallestAmount) / 10 ** fromCfg.decimals) * (Number(fromPriceScaled) / 10 ** priceDecimals);
-    return num > 0 ? num.toLocaleString('en-US', { style: 'currency', currency: 'USD' }) : null;
+    return (Number(smallestAmount) / 10 ** fromCfg.decimals) * (Number(fromPriceScaled) / 10 ** priceDecimals);
   }, [smallestAmount, fromCfg.decimals, fromPriceScaled, priceDecimals]);
 
-  const toUsdVal = useMemo(() => {
+  const toUsdNum = useMemo(() => {
     if (!selected || toPriceScaled <= 0n) return null;
     const amt = safeBigInt(selected.youReceive.amount);
-    const num = (Number(amt) / 10 ** toCfg.decimals) * (Number(toPriceScaled) / 10 ** priceDecimals);
-    return num > 0 ? num.toLocaleString('en-US', { style: 'currency', currency: 'USD' }) : null;
+    return (Number(amt) / 10 ** toCfg.decimals) * (Number(toPriceScaled) / 10 ** priceDecimals);
   }, [selected, toCfg.decimals, toPriceScaled, priceDecimals]);
+
+  const fromUsdVal = usd(fromUsdNum);
+  const toUsdVal = usd(toUsdNum);
+
+  /// Route costs (relayer, gas, DEX spread) are mostly fixed, so on small
+  /// amounts they eat a large share of the value. The quote still succeeds —
+  /// nothing warns the user they are burning most of what they send.
+  const valueLossWarning = useMemo(() => {
+    if (fromUsdNum === null || toUsdNum === null) return null;
+    if (fromUsdNum <= 0 || toUsdNum <= 0) return null;
+    const pct = ((fromUsdNum - toUsdNum) / fromUsdNum) * 100;
+    if (pct < 10) return null;
+    return { pct, from: usd(fromUsdNum), to: usd(toUsdNum), severe: pct >= 25 };
+  }, [fromUsdNum, toUsdNum]);
 
   const executeMutation = useMutation({
     mutationFn: () => {
@@ -751,6 +765,31 @@ export function SwapPage() {
                         Depósito fixo do ChangeNOW ({depositFeeWarning.amountHuman}{' '}
                         {depositFeeWarning.asset}) ≈ <strong>{depositFeeWarning.pct.toFixed(0)}%</strong> do
                         que você envia — não é a taxa SatsPay (0,25%). Aumente o valor ou use outro par.
+                      </div>
+                    </div>
+                  )}
+
+                  {valueLossWarning && (
+                    <div
+                      role="alert"
+                      className={`rounded-xl border px-3 py-2 text-[11px] ${
+                        valueLossWarning.severe
+                          ? 'border-rose-500/40 bg-rose-500/10 text-rose-900'
+                          : 'border-amber-500/40 bg-amber-500/10 text-amber-900'
+                      }`}
+                    >
+                      <div className="font-bold">
+                        {t('swap.valueLossTitle', {
+                          pct: valueLossWarning.pct.toFixed(0),
+                          defaultValue: `Você perde ~${valueLossWarning.pct.toFixed(0)}% do valor nesta rota`,
+                        })}
+                      </div>
+                      <div className="mt-0.5">
+                        {t('swap.valueLossBody', {
+                          from: valueLossWarning.from,
+                          to: valueLossWarning.to,
+                          defaultValue: `Você envia ${valueLossWarning.from} e recebe ${valueLossWarning.to}. Os custos de rota (relayer, gas, spread) são quase fixos, então em valores baixos eles consomem a maior parte. Aumentar a quantia costuma melhorar muito essa proporção.`,
+                        })}
                       </div>
                     </div>
                   )}

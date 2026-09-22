@@ -190,7 +190,9 @@
     "noRoutesSwap": "No DEX liquidity for {{from}} → {{to}} on Polygon right now. Try another pair (POL, USDT, or USDC) or a different amount.",
     "noRoutesBridge": "No provider quoted {{from}} ({{fromNet}}) → {{to}} ({{toNet}}) right now. Try SOL ↔ USDT/POL, PEPE ↔ USDT/POL, or increase the amount.",
     "noRoutesHint": "The SatsPay fee only shows when a route exists. This is not an insufficient-balance error.",
-    "bnbGasRequired": "Hot wallet lacks BNB for PEPE gas on BSC. Top up the hot wallet (min ~0.005 BNB)."
+    "bnbGasRequired": "Hot wallet lacks BNB for PEPE gas on BSC. Top up the hot wallet (min ~0.005 BNB).",
+    "valueLossTitle": "You lose ~{{pct}}% of the value on this route",
+    "valueLossBody": "You send {{from}} and receive {{to}}. Route costs (relayer, gas, spread) are close to fixed, so on small amounts they eat most of it. Sending more usually improves this ratio a lot."
   },
   "stake": {
     "title": "Staking",

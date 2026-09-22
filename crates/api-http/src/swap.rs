@@ -412,6 +412,23 @@ fn map_dex_route(client: &swapkit::SwapKitClient, from: Coin, to: Coin, from_amo
     })
 }
 
+/// Floor the re-quote may land on before execute refuses with SLIPPAGE.
+///
+/// Relay and ChangeNOW do not return a max-slippage figure the way SwapKit
+/// does, and execute always fetches a *fresh* quote. Using `expected` as the
+/// minimum therefore demands the market not move at all between the two calls,
+/// which for a cross-chain bridge quote is never true — the route fails
+/// essentially every time. Reuses `SWAP_SLIPPAGE_PCT` so every provider honours
+/// the same tolerance.
+fn slippage_floor(expected: u128) -> u128 {
+    static BPS: std::sync::OnceLock<u128> = std::sync::OnceLock::new();
+    let bps = *BPS.get_or_init(|| {
+        let pct: f64 = std::env::var("SWAP_SLIPPAGE_PCT").ok().and_then(|s| s.parse().ok()).unwrap_or(2.0);
+        (pct.clamp(0.0, 50.0) * 100.0) as u128
+    });
+    expected.saturating_sub(expected.saturating_mul(bps) / 10_000).max(1)
+}
+
 fn map_relay_route(
     client: &SwapKitClient,
     from: Coin,
@@ -422,6 +439,7 @@ fn map_relay_route(
     let bps = client.platform_fee_bps(&["RELAY".into()], from, to);
     let platform_fee_amount = from_amount.saturating_mul(bps as u128) / 10_000;
     let expected = quote.expected_out_ledger;
+    let min_amt = slippage_floor(expected);
     let mut tags = vec!["RELAY".to_string()];
     if quote.is_bridge {
         tags.push("BRIDGE".into());
@@ -442,8 +460,8 @@ fn map_relay_route(
             coin: to.as_str().into(),
         },
         min_receive: AmountCoin {
-            amount: expected.to_string(),
-            amount_human: format_amount(expected, to),
+            amount: min_amt.to_string(),
+            amount_human: format_amount(min_amt, to),
             coin: to.as_str().into(),
         },
         fees: QuoteFees {
@@ -508,6 +526,7 @@ fn map_changenow_route(
         }
     }
 
+    let min_amt = slippage_floor(expected);
     let mut network = Vec::new();
     if let Some(fee) = &estimate.deposit_fee_human {
         network.push(NetworkFeeItem {
@@ -537,8 +556,8 @@ fn map_changenow_route(
             coin: to.as_str().into(),
         },
         min_receive: AmountCoin {
-            amount: expected.to_string(),
-            amount_human: format_amount(expected, to),
+            amount: min_amt.to_string(),
+            amount_human: format_amount(min_amt, to),
             coin: to.as_str().into(),
         },
         fees: QuoteFees {
@@ -1572,5 +1591,26 @@ mod tests {
         assert!(pepe.starts_with("0x"));
         std::env::remove_var("HOT_WALLET_PRIVATE_KEY");
         std::env::remove_var("CHAIN_NETWORK");
+    }
+
+    /// Execute re-quotes Relay/ChangeNOW and refuses when the fresh quote lands
+    /// under `minToAmount`. If the quote hands the client `minReceive ==
+    /// youReceive`, that demands a perfectly frozen market and the bridge fails
+    /// every time — which is exactly what happened to SOL → PEPE.
+    #[test]
+    fn slippage_floor_leaves_room_under_expected() {
+        let expected = 14_285_399_519_600u128;
+        let floor = slippage_floor(expected);
+        assert!(floor < expected, "floor {floor} must sit below expected {expected}");
+        assert!(floor > 0);
+        // Default tolerance is 2%, so the floor should not be a trivial haircut.
+        let drop_bps = (expected - floor) * 10_000 / expected;
+        assert!((100..=500).contains(&drop_bps), "unexpected tolerance: {drop_bps} bps");
+    }
+
+    #[test]
+    fn slippage_floor_never_returns_zero_for_dust() {
+        assert!(slippage_floor(1) >= 1);
+        assert_eq!(slippage_floor(0), 1);
     }
 }
