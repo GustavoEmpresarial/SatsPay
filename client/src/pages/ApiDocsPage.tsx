@@ -1302,6 +1302,39 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                   Não existe status <code className="font-mono">PAID</code>: o estado final de sucesso é{' '}
                   <code className="font-mono font-bold text-ink">CONFIRMED</code>.
                 </p>
+
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="rounded-2xl border border-border bg-surface p-4 space-y-2">
+                    <h4 className="text-sm font-black text-ink">
+                      <i className="bi bi-arrow-up-circle text-emerald-600" /> Cliente pagou a mais
+                    </h4>
+                    <p className="text-xs text-ink-muted">
+                      Acontece bastante: a pessoa arredonda o valor ou a exchange manda um pouco além. A fatura é{' '}
+                      <b>confirmada normalmente</b> e o webhook é enviado. Você recebe o valor <b>da fatura</b> (menos a taxa),
+                      não o que chegou. O total recebido aparece em <code className="font-mono">receivedAmount</code>.
+                    </p>
+                    <p className="text-xs text-ink-muted">
+                      A diferença <b>não é creditada automaticamente</b>. Para reaver o excedente, abra um chamado no suporte
+                      com o <code className="font-mono">id</code> da fatura.
+                    </p>
+                  </div>
+                  <div className="rounded-2xl border border-border bg-surface p-4 space-y-2">
+                    <h4 className="text-sm font-black text-ink">
+                      <i className="bi bi-arrow-down-circle text-rose-600" /> Cliente pagou a menos
+                    </h4>
+                    <p className="text-xs text-ink-muted">
+                      A fatura <b>não é confirmada</b> e nenhum webhook é enviado. Ela fica em{' '}
+                      <code className="font-mono">DETECTED</code>, com o valor parcial em{' '}
+                      <code className="font-mono">receivedAmount</code>. Não libere o pedido.
+                    </p>
+                    <p className="text-xs text-ink-muted">
+                      Se o cliente mandar a diferença <b>para o mesmo endereço</b> antes de{' '}
+                      <code className="font-mono">expiresAt</code>, os pagamentos são somados e a fatura confirma. Se expirar
+                      incompleta, vira <code className="font-mono">EXPIRED</code> e o valor parcial não é creditado: a
+                      devolução é feita pelo suporte, com o <code className="font-mono">id</code> da fatura.
+                    </p>
+                  </div>
+                </div>
               </div>
             </section>
 

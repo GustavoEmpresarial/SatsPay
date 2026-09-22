@@ -73,6 +73,28 @@ Preferir chaves em `client/src/i18n/locales/{pt,en}.json` quando a página for t
 - Validar inputs antes de POST.
 
 
+## Pagamento a mais / a menos (regra do watcher)
+
+`crates/worker/src/invoice_watcher.rs` soma **todas** as entradas no endereço da moeda paga e
+confirma quando a soma com `min_confirmations` ≥ `amount` travado daquela moeda
+(`merchant_invoice_addresses.amount`, não a seleção atual da fatura).
+
+| Caso | Status | Webhook | Crédito do comerciante | Dinheiro on-chain |
+|---|---|---|---|---|
+| Exato | `CONFIRMED` | sim | `net_amount` da fatura | sweep → hot |
+| **A mais** (comum: arredondamento, exchange) | `CONFIRMED` | sim | `net_amount` **da fatura**; excedente **não** creditado | sweep leva **tudo** → o excedente fica na hot, sem dono no ledger |
+| **A menos** | `DETECTED`, `received_amount` parcial | **não** | nada | fica no endereço da fatura |
+| A menos + completou antes de expirar | `CONFIRMED` | sim | `net_amount` | sweep → hot |
+| A menos e expirou | `EXPIRED` | não | nada | **parado no endereço** (sem sweep: só roda após confirmar) |
+
+Suporte:
+- Excedente: conferir `received_amount − amount` na fatura e devolver/creditar manualmente
+  com lançamento auditado. Não existe fluxo automático de reembolso.
+- Parcial expirado: o valor segue no endereço derivado (`hd_index` preservado, porque o sweep não
+  rodou). Devolução exige sweep manual + lançamento auditado.
+- `received_amount` só é atualizado enquanto `PENDING/DETECTED`: entradas que chegam **depois**
+  do `CONFIRMED` ou do `EXPIRED` não aparecem na fatura — conferir on-chain.
+
 ## Bugs / armadilhas conhecidas
 
 - Não short-circuit hooks (`useA() || useB()`) — React #311.

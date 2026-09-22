@@ -440,6 +440,15 @@ Integre contra o `code`, nunca contra o texto.
 ### `GET /v1/merchant/deposits` / `GET /v1/merchant/deposits/:id`
 - **Autenticação**: igual à criação. `:id` de outro comerciante → `403 INVOICE_FORBIDDEN`.
 - Status: `PENDING → DETECTED → CONFIRMED | EXPIRED | CANCELLED` (não existe `PAID`).
+- **Pagamento a mais** (comum: cliente arredonda, exchange manda além): confirma normalmente
+  e envia o webhook. O comerciante recebe o `netAmount` **da fatura**, não o que chegou;
+  `receivedAmount` mostra o total. O excedente não é creditado automaticamente — é
+  devolvido pelo suporte, com o `id` da fatura.
+- **Pagamento a menos**: **não confirma** e não envia webhook. Fica `DETECTED` com o parcial em
+  `receivedAmount`. Entradas no mesmo endereço **somam**: completar antes de `expiresAt`
+  confirma. Expirou incompleta → `EXPIRED`, parcial não creditado, devolução pelo suporte.
+- A regra é por soma de entradas com o mínimo de confirmações da moeda
+  (`coin_config(coin).min_confirmations`), comparada ao valor travado **da moeda paga**.
 
 ### `GET` / `PUT /v1/merchant/settings`
 - **Autenticação**: igual à criação de fatura (escopo `deposits`).

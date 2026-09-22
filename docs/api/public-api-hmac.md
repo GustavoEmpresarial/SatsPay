@@ -293,6 +293,17 @@ Faturas do mesmo comerciante compartilham a chave; comerciantes diferentes têm 
 diferentes. O `timestamp` também vai **dentro** do corpo assinado, para você recusar replay
 fora de 300s sem confiar num header não assinado.
 
+### Valor diferente do cobrado
+
+- **A mais**: o webhook é enviado normalmente. Você recebe o valor da fatura (menos a taxa);
+  `receivedAmount` traz o total que chegou. O excedente não é creditado automaticamente —
+  abra um chamado no suporte com o `id` da fatura.
+- **A menos**: **não há webhook** e a fatura não confirma. Ela fica `DETECTED` com o parcial em
+  `receivedAmount`; não libere o pedido. Se o cliente completar no **mesmo endereço** antes de
+  `expiresAt`, os pagamentos somam e aí confirma. Se expirar, o parcial é devolvido pelo suporte.
+
+Só trate como pago o que chegar com `event = deposit.confirmed` e assinatura válida.
+
 Para testar sua verificação sem esperar um pagamento real:
 `POST /v1/merchant/deposits/:id/test-webhook` (Bearer JWT) envia uma entrega assinada igual
 à verdadeira.
