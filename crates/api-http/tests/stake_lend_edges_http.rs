@@ -111,6 +111,7 @@ async fn stake_invalid_and_claim_paths(pool: PgPool) {
 }
 
 #[sqlx::test(migrations = "../db/migrations")]
+#[ignore = "lend em manutenção (LEND_MAINTENANCE); reativar quando /lend reabrir — contrato atual em coverage_sweep_http::lend_is_in_maintenance_and_moves_no_money"]
 async fn lend_supply_happy_and_insufficient_ops(pool: PgPool) {
     db::house::ensure_house_inventory(&pool).await.unwrap();
     db::lend::ensure_lend_reserves(&pool).await.unwrap();

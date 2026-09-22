@@ -9,6 +9,7 @@ use tower::ServiceExt;
 use uuid::Uuid;
 
 #[sqlx::test(migrations = "../db/migrations")]
+#[ignore = "lend em manutenção (LEND_MAINTENANCE); reativar quando /lend reabrir — contrato atual em coverage_sweep_http::lend_is_in_maintenance_and_moves_no_money"]
 async fn lend_markets_positions_and_bad_supply(pool: PgPool) {
     db::house::ensure_house_inventory(&pool).await.unwrap();
     db::lend::ensure_lend_reserves(&pool).await.unwrap();

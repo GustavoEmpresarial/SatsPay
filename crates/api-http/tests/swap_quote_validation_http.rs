@@ -56,13 +56,10 @@ async fn swap_quote_validation_edges(pool: PgPool) {
         "{body}"
     );
 
-    // non-L2 pair (BTC↔LTC blocked)
+    // BTC↔LTC is a ChangeNOW L1 bridge now: without a provider it is "not configured", not blocked.
     let (st, body) = get_quote(state.clone(), "fromCoin=BTC&toCoin=LTC&fromAmount=1000").await;
     assert_eq!(st, axum::http::StatusCode::BAD_REQUEST, "{body}");
-    assert!(
-        body["error"].as_str().unwrap_or("").contains("Polygon"),
-        "{body}"
-    );
+    assert_eq!(body["code"], "SWAP_NOT_CONFIGURED", "{body}");
 
     // L2 pair without SwapKit configured → DEX not configured / no routes
     let (st, body) = get_quote(state, "fromCoin=USDT&toCoin=USDC&fromAmount=1000000").await;

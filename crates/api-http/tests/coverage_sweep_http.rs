@@ -255,112 +255,55 @@ async fn faucet_click_delete_cooldown_aliases(pool: PgPool) {
 }
 
 #[sqlx::test(migrations = "../db/migrations")]
-async fn lend_supply_withdraw_borrow_repay(pool: PgPool) {
-    db::house::ensure_house_inventory(&pool).await.unwrap();
-    db::lend::ensure_lend_reserves(&pool).await.unwrap();
-    common::seed_price_cache(&pool).await;
-
-    // Seed LEND_POOL + HOUSE liquidity
-    for coin in [Coin::Btc, Coin::Ltc] {
-        for kind in ["HOUSE", "LEND_POOL"] {
-            let mut tx = pool.begin().await.unwrap();
-            let wallet_id: Uuid = sqlx::query_scalar(
-                "SELECT w.id FROM wallets w JOIN users u ON u.id = w.user_id \
-                 WHERE u.email = $1 AND w.coin = $2::coin AND w.kind = $3::wallet_kind",
-            )
-            .bind(db::house::HOUSE_EMAIL)
-            .bind(coin.as_str())
-            .bind(kind)
-            .fetch_one(&mut *tx)
-            .await
-            .unwrap();
-            db::ledger::apply_ledger_entry(
-                &mut tx,
-                db::ledger::LedgerCreditInput {
-                    reference_key: None,
-                    wallet_id,
-                    amount: bigdecimal::BigDecimal::from(10_000_000_000_000u64),
-                    ledger_type: "ADJUSTMENT",
-                    reference_id: None,
-                    reference_type: Some("HttpTestSeed"),
-                    memo: Some("lend seed"),
-                },
-            )
-            .await
-            .unwrap();
-            tx.commit().await.unwrap();
-        }
-    }
-
+async fn lend_is_in_maintenance_and_moves_no_money(pool: PgPool) {
     let (state, token, user_id, _) = common::register_user(pool.clone(), "lendop").await;
     let uid = Uuid::parse_str(&user_id).unwrap();
     common::credit_personal(&pool, uid, Coin::Btc, 100_000_000).await;
 
-    let supply = api_http::app_without_metrics(state.clone())
-        .oneshot(
-            axum::http::Request::builder()
-                .method("POST")
-                .uri("/v1/lend/supply/BTC")
-                .header("content-type", "application/json")
-                .header("authorization", format!("Bearer {token}"))
-                .header("x-real-ip", "203.0.113.113")
-                .body(Body::from(r#"{"amount":"20000000"}"#))
-                .unwrap(),
+    let ledger_sum = || async {
+        sqlx::query_scalar::<_, Option<bigdecimal::BigDecimal>>(
+            "SELECT sum(l.amount) FROM ledger_entries l JOIN wallets w ON w.id = l.wallet_id WHERE w.user_id = $1",
         )
+        .bind(uid)
+        .fetch_one(&pool)
         .await
-        .unwrap();
-    let st = supply.status();
-    let bytes = supply.into_body().collect().await.unwrap().to_bytes();
-    assert_eq!(st, axum::http::StatusCode::OK, "supply={}", String::from_utf8_lossy(&bytes));
+        .unwrap()
+    };
+    let before = ledger_sum().await;
 
-    let borrow = api_http::app_without_metrics(state.clone())
-        .oneshot(
-            axum::http::Request::builder()
-                .method("POST")
-                .uri("/v1/lend/borrow/LTC")
+    let routes = [
+        ("GET", "/v1/lend/markets"),
+        ("GET", "/v1/lend/positions"),
+        ("POST", "/v1/lend/supply/BTC"),
+        ("POST", "/v1/lend/withdraw/BTC"),
+        ("POST", "/v1/lend/borrow/LTC"),
+        ("POST", "/v1/lend/repay/LTC"),
+    ];
+    for (method, uri) in routes {
+        let req = |auth: bool| {
+            let mut b = axum::http::Request::builder()
+                .method(method)
+                .uri(uri)
                 .header("content-type", "application/json")
-                .header("authorization", format!("Bearer {token}"))
-                .header("x-real-ip", "203.0.113.113")
-                .body(Body::from(r#"{"amount":"1000000"}"#))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    let st = borrow.status();
-    let bytes = borrow.into_body().collect().await.unwrap().to_bytes();
-    assert_eq!(st, axum::http::StatusCode::OK, "borrow={}", String::from_utf8_lossy(&bytes));
+                .header("x-real-ip", "203.0.113.113");
+            if auth {
+                b = b.header("authorization", format!("Bearer {token}"));
+            }
+            b.body(Body::from(r#"{"amount":"20000000"}"#)).unwrap()
+        };
 
-    let repay = api_http::app_without_metrics(state.clone())
-        .oneshot(
-            axum::http::Request::builder()
-                .method("POST")
-                .uri("/v1/lend/repay/LTC")
-                .header("content-type", "application/json")
-                .header("authorization", format!("Bearer {token}"))
-                .header("x-real-ip", "203.0.113.113")
-                .body(Body::from(r#"{"amount":"500000"}"#))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(repay.status(), axum::http::StatusCode::OK);
+        let anon = api_http::app_without_metrics(state.clone()).oneshot(req(false)).await.unwrap();
+        assert_eq!(anon.status(), axum::http::StatusCode::UNAUTHORIZED, "{method} {uri} must still require auth");
 
-    let withdraw = api_http::app_without_metrics(state)
-        .oneshot(
-            axum::http::Request::builder()
-                .method("POST")
-                .uri("/v1/lend/withdraw/BTC")
-                .header("content-type", "application/json")
-                .header("authorization", format!("Bearer {token}"))
-                .header("x-real-ip", "203.0.113.113")
-                .body(Body::from(r#"{"amount":"1000000"}"#))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    let st = withdraw.status();
-    let bytes = withdraw.into_body().collect().await.unwrap().to_bytes();
-    assert_eq!(st, axum::http::StatusCode::OK, "withdraw={}", String::from_utf8_lossy(&bytes));
+        let res = api_http::app_without_metrics(state.clone()).oneshot(req(true)).await.unwrap();
+        let st = res.status();
+        let body: serde_json::Value =
+            serde_json::from_slice(&res.into_body().collect().await.unwrap().to_bytes()).unwrap();
+        assert_eq!(st, axum::http::StatusCode::SERVICE_UNAVAILABLE, "{method} {uri}");
+        assert_eq!(body["error"]["code"], "LEND_MAINTENANCE", "{method} {uri}");
+    }
+
+    assert_eq!(ledger_sum().await, before, "maintenance must not touch balances");
 }
 
 #[sqlx::test(migrations = "../db/migrations")]

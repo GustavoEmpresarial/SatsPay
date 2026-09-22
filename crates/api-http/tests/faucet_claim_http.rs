@@ -113,6 +113,7 @@ async fn faucet_claim_ok(pool: PgPool) {
                 .method("GET")
                 .uri("/v1/faucet/status")
                 .header("authorization", format!("Bearer {token}"))
+                .header("x-real-ip", "203.0.113.77")
                 .body(Body::empty())
                 .unwrap(),
         )

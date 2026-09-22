@@ -47,7 +47,9 @@ async fn coins_catalogue_is_public_and_complete(pool: PgPool) {
         // The icon must come from this platform, not a third-party CDN.
         let logo = entry["logoUrl"].as_str().expect("logoUrl");
         assert!(logo.starts_with("https://www.satspay.pro/sdk/coins/"), "{logo}");
-        assert!(logo.ends_with(&format!("{}.svg", coin.as_str().to_lowercase())), "{logo}");
+        // PEPE ships as PNG (its SVG nests a raster that <img> won't paint).
+        let ext = if coin == shared::Coin::Pepe { "png" } else { "svg" };
+        assert!(logo.ends_with(&format!("{}.{ext}", coin.as_str().to_lowercase())), "{logo}");
         // Paused coins are advertised as such rather than silently failing later.
         assert_eq!(
             entry["depositsEnabled"].as_bool(),

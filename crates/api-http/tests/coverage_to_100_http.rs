@@ -206,10 +206,28 @@ async fn faucet_create_site_validation(pool: PgPool) {
 
 #[sqlx::test(migrations = "../db/migrations")]
 async fn withdraw_request_fee_margin_paused(pool: PgPool) {
-    seed_negative_fee_margin(&pool, Coin::Bch).await;
+    // BTC/LTC/DOGE/BCH/DGB are paused outright, so the fee-margin guard is
+    // exercised on a live coin; the paused one must answer with its own code.
+    seed_negative_fee_margin(&pool, Coin::Sol).await;
     let (state, token, user_id, _) = common::register_user(pool.clone(), "fm-wd").await;
     let uid = Uuid::parse_str(&user_id).unwrap();
+    common::credit_personal(&pool, uid, Coin::Sol, 100_000_000).await;
     common::credit_personal(&pool, uid, Coin::Bch, 100_000_000).await;
+
+    let (st, body) = oneshot(
+        state.clone(),
+        "POST",
+        "/v1/withdrawals",
+        Some(&token),
+        Some(json!({
+            "coin": "SOL",
+            "toAddress": "So11111111111111111111111111111111111111112",
+            "amount": "1500000"
+        })),
+    )
+    .await;
+    assert_eq!(st, axum::http::StatusCode::FORBIDDEN, "{body}");
+    assert_eq!(body["code"], "FEE_MARGIN_NEGATIVE");
 
     let (st, body) = oneshot(
         state,
@@ -223,8 +241,8 @@ async fn withdraw_request_fee_margin_paused(pool: PgPool) {
         })),
     )
     .await;
-    assert_eq!(st, axum::http::StatusCode::FORBIDDEN, "{body}");
-    assert_eq!(body["code"], "FEE_MARGIN_NEGATIVE");
+    assert_eq!(st, axum::http::StatusCode::SERVICE_UNAVAILABLE, "{body}");
+    assert_eq!(body["code"], "WITHDRAWAL_PAUSED");
 }
 
 #[sqlx::test(migrations = "../db/migrations")]

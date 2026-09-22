@@ -315,6 +315,7 @@ async fn issue_key_rejects_unknown_scope_and_balance_needs_scope(pool: PgPool) {
             axum::http::Request::builder()
                 .uri("/v1/public/balance")
                 .header("x-api-key", raw_key)
+                .header("x-real-ip", "203.0.113.50")
                 .body(Body::empty())
                 .unwrap(),
         )
