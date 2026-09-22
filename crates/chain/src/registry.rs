@@ -41,6 +41,13 @@ impl ChainRegistry {
         Self { clients }
     }
 
+    /// Swaps in `client` for the coin it reports. For tests that need a
+    /// broadcast outcome the stub can't produce (success, ambiguous failure).
+    pub fn with_client(mut self, client: Arc<dyn ChainClient>) -> Self {
+        self.clients.insert(client.coin().as_str(), client);
+        self
+    }
+
     pub fn get(&self, coin: Coin) -> Arc<dyn ChainClient> {
         self.clients
             .get(coin.as_str())

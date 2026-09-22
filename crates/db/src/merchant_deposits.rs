@@ -431,20 +431,9 @@ pub async fn confirm_invoice(
     .fetch_optional(&mut *tx)
     .await?;
 
-    let merchant_wallet_id = match merchant_wallet_id {
-        Some(id) => id,
-        None => {
-            // Fallback to personal wallet if merchant wallet not initialized
-            let personal_id: Option<Uuid> = sqlx::query_scalar(
-                "SELECT id FROM wallets WHERE user_id = $1 AND coin = $2::coin AND kind = 'PERSONAL'"
-            )
-            .bind(inv.merchant_id)
-            .bind(inv.coin.as_str())
-            .fetch_optional(&mut *tx)
-            .await?;
-            personal_id.ok_or(MerchantDepositError::MerchantWalletNotFound)?
-        }
-    };
+    // Created just above in this transaction; gateway income never falls
+    // back to the PERSONAL wallet.
+    let merchant_wallet_id = merchant_wallet_id.ok_or(MerchantDepositError::MerchantWalletNotFound)?;
 
     // 2. Lock merchant wallet and credit net amount
     lock_wallet(&mut tx, merchant_wallet_id).await?;
@@ -555,19 +544,9 @@ pub async fn pay_invoice_with_balance(
     .fetch_optional(&mut *tx)
     .await?;
 
-    let merchant_wallet_id = match merchant_wallet_id {
-        Some(id) => id,
-        None => {
-            let p_id: Option<Uuid> = sqlx::query_scalar(
-                "SELECT id FROM wallets WHERE user_id = $1 AND coin = $2::coin AND kind = 'PERSONAL'"
-            )
-            .bind(inv.merchant_id)
-            .bind(inv.coin.as_str())
-            .fetch_optional(&mut *tx)
-            .await?;
-            p_id.ok_or(MerchantDepositError::MerchantWalletNotFound)?
-        }
-    };
+    // Created just above in this transaction; gateway income never falls
+    // back to the PERSONAL wallet.
+    let merchant_wallet_id = merchant_wallet_id.ok_or(MerchantDepositError::MerchantWalletNotFound)?;
 
     // 5. Lock and credit merchant wallet
     lock_wallet(&mut tx, merchant_wallet_id).await?;
