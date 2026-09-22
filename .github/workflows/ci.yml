@@ -69,7 +69,7 @@ jobs:
             --ignore-filename-regex '(producer|relay)\.rs$' \
             --fail-under-lines 90 --summary-only
           cargo llvm-cov --package chain --lib --tests \
-            --ignore-filename-regex '(rpc_client|real_client|bitcore_client|dgb_client|evm_client|sol_client)\.rs$' \
+            --ignore-filename-regex '(rpc_client|real_client|bitcore_client|dgb_client|evm_client|sol_client|zer_client|utxo_node_rpc)\.rs$' \
             --fail-under-lines 90 --summary-only
           cargo llvm-cov --package db --lib --tests --fail-under-lines 90 --summary-only
 

@@ -780,4 +780,101 @@ mod tests {
         assert_eq!(eta.total, Some(3));
         assert_eq!(route.total_slippage_bps, Some(-13));
     }
+
+    #[derive(Deserialize)]
+    struct Lossy {
+        #[serde(default, deserialize_with = "de_opt_i64_lossy")]
+        v: Option<i64>,
+    }
+
+    fn eta(v: Value) -> Option<u64> {
+        serde_json::from_value::<EstimatedTime>(serde_json::json!({ "total": v })).unwrap().total
+    }
+
+    fn lossy(v: Value) -> Option<i64> {
+        serde_json::from_value::<Lossy>(serde_json::json!({ "v": v })).unwrap().v
+    }
+
+    #[test]
+    fn eta_rounds_up_and_clamps_odd_provider_shapes() {
+        assert_eq!(eta(serde_json::json!(7)), Some(7));
+        assert_eq!(eta(serde_json::json!(-5)), Some(0), "negative ETA clamps to zero");
+        assert_eq!(eta(serde_json::json!(2.1)), Some(3));
+        assert_eq!(eta(serde_json::json!("4.2")), Some(5));
+        assert_eq!(eta(serde_json::json!("soon")), None);
+        assert_eq!(eta(serde_json::json!(null)), None);
+        assert_eq!(eta(serde_json::json!(true)), None);
+    }
+
+    #[test]
+    fn slippage_bps_accepts_numbers_strings_and_huge_values() {
+        assert_eq!(lossy(serde_json::json!(-13)), Some(-13));
+        assert_eq!(lossy(serde_json::json!(u64::MAX)), Some(i64::MAX), "saturates instead of wrapping");
+        assert_eq!(lossy(serde_json::json!(12.6)), Some(13));
+        assert_eq!(lossy(serde_json::json!("-7.4")), Some(-7));
+        assert_eq!(lossy(serde_json::json!("x")), None);
+        assert_eq!(lossy(serde_json::json!([1])), None);
+    }
+
+    #[test]
+    fn contract_call_parsed_from_alternate_keys_and_hex() {
+        let payload = serde_json::json!({
+            "transaction": {
+                "to": "0x1111111111111111111111111111111111111111",
+                "data": "0xabcdef",
+                "value": "0x10",
+                "gasLimit": " 0X5208 ",
+                "gasPrice": "30000000000",
+                "from": "0x2222222222222222222222222222222222222222"
+            }
+        });
+        let tx = parse_contract_call_tx(&payload).unwrap();
+        assert_eq!(tx.value_wei, 16);
+        assert_eq!(tx.gas_limit, Some(21_000));
+        assert_eq!(tx.gas_price_wei, Some(30_000_000_000));
+        assert_eq!(tx.from.as_deref(), Some("0x2222222222222222222222222222222222222222"));
+
+        let evm = serde_json::json!({ "evmTransaction": { "to": "0x1", "data": "0x00", "value": 5, "gas": 9 } });
+        let tx = parse_contract_call_tx(&evm).unwrap();
+        assert_eq!((tx.value_wei, tx.gas_limit), (5, Some(9)));
+
+        // Non-hex calldata or a missing `to` is not a contract call.
+        assert!(parse_contract_call_tx(&serde_json::json!({ "tx": { "to": "0x1", "data": "abc" } })).is_none());
+        assert!(parse_contract_call_tx(&serde_json::json!({ "tx": { "to": "", "data": "0x" } })).is_none());
+        // Garbage numeric fields degrade to defaults instead of failing.
+        let bad = serde_json::json!({ "tx": { "to": "0x1", "data": "0x", "value": "0xzz", "gas": [1] } });
+        let tx = parse_contract_call_tx(&bad).unwrap();
+        assert_eq!((tx.value_wei, tx.gas_limit), (0, None));
+    }
+
+    #[test]
+    fn contract_call_falls_back_to_meta() {
+        let payload = serde_json::json!({
+            "routeId": "r",
+            "meta": { "tx": { "to": "0x3", "data": "0x01", "value": "7" } }
+        });
+        let tx = parse_contract_call_tx(&payload).unwrap();
+        assert_eq!((tx.to.as_str(), tx.value_wei), ("0x3", 7));
+        assert!(parse_contract_call_tx(&serde_json::json!({ "routeId": "r" })).is_none());
+    }
+
+    #[test]
+    fn track_status_and_amount_variants() {
+        let t: TrackResponse =
+            serde_json::from_value(serde_json::json!({ "trackingStatus": "swap_completed_ok", "outbound": { "finalAmount": 1.25 } }))
+                .unwrap();
+        assert!(t.is_complete());
+        assert_eq!(t.outbound_amount_human().as_deref(), Some("1.25"));
+        let t: TrackResponse = serde_json::from_value(serde_json::json!({ "status": "partial_success" })).unwrap();
+        assert!(t.is_complete());
+        let t: TrackResponse = serde_json::from_value(serde_json::json!({ "status": "pending" })).unwrap();
+        assert!(!t.is_complete());
+    }
+
+    #[test]
+    fn human_amount_rejects_blank() {
+        assert_eq!(parse_human_to_ledger("   ", Coin::Btc), None);
+        assert_eq!(parse_human_to_ledger("2", Coin::Btc), Some(200_000_000));
+    }
 }
+

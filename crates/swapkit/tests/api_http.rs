@@ -79,3 +79,55 @@ async fn quote_rejects_dgb_and_zero() {
         SwapKitError::InvalidAmount
     ));
 }
+
+async fn mount(server: &MockServer, p: &str, status: u16, body: &str) {
+    Mock::given(method("POST"))
+        .and(path(p))
+        .respond_with(ResponseTemplate::new(status).set_body_string(body))
+        .mount(server)
+        .await;
+}
+
+#[tokio::test]
+async fn upstream_errors_surface_as_api_errors() {
+    let server = MockServer::start().await;
+    mount(&server, "/v3/quote", 502, "bad gateway").await;
+    mount(&server, "/v3/swap", 500, "boom").await;
+    mount(&server, "/track", 429, "slow down").await;
+    let c = SwapKitClient::new_with_base(server.uri(), Some("k".into()));
+
+    let q = c.quote(Coin::Btc, Coin::Ltc, 100_000_000, None, None).await;
+    assert!(matches!(q, Err(SwapKitError::Api(ref m)) if m.contains("502")), "{q:?}");
+    let s = c.swap("r1", "a", "b").await;
+    assert!(matches!(s, Err(SwapKitError::Api(ref m)) if m.contains("500")), "{s:?}");
+    let t = c.track("h").await;
+    assert!(matches!(t, Err(SwapKitError::Api(ref m)) if m.contains("429")), "{t:?}");
+}
+
+#[tokio::test]
+async fn malformed_or_empty_bodies_are_rejected() {
+    let server = MockServer::start().await;
+    mount(&server, "/v3/quote", 200, r#"{"routes":[]}"#).await;
+    mount(&server, "/v3/swap", 200, "not json").await;
+    mount(&server, "/track", 200, "[").await;
+    let c = SwapKitClient::new_with_base(server.uri(), None);
+
+    assert!(matches!(
+        c.quote(Coin::Btc, Coin::Ltc, 100_000_000, None, None).await,
+        Err(SwapKitError::NoRoutes)
+    ));
+    assert!(matches!(c.swap("r1", "a", "b").await, Err(SwapKitError::Api(_))));
+    assert!(matches!(c.track("h").await, Err(SwapKitError::Api(_))));
+}
+
+#[tokio::test]
+async fn quote_with_unparseable_body_is_api_error() {
+    let server = MockServer::start().await;
+    mount(&server, "/v3/quote", 200, "{oops").await;
+    let c = SwapKitClient::new_with_base(server.uri(), None);
+    assert!(matches!(
+        c.quote(Coin::Btc, Coin::Ltc, 100_000_000, None, None).await,
+        Err(SwapKitError::Api(_))
+    ));
+}
+
