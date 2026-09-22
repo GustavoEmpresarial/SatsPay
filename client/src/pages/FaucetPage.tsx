@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, ApiError } from '../lib/api.js';
 import { formatApiError } from '../lib/formatError.js';
 import { coinLogo } from '../lib/coinAssets.js';
@@ -8,8 +8,6 @@ import { useAuthStore } from '../stores/auth.js';
 import { ModernCaptcha } from '../components/ModernCaptcha.js';
 import { FAUCET_CAPTCHA_ACTION } from '../lib/captchaActions.js';
 import { COIN_CONFIG, COINS, formatAmount, safeBigInt, type Coin } from '@/shared';
-
-const COOLDOWN_MS = 11 * 60 * 60 * 1000; // fallback; must match FAUCET_COOLDOWN_MINUTES=660 (server)
 
 /** Parse API timestamps (RFC3339 or legacy "YYYY-MM-DD HH:MM:SS.ssssss UTC"). */
 function parseClaimAt(raw?: string | null): number | null {
@@ -32,13 +30,32 @@ function formatRemainingTime(secs: number) {
   return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
 }
 
-type ClaimResp = { amount: string; nextClaimAt?: string; next_claim_at?: string };
+type ClaimResp = {
+  amount: string;
+  nextClaimAt?: string;
+  next_claim_at?: string;
+  pointsAwarded?: boolean;
+  seasonActive?: boolean;
+};
+
+type FaucetStatus = {
+  cooldownMinutes?: number;
+  coins?: { coin: string; nextClaimAt?: string | null }[];
+};
+
+function cooldownsFromStatus(data: FaucetStatus | undefined): Record<string, number> {
+  const map: Record<string, number> = {};
+  for (const row of data?.coins ?? []) {
+    const until = parseClaimAt(row.nextClaimAt);
+    if (until) map[row.coin] = until;
+  }
+  return map;
+}
 
 export function FaucetPage() {
   const { t } = useTranslation();
   const qc = useQueryClient();
   const user = useAuthStore((s) => s.user);
-  const storageKey = `bitcosats_faucet_v2_${user?.id || 'guest'}`;
 
   const [selectedCoin, setSelectedCoin] = useState<Coin>('BTC');
   const [msg, setMsg] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
@@ -49,52 +66,58 @@ export function FaucetPage() {
   const [mountedAt] = useState(() => Date.now());
 
   const [now, setNow] = useState(Date.now());
-  const [cooldowns, setCooldowns] = useState<Record<string, number>>(() => {
-    try {
-      const stored = localStorage.getItem(storageKey);
-      return stored ? JSON.parse(stored) : {};
-    } catch {
-      return {};
-    }
+
+  // Server is the only clock: user + IP cooldown from faucet_claims.
+  const statusQ = useQuery({
+    queryKey: ['faucet-status'],
+    queryFn: () => api<FaucetStatus>('/faucet/status'),
+    enabled: !!user,
+    staleTime: 15_000,
+    refetchOnWindowFocus: true,
   });
+  const statusReady = statusQ.isSuccess;
+  const cooldowns = useMemo(() => cooldownsFromStatus(statusQ.data), [statusQ.data]);
 
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
   }, []);
 
-  const persistCooldowns = (next: Record<string, number>) => {
-    setCooldowns(next);
-    try {
-      localStorage.setItem(storageKey, JSON.stringify(next));
-    } catch {
-      /* ignore */
-    }
+  const applyServerCooldown = (coin: Coin, untilIso: string) => {
+    qc.setQueryData<FaucetStatus>(['faucet-status'], (old) => {
+      const base = old?.coins?.length
+        ? old.coins
+        : COINS.map((c) => ({ coin: c, nextClaimAt: null as string | null }));
+      return {
+        cooldownMinutes: old?.cooldownMinutes ?? 660,
+        coins: base.map((row) => (row.coin === coin ? { ...row, nextClaimAt: untilIso } : row)),
+      };
+    });
   };
 
-  const isCoinCooling = (coin: Coin) => now < (cooldowns[coin] || 0);
+  const isCoinCooling = (coin: Coin) => statusReady && now < (cooldowns[coin] || 0);
 
-  const availableCoins = useMemo(
-    () => COINS.filter((c) => !isCoinCooling(c)),
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- isCoinCooling closes over now/cooldowns
-    [now, cooldowns],
-  );
+  const availableCoins = useMemo(() => {
+    if (!statusReady) return [];
+    return COINS.filter((c) => !isCoinCooling(c));
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- isCoinCooling closes over now/cooldowns/statusReady
+  }, [now, cooldowns, statusReady]);
 
-  // If the selected coin is on cooldown, jump to the first available one.
   useEffect(() => {
+    if (!statusReady) return;
     if (!isCoinCooling(selectedCoin)) return;
     const next = availableCoins[0];
     if (next && next !== selectedCoin) {
       setSelectedCoin(next);
-      // Don't leave a stale cooldown banner for the previous coin.
       setMsg((m) => (m?.type === 'info' ? null : m));
     }
-  }, [selectedCoin, availableCoins, now, cooldowns]);
+  }, [selectedCoin, availableCoins, now, cooldowns, statusReady]);
 
   const coinCooldownUntil = cooldowns[selectedCoin] || 0;
-  const isCoolingDown = now < coinCooldownUntil;
+  const isCoolingDown = statusReady && now < coinCooldownUntil;
   const remainingSeconds = Math.max(0, Math.ceil((coinCooldownUntil - now) / 1000));
-  const canClaim = captchaVerified && !isCoolingDown && availableCoins.length > 0;
+  const canClaim =
+    statusReady && captchaVerified && !isCoolingDown && availableCoins.length > 0 && !statusQ.isFetching;
 
   const handleCaptchaVerify = (token: string) => {
     setCaptchaToken(token);
@@ -104,6 +127,9 @@ export function FaucetPage() {
 
   const claimMut = useMutation({
     mutationFn: async (coin: Coin) => {
+      if (!statusReady) {
+        throw new Error(t('faucet.statusLoading', { defaultValue: 'Carregando cooldown do servidor…' }));
+      }
       if (honeypot.trim() !== '') {
         throw new Error('Bot detectado.');
       }
@@ -123,19 +149,27 @@ export function FaucetPage() {
       });
     },
     onSuccess: (data, coin) => {
-      const until = parseClaimAt(data.nextClaimAt ?? data.next_claim_at) ?? Date.now() + COOLDOWN_MS;
-      persistCooldowns({ ...cooldowns, [coin]: until });
+      const untilIso = data.nextClaimAt ?? data.next_claim_at;
+      if (untilIso) applyServerCooldown(coin, untilIso);
+      void qc.invalidateQueries({ queryKey: ['faucet-status'] });
 
       setCaptchaVerified(false);
       setCaptchaToken(null);
 
-      qc.invalidateQueries({ queryKey: ['wallets'] });
-      qc.invalidateQueries({ queryKey: ['ledger'] });
+      void qc.invalidateQueries({ queryKey: ['wallets', 'PERSONAL'] });
+      void qc.invalidateQueries({ queryKey: ['wallets'] });
+      void qc.invalidateQueries({ queryKey: ['ledger'] });
+      void qc.invalidateQueries({ queryKey: ['airdrop-overview'] });
+      void qc.invalidateQueries({ queryKey: ['airdrop-logs'] });
 
-      setMsg({
-        type: 'success',
-        text: `${t('faucet.received', { defaultValue: 'Reivindicado' })}: +${formatAmount(safeBigInt(data.amount), coin)} ${coin}.`,
-      });
+      const units = formatAmount(safeBigInt(data.amount), coin);
+      let text = `${t('faucet.received', { defaultValue: 'Reivindicado' })}: +${units} ${coin}`;
+      if (data.pointsAwarded) {
+        text += ` (+50 SatsPoints)`;
+      } else if (data.seasonActive === false) {
+        text += `. ${t('faucet.seasonInactive', { defaultValue: 'Temporada de airdrop inativa — pontos não creditados.' })}`;
+      }
+      setMsg({ type: 'success', text });
 
       const nextAvail = COINS.find((c) => c !== coin && Date.now() >= (cooldowns[c] || 0));
       if (nextAvail) setSelectedCoin(nextAvail);
@@ -143,18 +177,21 @@ export function FaucetPage() {
     onError: (err, coin) => {
       setCaptchaVerified(false);
       setCaptchaToken(null);
+      // Always re-read the server clock after a rejection.
+      void qc.invalidateQueries({ queryKey: ['faucet-status'] });
 
       if (err instanceof ApiError && (err.code === 'FAUCET_COOLDOWN' || /next claim available/i.test(err.message))) {
         const details = err.details as { nextClaimAt?: string } | undefined;
         const until = parseClaimAt(details?.nextClaimAt);
         if (until && until > Date.now()) {
-          const updated = { ...cooldowns, [coin]: until };
-          persistCooldowns(updated);
-          const stillAvail = COINS.find((c) => Date.now() >= (updated[c] || 0));
+          applyServerCooldown(coin, new Date(until).toISOString());
+          const stillAvail = COINS.find((c) => c !== coin && Date.now() >= (cooldowns[c] || 0));
           if (stillAvail) {
             setSelectedCoin(stillAvail);
-            // Don't leave an amber banner over an available coin — user should claim that one.
-            setMsg(null);
+            setMsg({
+              type: 'info',
+              text: `${coin}: cooldown ativo no servidor. Tente ${stillAvail}.`,
+            });
             return;
           }
           const secs = Math.ceil((until - Date.now()) / 1000);
@@ -173,6 +210,10 @@ export function FaucetPage() {
   });
 
   const onClaimClick = () => {
+    if (!statusReady) {
+      setMsg({ type: 'info', text: t('faucet.statusLoading', { defaultValue: 'Carregando cooldown do servidor…' }) });
+      return;
+    }
     const coin = !isCoolingDown ? selectedCoin : availableCoins[0];
     if (!coin) {
       setMsg({ type: 'info', text: t('faucet.cooldownActive', { defaultValue: 'Nenhuma moeda disponível agora.' }) });
@@ -199,6 +240,19 @@ export function FaucetPage() {
         <h1 className="text-2xl md:text-3xl font-bold tracking-tight">{t('faucet.title', { defaultValue: 'Faucet' })}</h1>
         <p className="text-sm text-ink-muted mt-1">{t('faucet.subtitle', { defaultValue: 'Pequenas quantias a cada 11 horas' })}</p>
       </header>
+
+      {statusQ.isError && (
+        <div className="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">
+          Não foi possível ler o cooldown no servidor. Recarregue a página.
+        </div>
+      )}
+
+      {!statusReady && !statusQ.isError && (
+        <div className="rounded-2xl border border-border bg-surface/80 p-4 text-sm text-ink-muted flex items-center gap-2">
+          <i className="bi bi-arrow-repeat animate-spin" />
+          Carregando cooldown do servidor…
+        </div>
+      )}
 
       {msg && (
         <div
@@ -233,20 +287,21 @@ export function FaucetPage() {
               const active = selectedCoin === c;
               const cooling = isCoinCooling(c);
               const secs = Math.max(0, Math.ceil(((cooldowns[c] || 0) - now) / 1000));
+              const pending = !statusReady;
 
               return (
                 <button
                   key={c}
                   type="button"
+                  disabled={pending}
                   onClick={() => {
                     setSelectedCoin(c);
-                    // Clear banners when picking another coin (esp. cooldown info).
                     setMsg(null);
                   }}
                   className={`flex items-center gap-3 rounded-xl border p-3 text-left transition-all ${
                     active
                       ? 'border-bitcoin bg-bitcoin/5 text-ink shadow-sm ring-1 ring-bitcoin/30'
-                      : cooling
+                      : cooling || pending
                         ? 'border-border bg-surface/50 text-ink-muted opacity-70'
                         : 'border-border bg-surface hover:bg-paper text-ink-muted'
                   }`}
@@ -255,7 +310,9 @@ export function FaucetPage() {
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center justify-between gap-1">
                       <span className="text-xs font-semibold text-ink">{c}</span>
-                      {cooling ? (
+                      {pending ? (
+                        <span className="rounded bg-surface px-1.5 py-0.5 text-[10px] font-medium text-ink-muted">…</span>
+                      ) : cooling ? (
                         <span className="rounded bg-amber-50 px-1.5 py-0.5 font-mono text-[10px] font-medium text-amber-700">
                           {formatRemainingTime(secs)}
                         </span>
@@ -292,7 +349,9 @@ export function FaucetPage() {
                 +{formatAmount(COIN_CONFIG[selectedCoin].faucetReward, selectedCoin)} {selectedCoin}
               </span>
             </div>
-            {isCoolingDown ? (
+            {!statusReady ? (
+              <div className="mt-1 text-xs font-medium text-ink-muted">Sincronizando com o servidor…</div>
+            ) : isCoolingDown ? (
               <div className="mt-1 flex items-center gap-1.5 text-xs font-medium text-amber-700">
                 <i className="bi bi-clock-history" />
                 <span>
@@ -316,6 +375,11 @@ export function FaucetPage() {
               <>
                 <i className="bi bi-arrow-repeat animate-spin text-base" />
                 <span>{t('faucet.claiming', { defaultValue: 'Processando...' })}</span>
+              </>
+            ) : !statusReady ? (
+              <>
+                <i className="bi bi-arrow-repeat animate-spin text-base" />
+                <span>Sincronizando…</span>
               </>
             ) : !captchaVerified ? (
               <>

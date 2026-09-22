@@ -35,12 +35,13 @@ Bem-vindo à documentação técnica oficial do **BitcoSats**, uma plataforma fi
 
 ### 7. Segurança e Auditoria
 - [`security/BALANCE_SECURITY.md`](security/BALANCE_SECURITY.md): O modelo formal de segurança de saldo (por que não existem colunas mutáveis de saldo).
-- [`security/threat-model-and-gaps.md`](security/threat-model-and-gaps.md): Análise de vetores de ataque (T1 a T8) e checklist de pendências para lançamento em Mainnet.
+- [`security/threat-model-and-gaps.md`](security/threat-model-and-gaps.md): Vetores T1–T12 e checklist mainnet (prod = compose VM).
 - [`security/SAST.md`](security/SAST.md): CodeQL CI + regras Semgrep de domínio (BitcoSats).
-- [`security/audit-2026-09-01.md`](security/audit-2026-09-01.md): Relatório de auditoria de segurança da infraestrutura e código-fonte.
+- [`security/audit-2026-09-01.md`](security/audit-2026-09-01.md): Addendum 2026-09-16 + snapshot histórico 01/09.
 
 ### 8. Operações e DevOps
-- [`operations/deployment.md`](operations/deployment.md): Topologia Kubernetes (CloudNativePG, Strimzi Kafka, External Secrets, Ingress) e Docker Compose.
+- [`operations/deployment.md`](operations/deployment.md): **Prod = compose VM + Caddy**; overlays k8s são lab/futuro.
+- [`operations/vm-security-runbook.md`](operations/vm-security-runbook.md): SSH key-only, backup/`ENCRYPTION_KEY`, LUKS, SMTP/admin, rotação AES.
 - [`operations/env-vars-reference.md`](operations/env-vars-reference.md): Tabela de referência completa de todas as variáveis de ambiente.
 - [`operations/backup-restore-postgres.md`](operations/backup-restore-postgres.md): Procedimentos de backup contínuo com Barman/S3 e recuperação Point-in-Time (PITR).
 

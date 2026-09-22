@@ -32,34 +32,88 @@ fn coin_config_matches_legacy_constants() {
     assert_eq!(pol.withdrawal_fee, 3_000_000);
     assert_eq!(pol.approval_threshold, 250_000_000_000);
 
-    assert_eq!(COINS.len(), 9);
+    assert_eq!(COINS.len(), 11);
     assert_eq!(coin_config(Coin::Dgb).name, "DigiByte");
     assert_eq!(coin_config(Coin::Sol).name, "Solana");
     assert_eq!(coin_config(Coin::Usdt).name, "Tether USD");
     assert_eq!(coin_config(Coin::Usdc).name, "USD Coin");
+    assert_eq!(coin_config(Coin::Zer).name, "Zero");
+    assert_eq!(coin_config(Coin::Zer).min_confirmations, 10);
+    assert_eq!(coin_config(Coin::Pepe).name, "Pepe");
+    assert_eq!(coin_config(Coin::Pepe).min_confirmations, 15);
+    assert_eq!(coin_config(Coin::Pepe).withdrawal_fee, 5_000_000_000_000);
+    assert_eq!(Coin::Pepe.onchain_decimals(), 18);
 }
 
 #[test]
 fn swap_l2_allowlist() {
     use crate::{is_swap_l2_coin, is_swap_l2_pair, SWAP_L2_COINS};
-    assert_eq!(SWAP_L2_COINS, [Coin::Pol, Coin::Usdt, Coin::Usdc]);
+    assert_eq!(SWAP_L2_COINS, [Coin::Pol, Coin::Usdt, Coin::Usdc, Coin::Sol]);
     assert!(is_swap_l2_coin(Coin::Pol));
+    assert!(is_swap_l2_coin(Coin::Sol));
     assert!(!is_swap_l2_coin(Coin::Btc));
+    assert!(!is_swap_l2_coin(Coin::Pepe));
     assert!(is_swap_l2_pair(Coin::Pol, Coin::Usdt));
+    assert!(is_swap_l2_pair(Coin::Sol, Coin::Usdt));
     assert!(!is_swap_l2_pair(Coin::Pol, Coin::Pol));
     assert!(!is_swap_l2_pair(Coin::Btc, Coin::Ltc));
 }
 
 #[test]
+fn swap_full_allowlist_includes_l1() {
+    use crate::{is_swap_coin, is_swap_l1_coin, is_swap_pair, SWAP_L1_COINS};
+    assert_eq!(
+        SWAP_L1_COINS,
+        [Coin::Btc, Coin::Ltc, Coin::Doge, Coin::Bch, Coin::Dgb]
+    );
+    assert!(is_swap_l1_coin(Coin::Btc));
+    assert!(is_swap_coin(Coin::Btc));
+    assert!(is_swap_coin(Coin::Usdt));
+    assert!(!is_swap_coin(Coin::Pepe));
+    assert!(is_swap_pair(Coin::Btc, Coin::Ltc));
+    assert!(is_swap_pair(Coin::Btc, Coin::Usdt));
+    assert!(!is_swap_pair(Coin::Btc, Coin::Btc));
+}
+
+#[test]
+fn coin_network_labels() {
+    use crate::coin_network;
+    assert_eq!(coin_network(Coin::Usdt).id, "polygon");
+    assert_eq!(coin_network(Coin::Usdc).short, "Polygon");
+    assert_eq!(coin_network(Coin::Pol).id, "polygon");
+    assert_eq!(coin_network(Coin::Sol).id, "solana");
+    assert_eq!(coin_network(Coin::Pepe).id, "bsc");
+    assert_eq!(coin_network(Coin::Btc).id, "bitcoin");
+}
+
+#[test]
+fn swap_vs_bridge_pairs() {
+    use crate::{is_bridge_pair, is_dex_swap_pair, is_same_swap_network, DEX_SWAP_COINS};
+    assert_eq!(DEX_SWAP_COINS, [Coin::Pol, Coin::Usdt, Coin::Usdc]);
+    assert!(is_dex_swap_pair(Coin::Pol, Coin::Usdt));
+    assert!(is_same_swap_network(Coin::Usdt, Coin::Usdc));
+    assert!(!is_bridge_pair(Coin::Pol, Coin::Usdt));
+    assert!(is_bridge_pair(Coin::Sol, Coin::Usdt));
+    assert!(is_bridge_pair(Coin::Btc, Coin::Ltc));
+    assert!(!is_dex_swap_pair(Coin::Sol, Coin::Usdt));
+}
+
+#[test]
 fn deposit_withdraw_pause_list() {
     use crate::{is_deposit_withdraw_paused, DEPOSIT_WITHDRAW_PAUSED_COINS};
-    assert_eq!(DEPOSIT_WITHDRAW_PAUSED_COINS, [Coin::Btc, Coin::Ltc, Coin::Doge, Coin::Dgb]);
+    assert_eq!(
+        DEPOSIT_WITHDRAW_PAUSED_COINS,
+        [Coin::Btc, Coin::Ltc, Coin::Doge, Coin::Bch, Coin::Dgb]
+    );
     assert!(is_deposit_withdraw_paused(Coin::Btc));
     assert!(is_deposit_withdraw_paused(Coin::Ltc));
     assert!(is_deposit_withdraw_paused(Coin::Doge));
+    assert!(is_deposit_withdraw_paused(Coin::Bch));
     assert!(is_deposit_withdraw_paused(Coin::Dgb));
+    assert!(!is_deposit_withdraw_paused(Coin::Zer));
     assert!(!is_deposit_withdraw_paused(Coin::Pol));
-    assert!(!is_deposit_withdraw_paused(Coin::Bch));
+    assert!(!is_deposit_withdraw_paused(Coin::Sol));
+    assert!(!is_deposit_withdraw_paused(Coin::Pepe));
 }
 
 #[test]
@@ -67,7 +121,7 @@ fn compute_swap_gross_minus_fee() {
     // 1 BTC (8 decimals) -> LTC (8 decimals), same price scale, 50bps fee.
     // priceFrom=priceTo means 1:1, so gross == fromAmount (same decimals).
     let quote = compute_swap(Coin::Btc, Coin::Ltc, 100_000_000, 1, 1, 50, 8).unwrap();
-    assert_eq!(quote.fee_amount, 500_000); // 0.5% of 100_000_000
+    assert_eq!(quote.fee_amount, 500_000); // 0.5% of 100_000_000 when fee_bps=50
     assert_eq!(quote.to_amount, 99_500_000);
     assert_eq!(quote.fee_amount + quote.to_amount, 100_000_000);
 }

@@ -8,6 +8,7 @@ import { clsx } from 'clsx';
 /** Admin UI is always pt-BR — ignore user-app language switch. */
 const NAV = [
   { to: '/admin', label: 'Visão geral', icon: 'bi-speedometer2' },
+  { to: '/admin/users', label: 'Usuários', icon: 'bi-people-fill' },
   { to: '/admin/withdrawals', label: 'Saques', icon: 'bi-hourglass-split' },
   { to: '/admin/stake', label: 'Tesouraria', icon: 'bi-safe2' },
   { to: '/admin/merchants', label: 'Comerciantes', icon: 'bi-shop' },

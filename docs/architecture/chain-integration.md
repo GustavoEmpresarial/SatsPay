@@ -13,6 +13,8 @@ A crate `chain` (`crates/chain/`) é responsável por toda a comunicação com r
 | **Dogecoin** | `DOGE` | UTXO | Base58Check (P2PKH) `D...` / `n...` | Bitcore Insight API / Nó Próprio |
 | **Bitcoin Cash** | `BCH` | UTXO (ForkId) | CashAddr `q...` / `bchtest:...` | Bitcore Insight API / Nó Próprio |
 | **Polygon (POL)** | `POL` | EVM (Account) | Hexadecimal EIP-55 `0x...` | JSON-RPC Polygon (ChainId 137 / 80002) |
+| **Zero** | `ZER` | UTXO (Zcash-family) | Transparent P2PKH `t1…` apenas (2-byte Base58Check). `t3` / `z*` rejeitados. | `zerod` JSON-RPC (`ZER_RPC_URL`) + fallback `zerochain.info` |
+| **Pepe** | `PEPE` | BEP-20 na BNB Smart Chain (chain id 56) | Hexadecimal EIP-55 `0x…` | JSON-RPC BSC (`BSC_RPC_URL`). Contrato `0x25d887Ce7a35172C62FeBFD67a1856F20FaEbB00` (18 casas). Gas em **BNB**, não em PEPE. Testnet recusado. Não é o PEPE da Ethereum (`0x6982…`). |
 
 ---
 
@@ -27,7 +29,9 @@ xpub Mestra (Somente Leitura no api-server)
       ├── LTC  Seq: ltc_hd_index_seq  ──> m/0/1 -> m/0/2 -> m/0/N
       ├── DOGE Seq: doge_hd_index_seq ──> m/0/1 -> m/0/2 -> m/0/N
       ├── BCH  Seq: bch_hd_index_seq  ──> m/0/1 -> m/0/2 -> m/0/N
-      └── POL  Seq: pol_hd_index_seq  ──> m/0/1 -> m/0/2 -> m/0/N
+      ├── POL  Seq: pol_hd_index_seq  ──> m/0/1 -> m/0/2 -> m/0/N
+      ├── PEPE Seq: pepe_hd_index_seq ──> m/44'/60'/0'/0/{i} (mesmo endereço 0x da hot EVM; gas em BNB)
+      └── ZER  Seq: zer_hd_index_seq  ──> m/44'/323'/0'/0/{i} (`t1`)
 ```
 
 ### 2.1 Por que Sequência Postgres em vez de Hash de User ID?
@@ -55,7 +59,9 @@ stateDiagram-v2
 ### 3.1 Assinatura Segura por Moeda
 - **BTC, LTC, DOGE**: Assinatura P2WPKH usando curvas secp256k1.
 - **BCH**: Assinatura P2PKH com algoritmo de digest BIP143 e flag obrigatória `SIGHASH_FORKID` (0x41).
-- **POL**: Transação EVM assinada no padrão EIP-155 com RLP encoding, consultando nonce e gas price em tempo real via JSON-RPC.
+- **POL / USDT / USDC**: Transação EVM assinada no padrão EIP-155 com RLP encoding, consultando nonce e gas price em tempo real via JSON-RPC da Polygon. Gas em POL (piso 30 gwei).
+- **PEPE**: Mesma assinatura EIP-155, chain id **56**, contrato BEP-20 na BNB Smart Chain. Gas price ao vivo com piso 0,05 gwei. Antes de assinar, a hot precisa ter BNB `>= gas_price × gas_limit`; se faltar, o saque reverte no ledger e nada vai para a rede. Sweep de depósito faz top-up de BNB (`gas_price × limite × 2`) a partir da hot.
+- **ZER**: raw montado no `zerod` (`createrawtransaction`) e assinado no nó (`signrawtransactionwithkey` / `signrawtransaction`). **Não** reusar o signer Bitcoin (sighash Zcash/ZIP-243). Sem `ZER_RPC_URL` o saque falha fechado. SatsPay **não** custodia shielded (`z…`).
 
 ---
 

@@ -25,7 +25,6 @@ jobs:
             --exclude=target --exclude=node_modules \
             --json -o .security-audit/semgrep-bitcosats.json \
             .
-          # Informational: print ERROR findings. Enable hard fail later with --error.
           python3 - <<'PY'
           import json, sys
           from pathlib import Path
@@ -35,5 +34,5 @@ jobs:
           print(f"BitcoSats Semgrep: {len(errs)} ERROR, {len(warns)} WARNING")
           for r in errs:
               print(f"  ERROR {r['path']}:{r['start']['line']}  {r.get('check_id')}")
-          sys.exit(0)
+          sys.exit(1 if errs else 0)
           PY

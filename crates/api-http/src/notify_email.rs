@@ -8,9 +8,14 @@ use domain::auth::EmailSender;
 use sqlx::PgPool;
 use uuid::Uuid;
 
-pub async fn user_email(pool: &PgPool, user_id: Uuid) -> Option<String> {
-    match sqlx::query_scalar::<_, String>("SELECT email FROM users WHERE id = $1").bind(user_id).fetch_optional(pool).await {
-        Ok(email) => email,
+pub async fn user_email(pool: &PgPool, secrets: Option<&crypto::SecretsService>, user_id: Uuid) -> Option<String> {
+    match sqlx::query_as::<_, (String, Option<String>)>("SELECT email, email_enc FROM users WHERE id = $1")
+        .bind(user_id)
+        .fetch_optional(pool)
+        .await
+    {
+        Ok(Some((email, enc))) => Some(db::privacy::reveal_stored_email(secrets, user_id, &email, enc.as_deref())),
+        Ok(None) => None,
         Err(e) => {
             tracing::warn!(%user_id, error = %e, "failed to look up user email for notification");
             None
@@ -18,15 +23,16 @@ pub async fn user_email(pool: &PgPool, user_id: Uuid) -> Option<String> {
     }
 }
 
-pub async fn faucet_site_owner_email(pool: &PgPool, site_id: Uuid) -> Option<String> {
-    match sqlx::query_scalar::<_, String>(
-        "SELECT u.email FROM faucet_sites fs JOIN users u ON u.id = fs.owner_id WHERE fs.id = $1",
+pub async fn faucet_site_owner_email(pool: &PgPool, secrets: Option<&crypto::SecretsService>, site_id: Uuid) -> Option<String> {
+    match sqlx::query_as::<_, (Uuid, String, Option<String>)>(
+        "SELECT u.id, u.email, u.email_enc FROM faucet_sites fs JOIN users u ON u.id = fs.owner_id WHERE fs.id = $1",
     )
     .bind(site_id)
     .fetch_optional(pool)
     .await
     {
-        Ok(email) => email,
+        Ok(Some((uid, email, enc))) => Some(db::privacy::reveal_stored_email(secrets, uid, &email, enc.as_deref())),
+        Ok(None) => None,
         Err(e) => {
             tracing::warn!(%site_id, error = %e, "failed to look up faucet site owner email for notification");
             None
@@ -68,12 +74,12 @@ mod tests {
         let url = std::env::var("DATABASE_URL").ok();
         let Some(url) = url else { return };
         let pool = sqlx::PgPool::connect(&url).await.expect("pool");
-        let missing = user_email(&pool, Uuid::nil()).await;
+        let missing = user_email(&pool, None, Uuid::nil()).await;
         assert!(missing.is_none());
-        let none_site = faucet_site_owner_email(&pool, Uuid::nil()).await;
+        let none_site = faucet_site_owner_email(&pool, None, Uuid::nil()).await;
         assert!(none_site.is_none());
         pool.close().await;
-        assert!(user_email(&pool, Uuid::nil()).await.is_none());
-        assert!(faucet_site_owner_email(&pool, Uuid::nil()).await.is_none());
+        assert!(user_email(&pool, None, Uuid::nil()).await.is_none());
+        assert!(faucet_site_owner_email(&pool, None, Uuid::nil()).await.is_none());
     }
 }

@@ -25,8 +25,8 @@ pub enum HouseError {
 /// Ensures the house system user + one HOUSE and one LEND_POOL wallet per
 /// coin exist. Idempotent; safe to call on API/worker boot.
 ///
-/// Does **not** mint fake ledger inventory. Liquidity for faucet/lend/HOUSE
-/// swap must be funded explicitly (admin fund) — swaps use external DEX.
+/// Does **not** mint a million-unit reserve. An empty HOUSE wallet (faucet
+/// cannot pay) is topped to 100.00000000 once, matching the other coins.
 pub async fn ensure_house_inventory(pool: &PgPool) -> Result<Uuid, HouseError> {
     let password_hash = crypto::hash_password(&crypto::random_token(48)).expect("argon2 hashing is infallible for random input");
 
@@ -55,8 +55,33 @@ pub async fn ensure_house_inventory(pool: &PgPool) -> Result<Uuid, HouseError> {
     }
 
     reverse_legacy_liquidity_seed(pool).await?;
+    // Faucet pays 1 ledger unit from HOUSE. A new coin starts at 0 and every
+    // claim fails. Empty HOUSE inventory is topped back to 100.00000000 so
+    // PEPE/ZER (and any later coin) never sit at zero. Coins already funded
+    // are left alone.
+    ensure_faucet_floor(pool).await?;
 
     Ok(house_id)
+}
+
+/// 100.00000000 in ledger units (8 decimals), same inventory the other faucets use.
+const FAUCET_FLOOR: i64 = 10_000_000_000;
+
+async fn ensure_faucet_floor(pool: &PgPool) -> Result<(), HouseError> {
+    sqlx::query(
+        "INSERT INTO ledger_entries (wallet_id, amount, type, reference_type, memo) \
+         SELECT w.id, $1, 'ADJUSTMENT'::ledger_type, 'HouseFund', \
+                'Admin fund HOUSE ' || w.coin::text \
+         FROM wallets w \
+         JOIN users u ON u.id = w.user_id \
+         WHERE u.email = $2 AND w.kind = 'HOUSE' \
+           AND COALESCE((SELECT SUM(amount) FROM ledger_entries WHERE wallet_id = w.id), 0) <= 0",
+    )
+    .bind(BigDecimal::from(FAUCET_FLOOR))
+    .bind(HOUSE_EMAIL)
+    .execute(pool)
+    .await?;
+    Ok(())
 }
 
 /// Undo the old auto-mint (`Platform Liquidity Reserve Seed` ≈ 1M units/coin).

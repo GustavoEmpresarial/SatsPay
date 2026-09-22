@@ -20,6 +20,7 @@ describe('LoginPage structure', () => {
     expect(page).toContain('codeSent');
     expect(page).toContain('resolveReturnTo');
     expect(page).toContain('reportAuthFailure');
+    expect(page).not.toMatch(/!needsCode\s*&&[\s\S]*Turnstile/);
   });
 
   it('links to register and does not persist password', () => {

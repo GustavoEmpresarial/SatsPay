@@ -36,7 +36,13 @@
 
 ## Comportamento (bruto)
 
-Página React `PrivacyPage`. Chama 0 endpoint(s) via `api()`.
+Página React `PrivacyPage`. Chama 0 endpoint(s) via `api()`. Política LGPD (bases art. 7, direitos art. 18, retenção art. 16). Export `GET /v1/me/export` e erase `POST /v1/me/erase` (confirmEmail + APAGAR) na aba Configurações. Ledger não é apagado.
+
+PII em AES-GCM (`enc:v1:`) com AAD por linha: fatura, e-mail (`email_hmac`+`email_enc`), perfil merchant, tickets, `to_address` de saque, label de API key. IP vira HMAC (`ip_fingerprint`). Boot roda `backfill_pii` (idempotente). `PII_BLANK_EMAIL=true` apaga o texto de `users.email` (HOUSE fica). Worker apaga OTP/captcha >7d, refresh >30d, telemetria >90d. Sem isso, dump do Postgres ainda vaza o que não foi selado.
+
+**Username fica em claro.** É handle público (`@user` na UI). Não cifrar. E-mail não volta para `audit_logs.metadata`.
+
+Doc gerado à mão — `scripts/generate_feature_docs.py` **não** sobrescreve este FEATURE.
 
 ## Notas de overview legado
 

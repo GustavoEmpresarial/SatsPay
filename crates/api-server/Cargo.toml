@@ -18,6 +18,8 @@ chain = { path = "../chain" }
 notify.workspace = true
 captcha.workspace = true
 swapkit = { path = "../swapkit" }
+relay = { path = "../relay" }
+changenow = { path = "../changenow" }
 url = "2"
 tokio.workspace = true
 tracing.workspace = true

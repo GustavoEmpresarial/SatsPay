@@ -22,9 +22,13 @@ pub enum Coin {
     Usdt,
     #[serde(rename = "USDC")]
     Usdc,
+    #[serde(rename = "ZER")]
+    Zer,
+    #[serde(rename = "PEPE")]
+    Pepe,
 }
 
-pub const COINS: [Coin; 9] = [
+pub const COINS: [Coin; 11] = [
     Coin::Btc,
     Coin::Ltc,
     Coin::Doge,
@@ -34,20 +38,140 @@ pub const COINS: [Coin; 9] = [
     Coin::Sol,
     Coin::Usdt,
     Coin::Usdc,
+    Coin::Zer,
+    Coin::Pepe,
 ];
 
-/// Polygon L2 assets currently allowed for DEX swap (no L1 / no HOUSE inventory).
-pub const SWAP_L2_COINS: [Coin; 3] = [Coin::Pol, Coin::Usdt, Coin::Usdc];
+/// Assets allowed for custodial DEX / Relay (Polygon L2 + SOL bridge).
+pub const SWAP_L2_COINS: [Coin; 4] = [Coin::Pol, Coin::Usdt, Coin::Usdc, Coin::Sol];
+
+/// Layer-1 UTXO coins swapped via ChangeNOW (deposit-address flow).
+pub const SWAP_L1_COINS: [Coin; 5] = [Coin::Btc, Coin::Ltc, Coin::Doge, Coin::Bch, Coin::Dgb];
+
+/// Full swap picker: L1 (ChangeNOW) + L2/SOL (DEX/Relay). SOL near top for UX.
+pub const SWAP_COINS: [Coin; 9] = [
+    Coin::Btc,
+    Coin::Sol,
+    Coin::Ltc,
+    Coin::Doge,
+    Coin::Bch,
+    Coin::Dgb,
+    Coin::Pol,
+    Coin::Usdt,
+    Coin::Usdc,
+];
+
+/// Same-network DEX (UI "Swap" tab): Polygon only — POL ↔ USDT ↔ USDC.
+pub const DEX_SWAP_COINS: [Coin; 3] = [Coin::Pol, Coin::Usdt, Coin::Usdc];
+
+/// Custodial chain for a coin on SatsPay (UI + docs). PEPE is BSC, not ETH.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CoinNetwork {
+    pub id: &'static str,
+    pub short: &'static str,
+    pub label: &'static str,
+}
+
+pub fn coin_network(coin: Coin) -> CoinNetwork {
+    match coin {
+        Coin::Btc => CoinNetwork {
+            id: "bitcoin",
+            short: "Bitcoin",
+            label: "Bitcoin",
+        },
+        Coin::Ltc => CoinNetwork {
+            id: "litecoin",
+            short: "Litecoin",
+            label: "Litecoin",
+        },
+        Coin::Doge => CoinNetwork {
+            id: "dogecoin",
+            short: "Dogecoin",
+            label: "Dogecoin",
+        },
+        Coin::Bch => CoinNetwork {
+            id: "bitcoincash",
+            short: "Bitcoin Cash",
+            label: "Bitcoin Cash",
+        },
+        Coin::Dgb => CoinNetwork {
+            id: "digibyte",
+            short: "DigiByte",
+            label: "DigiByte",
+        },
+        Coin::Pol => CoinNetwork {
+            id: "polygon",
+            short: "Polygon",
+            label: "Polygon PoS",
+        },
+        Coin::Usdt => CoinNetwork {
+            id: "polygon",
+            short: "Polygon",
+            label: "Polygon PoS (USDT bridged)",
+        },
+        Coin::Usdc => CoinNetwork {
+            id: "polygon",
+            short: "Polygon",
+            label: "Polygon PoS (USDC native)",
+        },
+        Coin::Sol => CoinNetwork {
+            id: "solana",
+            short: "Solana",
+            label: "Solana",
+        },
+        Coin::Zer => CoinNetwork {
+            id: "zero",
+            short: "Zero",
+            label: "Zero (transparent t1)",
+        },
+        // Binance-Peg PEPE — gas in BNB. Not Ethereum PEPE.
+        Coin::Pepe => CoinNetwork {
+            id: "bsc",
+            short: "BSC",
+            label: "BNB Smart Chain (BEP-20)",
+        },
+    }
+}
+
+pub fn is_dex_swap_coin(coin: Coin) -> bool {
+    DEX_SWAP_COINS.contains(&coin)
+}
+
+pub fn is_same_swap_network(from: Coin, to: Coin) -> bool {
+    coin_network(from).id == coin_network(to).id
+}
+
+/// UI Swap tab: same-network DEX pair (Polygon stables today).
+pub fn is_dex_swap_pair(from: Coin, to: Coin) -> bool {
+    from != to && is_dex_swap_coin(from) && is_dex_swap_coin(to)
+}
+
+/// UI Bridge tab: allowlisted coins on distinct custodial networks.
+pub fn is_bridge_pair(from: Coin, to: Coin) -> bool {
+    from != to && is_swap_coin(from) && is_swap_coin(to) && !is_same_swap_network(from, to)
+}
 
 /// Temporary pause: personal deposits/withdrawals **and** merchant deposit
 /// gateway invoices stay listed where applicable but are rejected by the API.
-/// Currently: BTC, LTC, DOGE, DGB.
+/// Currently: BTC, LTC, DOGE, BCH, DGB.
 /// Does **not** affect `/v1/public/send` (merchant ledger payout to users).
-pub const DEPOSIT_WITHDRAW_PAUSED_COINS: [Coin; 4] = [Coin::Btc, Coin::Ltc, Coin::Doge, Coin::Dgb];
+/// Does **not** block custodial ChangeNOW swaps from ledger balance.
+pub const DEPOSIT_WITHDRAW_PAUSED_COINS: [Coin; 5] =
+    [Coin::Btc, Coin::Ltc, Coin::Doge, Coin::Bch, Coin::Dgb];
 
-/// True when `coin` is in the temporary L2-only swap allowlist.
+/// True when `coin` is in the Polygon/SOL DEX allowlist.
 pub fn is_swap_l2_coin(coin: Coin) -> bool {
     SWAP_L2_COINS.contains(&coin)
+}
+
+/// True when `coin` is an L1 UTXO swap asset (ChangeNOW).
+pub fn is_swap_l1_coin(coin: Coin) -> bool {
+    SWAP_L1_COINS.contains(&coin)
+}
+
+/// True when `coin` appears in the swap UI / API allowlist.
+pub fn is_swap_coin(coin: Coin) -> bool {
+    SWAP_COINS.contains(&coin)
 }
 
 /// True when deposits/withdrawals for `coin` are temporarily paused.
@@ -55,9 +179,14 @@ pub fn is_deposit_withdraw_paused(coin: Coin) -> bool {
     DEPOSIT_WITHDRAW_PAUSED_COINS.contains(&coin)
 }
 
-/// Both legs must be L2 allowlisted and distinct.
+/// Both legs must be L2/SOL swap-allowlisted and distinct.
 pub fn is_swap_l2_pair(from: Coin, to: Coin) -> bool {
     from != to && is_swap_l2_coin(from) && is_swap_l2_coin(to)
+}
+
+/// Any distinct pair among full swap allowlist (L1 + L2/SOL).
+pub fn is_swap_pair(from: Coin, to: Coin) -> bool {
+    from != to && is_swap_coin(from) && is_swap_coin(to)
 }
 
 impl Coin {
@@ -72,14 +201,16 @@ impl Coin {
             Coin::Sol => "SOL",
             Coin::Usdt => "USDT",
             Coin::Usdc => "USDC",
+            Coin::Zer => "ZER",
+            Coin::Pepe => "PEPE",
         }
     }
 
     /// On-chain smallest-unit decimals. Internal ledger is always 8.
     pub fn onchain_decimals(self) -> u32 {
         match self {
-            Coin::Btc | Coin::Ltc | Coin::Doge | Coin::Bch | Coin::Dgb => 8,
-            Coin::Pol => 18,
+            Coin::Btc | Coin::Ltc | Coin::Doge | Coin::Bch | Coin::Dgb | Coin::Zer => 8,
+            Coin::Pol | Coin::Pepe => 18,
             Coin::Usdt | Coin::Usdc => 6,
             Coin::Sol => 9,
         }
@@ -230,6 +361,30 @@ pub fn coin_config(coin: Coin) -> CoinConfig {
             faucet_reward: 1, // 0.00000001 USDC — near-zero
             display_color: "#2775CA",
             approval_threshold: 100_000_000_000, // 1,000 USDC
+        },
+        Coin::Zer => CoinConfig {
+            symbol: Coin::Zer,
+            name: "Zero",
+            decimals: 8,
+            min_withdrawal: 1,
+            // On-chain miner fee is ~0.0001 ZER; platform fee 0.001 ZER.
+            withdrawal_fee: 100_000, // 0.001 ZER
+            min_confirmations: 10,
+            faucet_reward: 1,
+            display_color: "#1a1a1a",
+            approval_threshold: 10_000_000_000_000, // 100,000 ZER ≈ $1,000
+        },
+        Coin::Pepe => CoinConfig {
+            symbol: Coin::Pepe,
+            name: "Pepe",
+            decimals: 8,
+            min_withdrawal: 1,
+            // Product fee in PEPE. On-chain gas is paid in BNB by the hot wallet.
+            withdrawal_fee: 5_000_000_000_000, // 50,000 PEPE
+            min_confirmations: 15,
+            faucet_reward: 1,
+            display_color: "#3CB43C",
+            approval_threshold: 25_000_000_000_000_000, // 250,000,000 PEPE ≈ $1,000
         },
     }
 }

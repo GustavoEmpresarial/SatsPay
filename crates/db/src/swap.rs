@@ -20,7 +20,7 @@ use sqlx::{PgPool, Row};
 use std::time::Duration;
 use uuid::Uuid;
 
-const SWAP_FEE_BPS: u32 = 25; // 0.25% (25 bps)
+const SWAP_FEE_BPS: u32 = 25; // 0.25% — diferencial SatsPay
 
 #[derive(Debug, thiserror::Error)]
 pub enum SwapServiceError {

@@ -22,6 +22,8 @@ const HMAC_INFO: &[u8] = b"bitcosats:hmac-sha256:v1";
 const REFRESH_HMAC_INFO: &[u8] = b"bitcosats:refresh-token-hmac:v1";
 /// Dedicated HKDF info for merchant webhook HMAC — never reuse API-key HMAC.
 const WEBHOOK_HMAC_INFO: &[u8] = b"bitcosats:webhook:v1";
+const EMAIL_INDEX_INFO: &[u8] = b"bitcosats:email-index:v1";
+const IP_HMAC_INFO: &[u8] = b"bitcosats:ip-hmac:v1";
 const REFRESH_HASH_PREFIX: &str = "v2:";
 
 #[derive(Debug, Error)]
@@ -44,6 +46,8 @@ pub struct SecretsService {
     hmac_key: [u8; 32],
     refresh_hmac_key: [u8; 32],
     webhook_hmac_key: [u8; 32],
+    email_hmac_key: [u8; 32],
+    ip_hmac_key: [u8; 32],
 }
 
 impl SecretsService {
@@ -58,11 +62,15 @@ impl SecretsService {
         let hmac_key = derive_key(&master, HMAC_INFO);
         let refresh_hmac_key = derive_key(&master, REFRESH_HMAC_INFO);
         let webhook_hmac_key = derive_key(&master, WEBHOOK_HMAC_INFO);
+        let email_hmac_key = derive_key(&master, EMAIL_INDEX_INFO);
+        let ip_hmac_key = derive_key(&master, IP_HMAC_INFO);
         Ok(Self {
             aes_key,
             hmac_key,
             refresh_hmac_key,
             webhook_hmac_key,
+            email_hmac_key,
+            ip_hmac_key,
         })
     }
 
@@ -164,6 +172,14 @@ impl SecretsService {
     /// Per-merchant webhook signing secret (hex). Same merchant → same secret;
     /// different merchants → different secrets. Not persisted — derived from
     /// `ENCRYPTION_KEY`.
+    pub(crate) fn email_index_hmac(&self, normalized_email: &str) -> String {
+        Self::hmac_hex_with_key(&self.email_hmac_key, normalized_email)
+    }
+
+    pub(crate) fn ip_hmac(&self, ip: &str) -> String {
+        Self::hmac_hex_with_key(&self.ip_hmac_key, ip)
+    }
+
     pub fn webhook_signing_secret(&self, merchant_id: &str) -> String {
         Self::hmac_hex_with_key(&self.webhook_hmac_key, &format!("merchant:{merchant_id}"))
     }

@@ -1,14 +1,16 @@
 //! Port 1:1 of legacy `apps/api/src/modules/faucet/services/faucet.service.ts`.
 //! Captcha is enforced in `api-http` (Turnstile + action pin). This module owns
-//! cooldown / anti-Sybil / HOUSE debit / ledger credit.
+//! per-user cooldown / HOUSE debit / ledger credit. IP is audited on the claim row.
 
+use crate::airdrop::{award_airdrop_points_tx, AwardResult};
 use crate::house::{debit_house, HouseError};
 use crate::ledger::{apply_ledger_entry, lock_wallet, LedgerCreditInput};
 use bigdecimal::BigDecimal;
 use chrono::{DateTime, Duration, Utc};
 use sha2::{Digest, Sha256};
-use shared::{coin_config, Coin};
-use sqlx::PgPool;
+use shared::{coin_config, Coin, COINS};
+use sqlx::{PgPool, Row};
+use std::collections::HashMap;
 use uuid::Uuid;
 
 #[derive(Debug, thiserror::Error)]
@@ -27,6 +29,54 @@ pub struct ClaimResult {
     pub amount: u128,
     pub coin: Coin,
     pub next_claim_at: DateTime<Utc>,
+    /// True when the +50 FAUCET_CLAIM points committed in the same transaction.
+    pub points_awarded: bool,
+    pub season_active: bool,
+}
+
+pub struct FaucetCooldownRow {
+    pub coin: String,
+    pub next_claim_at: Option<DateTime<Utc>>,
+}
+
+/// Per-coin next claim time from `faucet_claims` for this user only.
+/// `None` means the coin is ready. IP is stored on insert for audit, not used as a clock.
+pub async fn cooldowns(
+    pool: &PgPool,
+    user_id: Uuid,
+    _ip: &str,
+    cooldown_minutes: i64,
+) -> Result<Vec<FaucetCooldownRow>, sqlx::Error> {
+    let cooldown = Duration::minutes(cooldown_minutes);
+    let now = Utc::now();
+    let rows = sqlx::query(
+        "SELECT coin::text AS coin, MAX(created_at) AS last_at
+         FROM faucet_claims WHERE user_id = $1 GROUP BY coin",
+    )
+    .bind(user_id)
+    .fetch_all(pool)
+    .await?;
+    let mut last: HashMap<String, DateTime<Utc>> = HashMap::new();
+    for row in rows {
+        last.insert(row.get("coin"), row.get("last_at"));
+    }
+    Ok(COINS
+        .iter()
+        .map(|coin| {
+            let next_claim_at = last.get(coin.as_str()).and_then(|at| {
+                let next = *at + cooldown;
+                if next > now {
+                    Some(next)
+                } else {
+                    None
+                }
+            });
+            FaucetCooldownRow {
+                coin: coin.as_str().to_string(),
+                next_claim_at,
+            }
+        })
+        .collect())
 }
 
 /// Stable 64-bit advisory lock key for (ip, coin) — serializes cross-user
@@ -42,11 +92,10 @@ pub fn faucet_ip_lock_key(ip: &str, coin: Coin) -> i64 {
 pub async fn claim(pool: &PgPool, user_id: Uuid, coin: Coin, ip: &str, cooldown_minutes: i64) -> Result<ClaimResult, FaucetError> {
     let cooldown = Duration::minutes(cooldown_minutes);
     let now = Utc::now();
-    let ip_cooldown_since = now - cooldown;
 
     let mut tx = pool.begin().await?;
 
-    // Cross-user IP serialization BEFORE cooldown checks.
+    // Serialize concurrent claims for the same wallet (and same IP+coin races).
     sqlx::query("SELECT pg_advisory_xact_lock($1)").bind(faucet_ip_lock_key(ip, coin)).execute(&mut *tx).await?;
 
     let wallet_id: Option<Uuid> = sqlx::query_scalar("SELECT id FROM wallets WHERE user_id = $1 AND coin = $2::coin AND kind = 'PERSONAL'")
@@ -60,7 +109,7 @@ pub async fn claim(pool: &PgPool, user_id: Uuid, coin: Coin, ip: &str, cooldown_
     // requests racing at the end of the cooldown can't both pass the check.
     lock_wallet(&mut tx, wallet_id).await.map_err(|e| FaucetError::Db(sqlx::Error::Protocol(e.to_string())))?;
 
-    // Per-user cooldown.
+    // Per-user cooldown only — clock is faucet_claims by user_id+coin (DB table).
     let last_by_user: Option<DateTime<Utc>> =
         sqlx::query_scalar("SELECT created_at FROM faucet_claims WHERE user_id = $1 AND coin = $2::coin ORDER BY created_at DESC LIMIT 1")
             .bind(user_id)
@@ -72,19 +121,6 @@ pub async fn claim(pool: &PgPool, user_id: Uuid, coin: Coin, ip: &str, cooldown_
         if next_allowed > now {
             return Err(FaucetError::Cooldown { next_claim_at: next_allowed });
         }
-    }
-
-    // Per-IP cooldown (Sybil defense across accounts sharing an IP).
-    let ip_recent: Option<DateTime<Utc>> =
-        sqlx::query_scalar("SELECT created_at FROM faucet_claims WHERE ip = $1 AND coin = $2::coin AND created_at > $3 ORDER BY created_at DESC LIMIT 1")
-            .bind(ip)
-            .bind(coin.as_str())
-            .bind(ip_cooldown_since)
-            .fetch_optional(&mut *tx)
-            .await?;
-    if let Some(recent) = ip_recent {
-        let next_allowed = recent + cooldown;
-        return Err(FaucetError::Cooldown { next_claim_at: next_allowed });
     }
 
     let amount = coin_config(coin).faucet_reward;
@@ -113,9 +149,13 @@ pub async fn claim(pool: &PgPool, user_id: Uuid, coin: Coin, ip: &str, cooldown_
     .await
     .map_err(|e| FaucetError::Db(sqlx::Error::Protocol(e.to_string())))?;
 
+    let award = award_airdrop_points_tx(&mut tx, user_id, 50, 0, "FAUCET_CLAIM").await?;
+    let points_awarded = award == AwardResult::Awarded;
+    let season_active = points_awarded;
+
     tx.commit().await?;
 
-    Ok(ClaimResult { amount, coin, next_claim_at: now + cooldown })
+    Ok(ClaimResult { amount, coin, next_claim_at: now + cooldown, points_awarded, season_active })
 }
 
 #[cfg(test)]

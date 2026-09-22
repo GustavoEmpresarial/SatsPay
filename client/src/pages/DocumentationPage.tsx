@@ -208,13 +208,24 @@ export function DocumentationPage() {
               <div className="prose text-sm text-ink-muted space-y-4">
                 <p>
                   O <strong>Swap</strong> é custodial: você troca saldo na conta; a plataforma executa a rota on-chain via{' '}
-                  <strong>SwapKit</strong> (agrega THORChain, Chainflip, Mayan, Jupiter, etc.) ou, quando não há rota DEX
-                  (ex.: DGB), via pool interno <strong>SatsPay Liquidity</strong>.
+                  <strong>1inch / SwapKit</strong>, <strong>Relay</strong> (Polygon ↔ SOL) ou <strong>ChangeNOW</strong> (L1).
                 </p>
+                <h3 className="text-base font-bold text-ink pt-2">Swap vs Bridge</h3>
+                <ul className="list-disc pl-5 space-y-1">
+                  <li><strong>Swap</strong> (aba Swap): mesma rede — só POL ↔ USDT ↔ USDC na Polygon (DEX / 1inch).</li>
+                  <li><strong>Bridge</strong> (aba Bridge): redes distintas — Solana ↔ Polygon (Relay) ou L1 nativa ↔ outra moeda (ChangeNOW).</li>
+                </ul>
+                <h3 className="text-base font-bold text-ink pt-2">Rede de cada moeda na SatsPay</h3>
+                <ul className="list-disc pl-5 space-y-1">
+                  <li><strong>POL, USDT, USDC:</strong> Polygon PoS (não Ethereum).</li>
+                  <li><strong>SOL:</strong> Solana.</li>
+                  <li><strong>BTC, LTC, DOGE, BCH, DGB:</strong> rede nativa de cada uma (ChangeNOW).</li>
+                  <li><strong>PEPE:</strong> BNB Smart Chain (BEP-20). Depósito/saque ativos; gas em BNB. Swap cross-chain em breve.</li>
+                </ul>
                 <h3 className="text-base font-bold text-ink pt-2">Taxas transparentes</h3>
                 <ul className="list-disc pl-5 space-y-1">
                   <li><strong>Taxa de rede / provedor:</strong> inbound, network, outbound, liquidity — exibidas no quote.</li>
-                  <li><strong>Taxa SatsPay:</strong> 0,25% (same-chain) ou 0,50% (cross-chain), via affiliate SwapKit.</li>
+                  <li><strong>Taxa SatsPay:</strong> 0,25% (same-chain e cross-chain) — diferencial da plataforma.</li>
                 </ul>
                 <h3 className="text-base font-bold text-ink pt-2">Idempotência</h3>
                 <p>
@@ -289,24 +300,129 @@ export function DocumentationPage() {
                 </div>
                 <div>
                   <h2 className="text-xl font-bold text-ink">Sistemas para Comerciantes & Desenvolvedores</h2>
-                  <p className="text-xs text-ink-muted">Emissão de chaves de API, carteiras corporativas e assinatura HMAC</p>
+                  <p className="text-xs text-ink-muted">Gateway de cobranças, checkout hospedado, chaves de API e webhooks assinados</p>
                 </div>
               </div>
 
               <div className="prose text-sm text-ink-muted space-y-4">
                 <p>
-                  O BitcoSats oferece ferramentas completas para empresas, comerciantes e desenvolvedores que desejam aceitar ou enviar criptoativos programaticamente:
+                  O SatsPay entrega duas coisas diferentes para quem vende: um <strong>gateway de
+                  cobranças</strong> com checkout hospedado, e uma <strong>API de envios</strong> para
+                  automatizar pagamentos. As duas usam a mesma credencial de servidor.
                 </p>
-                <h3 className="text-base font-bold text-ink pt-2">Chaves de API & Assinatura Criptográfica HMAC</h3>
+
+                <h3 className="text-base font-bold text-ink pt-2">Enviar para a conta SatsPay do seu cliente</h3>
                 <p>
-                  As chaves de API permitem automatizar transferências de fundos. Quando configurada com <code>requireSignature = true</code>, cada requisição deve ser assinada com HMAC-SHA256 contendo timestamp, nonce e hash do payload para prevenir ataques de repetição (*replay attacks*).
+                  <code>POST /v1/public/send</code> debita a sua carteira comercial e credita a conta
+                  SatsPay do e-mail em <code>toEmail</code>. É transferência interna: sem taxa de rede
+                  e sem endereço de carteira. A chave precisa do escopo <code>send</code>.
                 </p>
+                <p>
+                  Esse e-mail é o da conta que <strong>recebe</strong>. No seu produto você pode pegá-lo
+                  dos dois jeitos abaixo. Os dois são válidos, e pode oferecer os dois ao mesmo tempo.
+                  O valor que você colocar em <code>toEmail</code> é o que a SatsPay usa.
+                </p>
+                <ol className="list-decimal pl-5 space-y-1.5 text-sm">
+                  <li>
+                    <strong>O cliente digita.</strong> Um campo de texto no seu site ou app. Ele escreve
+                    o e-mail da conta SatsPay dele. Você envia esse texto em <code>toEmail</code>.
+                  </li>
+                  <li>
+                    <strong>O cliente entra com SatsPay.</strong> O botão Login com SatsPay. Depois da
+                    troca do código, <code>GET /v1/oauth/userinfo</code> devolve <code>email</code> com{' '}
+                    <code>email_verified: true</code>. Esse e-mail também vai em <code>toEmail</code>.
+                  </li>
+                </ol>
+                <p>
+                  Não coloque o e-mail da sua própria chave de API, e não coloque endereço{' '}
+                  <code>bc1…</code>, <code>t1…</code> ou qualquer outra carteira: esta rota não saca
+                  on-chain. Se ninguém tiver conta SatsPay com aquele e-mail, a chamada falha com{' '}
+                  <code>TARGET_INELIGIBLE</code> e <strong>nada é debitado</strong>.
+                </p>
+                <p>
+                  O <code>toEmail</code> também não pode ser a conta que emitiu a chave. A API responde{' '}
+                  <code>400</code> com <code>code: SEND_TO_SELF</code> e o texto{' '}
+                  <code>cannot send to the SatsPay account that owns this API key</code>. Nada é debitado.
+                  Não é falta de saldo. Acontece quando quem recebe é o mesmo e-mail do comerciante — para
+                  testar, use outra conta SatsPay. Leia o campo <code>error</code> e o <code>code</code>;
+                  não substitua por uma mensagem genérica.
+                </p>
+
+                <h3 className="text-base font-bold text-ink pt-2">Gateway de cobranças</h3>
+                <p>
+                  O seu backend cria a fatura, o cliente paga numa página sob o domínio oficial, e você
+                  recebe um webhook assinado quando o pagamento confirma na blockchain. Em resumo:
+                </p>
+                <ol className="list-decimal pl-5 space-y-1.5 text-sm">
+                  <li>
+                    <strong>Credenciamento</strong> — <code>POST /v1/merchant/apply</code>. Enquanto o
+                    pedido não for aprovado, criar fatura responde <code>403</code>.
+                  </li>
+                  <li>
+                    <strong>Chave de API</strong> — emitida com escopo <code>deposits</code>. O segredo
+                    aparece uma única vez; ele vive no seu servidor e <strong>nunca</strong> no navegador.
+                  </li>
+                  <li>
+                    <strong>Cobrança</strong> — <code>POST /v1/merchant/deposits</code>. Você informa a
+                    moeda e a quantia, ou apenas <code>amountUsd</code> e deixa o cliente escolher a moeda.
+                  </li>
+                  <li>
+                    <strong>Checkout</strong> — redirecione para o <code>checkoutUrl</code> da resposta, ou
+                    use o botão oficial (<code>/sdk/satspay-pay.js</code>), que só navega até esse link.
+                  </li>
+                  <li>
+                    <strong>Webhook</strong> — <code>deposit.confirmed</code>, assinado em
+                    <code> X-SatsPay-Signature</code>. Confirme sempre pela assinatura, nunca pelo
+                    redirecionamento do navegador.
+                  </li>
+                </ol>
+
+                <h3 className="text-base font-bold text-ink pt-2">O cliente escolhe como pagar</h3>
+                <p>
+                  Você define quais moedas aceita no painel; quem paga escolhe entre elas no checkout. A
+                  cotação trava no instante da escolha e vale até a fatura vencer. Se você cobrou em
+                  dólar, a variação de preço entre a trava e o pagamento é sua — a plataforma não absorve
+                  nem repassa nada além da taxa.
+                </p>
+                <p>
+                  A <strong>taxa do gateway é de 0,25%</strong>, igual para todo comerciante, descontada
+                  da fatura: <code>feeAmount + netAmount</code> é exatamente o valor cobrado.
+                </p>
+
+                <h3 className="text-base font-bold text-ink pt-2">Quantias são inteiros</h3>
+                <p>
+                  Todo campo <code>amount</code> da API é um <strong>inteiro em unidades de 1e-8</strong>,
+                  em qualquer moeda: 25 USDT é <code>"2500000000"</code>, não <code>"25.00"</code>. A
+                  única exceção é <code>amountUsd</code>, que é decimal porque é dinheiro fiat. Mandar
+                  decimal onde se espera inteiro responde <code>400 AMOUNT_NOT_INTEGER</code> em vez de
+                  cobrar o valor errado.
+                </p>
+
+                <h3 className="text-base font-bold text-ink pt-2">Chaves de API e assinatura HMAC</h3>
+                <p>
+                  Uma chave pode ser restrita por escopo, por lista de IPs e por validade. Com{' '}
+                  <code>requireSignature = true</code>, cada requisição precisa vir assinada em
+                  HMAC-SHA256 sobre <code>timestamp + método + caminho + hash do corpo</code> — e a
+                  própria assinatura é reservada como uso único, o que impede repetição sem precisar de
+                  um nonce separado.
+                </p>
+
                 <div className="flex flex-wrap gap-3 pt-2">
-                  <Link to="/api-keys" className="btn-primary text-xs">
+                  <Link to="/docs?tab=start" className="btn-primary text-xs">
+                    Começar do zero →
+                  </Link>
+                  <Link to="/api-keys" className="btn-secondary text-xs">
                     Gerenciar API Keys →
                   </Link>
-                  <Link to="/docs" className="btn-secondary text-xs">
-                    Ver Especificação da API →
+                  <Link to="/docs?tab=deposits" className="btn-secondary text-xs">
+                    Gateway de cobranças →
+                  </Link>
+                  <Link to="/docs?tab=payouts" className="btn-secondary text-xs">
+                    API de envios →
+                  </Link>
+                  <Link to="/pay/demo" className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 font-bold text-xs px-3.5 py-2 flex items-center gap-1.5 transition-all">
+                    <i className="bi bi-qr-code" />
+                    <span>Ver o checkout de demonstração</span>
                   </Link>
                   <Link to="/docs?tab=simulator" className="rounded-xl border border-purple-500/30 bg-purple-500/10 hover:bg-purple-500/20 text-purple-600 font-bold text-xs px-3.5 py-2 flex items-center gap-1.5 transition-all">
                     <i className="bi bi-cpu" />
@@ -334,6 +450,9 @@ export function DocumentationPage() {
               <div className="prose text-sm text-ink-muted space-y-6">
                 <p>
                   O <strong>Login com SatsPay</strong> funciona de maneira análoga ao <em>Google Sign-In</em> ou <em>Apple ID</em>. Seus clientes e jogadores podem se cadastrar e efetuar login em sua plataforma com 1 clique utilizando a conta SatsPay verificada, sem necessidade de gerenciar senhas ou expor credenciais sensíveis.
+                </p>
+                <p>
+                  O <code>email</code> que volta em <code>/v1/oauth/userinfo</code> já está verificado. Ele serve como <code>toEmail</code> em <code>POST /v1/public/send</code> quando você for pagar essa conta. Se preferir, o cliente também pode digitar o e-mail da conta SatsPay dele num campo seu — os dois caminhos mandam para o mesmo campo. Veja a <Link to="/docs?tab=payouts" className="font-bold text-bitcoin hover:underline">API de envios</Link>.
                 </p>
 
                 {/* 3 STEPS GRID */}
@@ -434,6 +553,8 @@ function onSatsPaySignIn(response) {
   const profile = await userRes.json();
 
   // profile contém: { sub, id, username, email, email_verified, picture }
+  // profile.email (email_verified === true) pode ir em toEmail no POST /v1/public/send.
+  // O cliente também pode digitar outro e-mail de conta SatsPay. Os dois servem.
   console.log('Usuário autenticado:', profile.username, profile.email);
   res.json({ success: true, user: profile });
 });`}

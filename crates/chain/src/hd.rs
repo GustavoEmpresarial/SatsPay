@@ -23,10 +23,25 @@ pub enum HdError {
 /// private key, so hardened derivation (which needs it) is impossible from
 /// an xpub alone, by design.
 pub fn derive_child_pubkey(xpub_str: &str, index: u32) -> Result<bitcoin::secp256k1::PublicKey, HdError> {
+    derive_pub_at(xpub_str, &[index])
+}
+
+/// Receive address under an account xpub: `{account}/0/{index}`.
+/// This is the same key `address_from_mnemonic` spends. A single child
+/// (`{account}/{index}`) is a different address — funds sent there cannot
+/// be swept by the BIP44 key.
+pub fn derive_receive_pubkey(xpub_str: &str, index: u32) -> Result<bitcoin::secp256k1::PublicKey, HdError> {
+    derive_pub_at(xpub_str, &[0, index])
+}
+
+fn derive_pub_at(xpub_str: &str, indices: &[u32]) -> Result<bitcoin::secp256k1::PublicKey, HdError> {
     let secp = Secp256k1::verification_only();
     let xpub = Xpub::from_str(xpub_str).map_err(|e| HdError::InvalidXpub(e.to_string()))?;
-    let child_number = ChildNumber::from_normal_idx(index).map_err(|_| HdError::InvalidIndex(index))?;
-    let child = xpub.derive_pub(&secp, &[child_number]).map_err(|e| HdError::DerivationFailed(e.to_string()))?;
+    let mut path = Vec::with_capacity(indices.len());
+    for index in indices {
+        path.push(ChildNumber::from_normal_idx(*index).map_err(|_| HdError::InvalidIndex(*index))?);
+    }
+    let child = xpub.derive_pub(&secp, &path).map_err(|e| HdError::DerivationFailed(e.to_string()))?;
     Ok(child.public_key)
 }
 

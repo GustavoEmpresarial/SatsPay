@@ -48,7 +48,7 @@ Página **Coins** (`CoinsPage.tsx`).
 
 - Auth gate: **public**
 - Rotas: `/coins`
-- Nota: Lista COINS
+- Nota: Lista COINS (11, inclui ZER — só `t1` transparente — e PEPE BEP-20 na BNB)
 
 ## Comportamento esperado
 

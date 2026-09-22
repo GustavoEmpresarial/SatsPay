@@ -4,9 +4,11 @@ pub mod stake;
 pub mod swap;
 
 pub use coins::{
-    coin_config, format_amount, from_onchain_amount, is_deposit_withdraw_paused, is_swap_l2_coin,
-    is_swap_l2_pair, to_onchain_amount, Coin, CoinConfig, COINS, DEPOSIT_WITHDRAW_PAUSED_COINS,
-    SWAP_L2_COINS,
+    coin_config, coin_network, format_amount, from_onchain_amount, is_bridge_pair,
+    is_deposit_withdraw_paused, is_dex_swap_coin, is_dex_swap_pair, is_same_swap_network,
+    is_swap_coin, is_swap_l1_coin, is_swap_l2_coin, is_swap_l2_pair, is_swap_pair,
+    to_onchain_amount, Coin, CoinConfig, CoinNetwork, COINS, DEPOSIT_WITHDRAW_PAUSED_COINS,
+    DEX_SWAP_COINS, SWAP_COINS, SWAP_L1_COINS, SWAP_L2_COINS,
 };
 pub use lend::{
     accrue_index, amount_to_scaled, calc_borrow_rate_bps, calc_supply_rate_bps, calc_utilization_bps,

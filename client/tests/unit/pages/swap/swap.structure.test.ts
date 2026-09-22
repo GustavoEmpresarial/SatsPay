@@ -21,4 +21,28 @@ describe('Swap — structure', () => {
     const src = readFileSync(pagePath, 'utf8');
     expect(src).toMatch(/export function \w+/);
   });
+
+  it('refreshes wallets when an in-flight swap settles', () => {
+    const src = readFileSync(pagePath, 'utf8');
+    expect(src).toContain('prevSwapStatusRef');
+    expect(src).toContain('isSwapInFlight');
+    expect(src).toContain('isSwapTerminal');
+    expect(src).toContain("invalidateQueries({ queryKey: ['wallets'] })");
+  });
+
+  it('shows custodial network on coin picker', () => {
+    const src = readFileSync(pagePath, 'utf8');
+    expect(src).toContain('coinNetwork');
+    expect(src).toContain('swap.networkOn');
+  });
+
+  it('separates Swap and Bridge tabs', () => {
+    const src = readFileSync(pagePath, 'utf8');
+    expect(src).toContain("tab') === 'bridge'");
+    expect(src).toContain('switchMode');
+    expect(src).toContain('isDexSwapPair');
+    expect(src).toContain('isBridgePair');
+    expect(src).toContain('tabSwap');
+    expect(src).toContain('tabBridge');
+  });
 });

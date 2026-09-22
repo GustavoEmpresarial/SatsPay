@@ -22,4 +22,12 @@ describe('Merchant Dashboard — structure', () => {
     const src = readFileSync(pagePath, 'utf8');
     expect(src).toMatch(/export function \w+/);
   });
+
+  it('converts ledger amounts with formatLedgerAmount / getCoinUsdValue (not raw×price)', () => {
+    const src = readFileSync(pagePath, 'utf8');
+    expect(src).toContain('formatLedgerAmount');
+    expect(src).toContain('getCoinUsdValue');
+    expect(src).toContain('priceUsdScaled');
+    expect(src).not.toMatch(/Number\(inv\.amount\)\s*\*\s*price/);
+  });
 });

@@ -28,4 +28,13 @@ describe('Withdraw — structure', () => {
     expect(src).toContain('codeSent');
     expect(src).not.toContain('totpCode');
   });
+
+  it('picker lists active coins and shows paused networks as disabled rows', () => {
+    const src = readFileSync(pagePath, 'utf8');
+    expect(src).toContain('depositWithdrawActiveCoins');
+    expect(src).toContain('pausedCoins');
+    expect(src).toContain('pausedSection');
+    expect(src).toContain('aria-disabled="true"');
+    expect(src).toContain('pausedBadge');
+  });
 });

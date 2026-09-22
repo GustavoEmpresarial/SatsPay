@@ -318,7 +318,7 @@ describe('SwapPage quote UI', () => {
 });
 
 describe('ApiDocsPage tabs via query', () => {
-  for (const tab of ['deposits', 'payouts', 'oauth', 'security', 'simulator'] as const) {
+  for (const tab of ['start', 'deposits', 'payouts', 'oauth', 'security', 'simulator'] as const) {
     it(`tab=${tab}`, async () => {
       const { container, unmount } = renderWithProviders(<ApiDocsPage />, {
         route: `/api-docs?tab=${tab}`,
@@ -328,6 +328,19 @@ describe('ApiDocsPage tabs via query', () => {
       unmount();
     });
   }
+
+  it('renders the onboarding trail, not just a shell', async () => {
+    // The tab loop above only asserts that something rendered. This one fails
+    // if the onboarding content itself throws or goes missing.
+    const { findByText, container, unmount } = renderWithProviders(<ApiDocsPage />, {
+      route: '/api-docs?tab=start',
+      loggedIn: true,
+    });
+    await findByText(/Come\u00e7ar do zero/);
+    expect(container.textContent).toContain('/v1/merchant/apply');
+    expect(container.textContent).toContain('/v1/api-keys');
+    unmount();
+  });
 
   it('clicks through tab buttons', async () => {
     const user = userEvent.setup();
@@ -484,29 +497,14 @@ describe('OAuthAppsPage UI', () => {
 });
 
 describe('LendPage markets', () => {
-  it('mounts markets and opens supply modal', async () => {
-    const user = userEvent.setup();
+  it('shows maintenance landing', async () => {
     const { container, unmount } = renderWithProviders(<LendPage />, {
       route: '/lend',
       loggedIn: true,
     });
-    await waitFor(() => expect(container.innerHTML).toMatch(/USDT|Supply|Fornecer|Aave/i), {
+    await waitFor(() => expect(container.innerHTML).toMatch(/Manutenção|Empréstimos|Aave/i), {
       timeout: 5000,
     });
-
-    const supplyBtn = within(container)
-      .queryAllByRole('button')
-      .find((b) => /supply|fornecer|depositar/i.test(b.textContent || ''));
-    if (supplyBtn) await user.click(supplyBtn);
-
-    const modalInput = container.querySelector('[role="dialog"] input, .modal input');
-    if (modalInput) await user.type(modalInput as HTMLElement, '10');
-
-    const close = within(container)
-      .queryAllByRole('button')
-      .find((b) => /cancel|fechar|close/i.test(b.textContent || ''));
-    if (close) await user.click(close);
-
     unmount();
   });
 });

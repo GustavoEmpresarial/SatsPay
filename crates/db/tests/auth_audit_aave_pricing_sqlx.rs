@@ -223,7 +223,7 @@ async fn public_api_rotate_disable_balance(pool: PgPool) {
     )
     .await
     .unwrap();
-    let keys = db::public_api::list_api_keys_by_user(&pool, user).await.unwrap();
+    let keys = db::public_api::list_api_keys_by_user(&pool, None, user).await.unwrap();
     assert!(!keys.is_empty());
 
     let rotated = db::public_api::rotate_api_key(&pool, &secrets, user, issued.id)

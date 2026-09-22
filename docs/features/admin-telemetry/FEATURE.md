@@ -1,45 +1,97 @@
 # FEATURE — Admin Telemetry
 
-## Keywords
+> Doc bruta para busca por IA/humanos. Atualizar quando a feature mudar.
+> Gerado/atualizado por `scripts/generate_feature_docs.py`.
 
-`telemetria APM erros system_error_logs resolve ignore clear client-frontend reportClientError fingerprint TELEMETRY_ALERT_WEBHOOK_URL`
+## Identidade
 
-## Abas
+| Campo | Valor |
+|-------|-------|
+| Slug | `admin-telemetry` |
+| Título | Admin Telemetry |
+| Componente | `AdminTelemetryPage` |
+| Auth | **admin** — RequireAdmin — role ADMIN ou sessão admin store |
+| UI pt-BR | Admin sempre pt-BR hardcoded; app usuário usa i18n |
 
-1. **Saúde** — stack (API/worker/Postgres), load, overview  
-2. **Desempenho** — vazão/latência snapshots worker (ex-APM)  
-3. **Erros** — console estilo operações: Sev / Impacto / Cat / Ciclo / Código / Origem / HTTP / Qtd / Amostra / Path / error_id / Último; segredos redigidos (client + ingest) 
+## Keywords (busca)
 
-UI pt-BR: Autoatualização, Vazão, Cliente (frontend), etc.
+`admin telemetry AdminTelemetryPage /admin/telemetry /admin/stats /admin/telemetry/errors /admin/telemetry/errors/:id/ignore /admin/telemetry/errors/:id/resolve /admin/telemetry/errors/clear /admin/telemetry/errors/resolve-all /admin/telemetry/metrics-history /admin/telemetry/overview Saúde Desempenho Erros 5s 10s 30s Off Recentes Mais frequentes admin`
 
-## APIs
+## Rotas
 
-- `GET /v1/admin/telemetry/overview`  
-- `GET /v1/admin/telemetry/metrics-history?hours=`  
-- `GET /v1/admin/telemetry/errors?…`  
-- `POST …/errors/:id/resolve|ignore`  
-- `POST …/errors/resolve-all` · `POST …/errors/clear`  
-- `GET /v1/admin/stats` (recursos servidor)  
+- `/admin/telemetry`
 
-## Cliente → telemetria
+## Abas / seções internas
 
-- `client/src/lib/reportError.ts` — fila, throttle, `isExternalNoise`, `isExpectedApiNoise`  
-- Ruído filtrado: inventory faucet, login 400, removeChild, React #311 legado, ícones CDN  
-- Ingest `POST /v1/telemetry/client-errors` — rate-limit **telemetry-ingest** (60/min/IP, shared PG)
+- Saúde
+- Desempenho
+- Erros
+- 5s
+- 10s
+- 30s
+- Off
+- Recentes
+- Mais frequentes
 
-## Fingerprint + alertas
+## APIs usadas (client → `/v1…`)
 
-- Fingerprint: service + level + method + status + endpoint normalizado (`:id`) + kind + msg/stack sem UUIDs/números voláteis  
-- Env opcional `TELEMETRY_ALERT_WEBHOOK_URL` — webhook best-effort em **novo** CRITICAL/FATAL (e security://) e milestones de spike (10/50/100/…)
+- `/admin/stats` (prefixo `/v1` no servidor)
+- `/admin/telemetry/errors` (prefixo `/v1` no servidor)
+- `/admin/telemetry/errors/:id/ignore` (prefixo `/v1` no servidor)
+- `/admin/telemetry/errors/:id/resolve` (prefixo `/v1` no servidor)
+- `/admin/telemetry/errors/clear` (prefixo `/v1` no servidor)
+- `/admin/telemetry/errors/resolve-all` (prefixo `/v1` no servidor)
+- `/admin/telemetry/metrics-history` (prefixo `/v1` no servidor)
+- `/admin/telemetry/overview` (prefixo `/v1` no servidor)
 
-## Bug histórico
+## Arquivos-chave
 
-React #311 em admin: `useAdminStore(…) || useAuthStore(…)` em `RequireAdmin` — **proibido**. Sempre chamar os dois hooks.
+- `client/src/pages/AdminTelemetryPage.tsx`
+- `docs/pages/admin-telemetry/`
 
-## Arquivos
+## Comportamento (bruto)
 
-- `client/src/pages/AdminTelemetryPage.tsx`  
-- `client/src/lib/errorConsole.ts` — classificação + `redactSecrets`  
-- `crates/db/src/telemetry.rs`  
-- `docs/quality/error-observability.md`  
-- [`../domain-observability/FEATURE.md`](../domain-observability/FEATURE.md)  
+Página React `AdminTelemetryPage`. Chama 8 endpoint(s) via `api()`. Abas/labels: Saúde, Desempenho, Erros, 5s, 10s, 30s, Off, Recentes, Mais frequentes. Abas Saúde / Desempenho / Erros; autoatualização; resolve/ignore/clear. UI admin sempre pt-BR.
+
+## Notas de overview legado
+
+# Admin Telemetry — Overview
+
+## Papel
+
+Página **Admin Telemetry** (`AdminTelemetryPage.tsx`).
+
+- Auth gate: **admin**
+- Rotas: `/admin/telemetry`
+- Nota: Nested under /admin
+
+## Comportamento esperado
+
+1. Usuário navega para a rota.
+2. Layout adequado renderiza (`MarketingLayout` / `AppLayout` / `AdminLayout` / standalone).
+3. Dados carregam via React Query / fetch quando aplicável.
+4. Erros de API passam por `formatApiError` / telemetria quando aplicável.
+
+## i18n
+
+Preferir chaves em `client/src/i18n/locales/{pt,en}.json` quando a página for traduzida.
+
+## Segurança
+
+- Respeitar gate `admin` (RequireAuth / RequireAdmin / público).
+- Não persistir segredos em localStorage.
+- Validar inputs antes de POST.
+
+
+## Bugs / armadilhas conhecidas
+
+- Não short-circuit hooks (`useA() || useB()`) — React #311.
+- Admin: `AdminLayout` labels em pt-BR; ignore language switch do app.
+- Erros esperados de produto (faucet inventory, login 400) não devem floodar telemetria.
+- Saldos: nunca confiar em coluna `balance` mutável — usar ledger.
+
+## Links relacionados
+
+- Mapa geral: [`docs/README.md`](../../README.md)
+- Índice features: [`../README.md`](../README.md)
+- Testes: [`TC.md`](TC.md)

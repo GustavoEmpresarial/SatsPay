@@ -20,5 +20,6 @@ describe('Lend — structure', () => {
   it('exports a React page component', () => {
     const src = readFileSync(pagePath, 'utf8');
     expect(src).toMatch(/export function \w+/);
+    expect(src).toMatch(/Manutenção/);
   });
 });

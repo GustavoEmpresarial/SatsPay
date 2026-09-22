@@ -102,20 +102,15 @@ async fn main() {
     assert!(cooldown_err.is_err(), "second claim within cooldown must fail");
     println!("second claim correctly rejected: {:?}", cooldown_err.err());
 
-    // Cross-user Sybil: different account, same IP+coin → cooldown.
-    let email_b = format!("faucet-sybil-{}@bitcosats.dev", Uuid::new_v4());
+    // Second account on the same IP is allowed — cooldown is per user_id+coin.
+    let email_b = format!("faucet-peer-{}@bitcosats.dev", Uuid::new_v4());
     let user_b: Uuid =
         sqlx::query_scalar("INSERT INTO users (email, password_hash) VALUES ($1, $2) RETURNING id").bind(&email_b).bind(&password_hash).fetch_one(&pool).await.unwrap();
     let _btc_b: Uuid =
         sqlx::query_scalar("INSERT INTO wallets (user_id, coin, kind) VALUES ($1, 'BTC', 'PERSONAL') RETURNING id").bind(user_b).fetch_one(&pool).await.unwrap();
-    let sybil_err = db::faucet::claim(&pool, user_b, Coin::Btc, "203.0.113.5", 60).await;
-    assert!(sybil_err.is_err(), "second user on same IP+coin must be cooldown-blocked");
-    println!("sybil same-IP claim correctly rejected: {:?}", sybil_err.err());
-
-    // Different IP is allowed for user B.
-    let other_ip = db::faucet::claim(&pool, user_b, Coin::Btc, "198.51.100.10", 60).await.expect("faucet claim other IP");
-    assert!(other_ip.amount > 0);
-    println!("different-IP claim succeeded amount={}", other_ip.amount);
+    let peer = db::faucet::claim(&pool, user_b, Coin::Btc, "203.0.113.5", 60).await.expect("peer claim same IP");
+    assert!(peer.amount > 0);
+    println!("same-IP peer claim succeeded amount={}", peer.amount);
 
     println!("\nALL ASSERTIONS PASSED");
 }

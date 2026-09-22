@@ -20,7 +20,8 @@ Este documento cataloga todas as variáveis de ambiente utilizadas pelos serviç
 | Variável | Serviços | Obrigatória? | Exemplo | Descrição |
 |---|---|---|---|---|
 | `JWT_ACCESS_SECRET` | `api-server` | Sim | `segredo-longo-e-aleatorio-32-bytes` | Segredo para assinatura de Access Tokens JWT |
-| `ENCRYPTION_KEY` | `api-server` | Sim | Hex 64 chars (32 bytes) | Chave mestre AES-256-GCM para criptografia de segredos e TOTP |
+| `ENCRYPTION_KEY` | `api-server`, `worker` | Sim | Hex 64 chars (32 bytes) | Chave mestre AES-256-GCM (PII, API keys, TOTP, HMAC e-mail/IP). Backup offline obrigatório. Rotação: [`vm-security-runbook.md`](vm-security-runbook.md) §5 — sem dual-key, re-selar tudo antes de trocar |
+| `PII_BLANK_EMAIL` | `api-server`, `worker` | Não | `true` | Deploy 4: substitui `users.email` por placeholder após HMAC+`email_enc` estarem verdes. HOUSE não é tocado |
 | `ADMIN_EMAILS` | `api-server` | Não | `admin@bitcosats.com,op@...` | Lista de e-mails autorizados para papel `ADMIN` |
 | `TURNSTILE_SECRET` | `api-server` | Não | `0x4AAAAAA...` / `disabled_in_dev` | Chave secreta do Cloudflare Turnstile |
 
@@ -36,6 +37,15 @@ Este documento cataloga todas as variáveis de ambiente utilizadas pelos serviç
 | `BTC_XPUB`, `LTC_XPUB`, ... | `api-server` | Se real=true | `xpub6...` | Chaves públicas estendidas para geração de endereços |
 | `BTC_HOT_WIF`, `POL_PRIVATE_KEY` | `worker` | Se real=true | WIF / Hex Key | Chaves privadas para assinatura e broadcast de saques |
 | `POL_RPC_URL` | `api-server`, `worker` | Se real=true | `https://polygon-rpc.com` | Endpoint JSON-RPC da rede Polygon |
+| `DGB_RPC_URL` | `api-server`, `worker` | Não | `http://user:pass@host:14022` | Node DigiByte próprio (`scantxoutset` / `sendrawtransaction`). Sem valor, cai no Insight. |
+| `DGB_INSIGHT_API` | `api-server`, `worker` | Não | `https://digiexplorer.info/api` | Fallback indexer DGB quando o node RPC falha |
+| `ZER_RPC_URL` | `api-server`, `worker` | Prod (saque) | `http://user:pass@host:23801` | Node `zerod` (`scantxoutset` / `createrawtransaction` / `signrawtransactionwithkey` / `sendrawtransaction`). Sem URL, depósito cai no explorer; saque falha fechado. |
+| `ZER_EXPLORER_API` | `api-server`, `worker` | Não | `https://zerochain.info/api` | Fallback de saldo/txs para ZER |
+| `ZER_EXPLORER_API_KEY` | `api-server`, `worker` | Não | — | Key pedida pelos paths públicos `addressinfo` / `txs` do zerochain.info |
+| `BSC_RPC_URL` | `api-server`, `worker` | Prod (PEPE) | `https://bsc-rpc.publicnode.com` | JSON-RPC da BNB Smart Chain (chain id 56). Só PEPE. Nunca reusar `EVM_RPC_URL` (Polygon). |
+| `BSC_DEPOSIT_LOOKBACK_BLOCKS` | `worker` | Não | `2000` | Blocos BSC varridos no `eth_getLogs` do contrato PEPE (~100 min). |
+
+A hot de PEPE é o mesmo endereço `0x` da hot de POL (`m/44'/60'/0'/0/0`). O gas do `transfer` BEP-20 é BNB nativo nessa carteira — sem saldo de BNB o saque falha fechado e o ledger é revertido.
 
 ---
 
@@ -54,8 +64,14 @@ Este documento cataloga todas as variáveis de ambiente utilizadas pelos serviç
 | `SWAPKIT_ENABLED` | `api-server`, `worker` | Não | `false` | Liga rotas DEX SwapKit (`true` + API key) |
 | `SWAPKIT_API_KEY` | `api-server`, `worker` | Não | — | API key Partner SwapKit (sem key = só pool HOUSE) |
 | `SWAPKIT_BASE_URL` | `api-server`, `worker` | Não | `https://api.swapkit.dev` | Base URL SwapKit |
-| `SWAP_PLATFORM_FEE_BPS_SAME` | `api-server`, `worker` | Não | `25` | Taxa SatsPay same-chain (bps) |
-| `SWAP_PLATFORM_FEE_BPS_CROSS` | `api-server`, `worker` | Não | `50` | Taxa SatsPay cross-chain (bps) |
+| `RELAY_ENABLED` | `api-server`, `worker` | Não | `false` | Liga cotação/execução Relay (`POST /quote/v2`) como 2º provedor Polygon |
+| `RELAY_API_KEY` | `api-server`, `worker` | Não | — | API key Relay (opcional) |
+| `RELAY_BASE_URL` | `api-server`, `worker` | Não | `https://api.relay.link` | Base URL Relay Protocol |
+| `CHANGENOW_ENABLED` | `api-server`, `worker` | Não | `false` | Liga swaps L1 via ChangeNOW (deposit-address) |
+| `CHANGENOW_API_KEY` | `api-server`, `worker` | Se habilitado | — | API key Partner ChangeNOW (`x-changenow-api-key`) |
+| `CHANGENOW_BASE_URL` | `api-server`, `worker` | Não | `https://api.changenow.io/v2` | Base URL ChangeNOW API v2 |
+| `SWAP_PLATFORM_FEE_BPS_SAME` | `api-server`, `worker` | Não | `25` | Taxa SatsPay same-chain (bps) — 0,25% diferencial |
+| `SWAP_PLATFORM_FEE_BPS_CROSS` | `api-server`, `worker` | Não | `25` | Taxa SatsPay cross-chain / ChangeNOW / Relay (bps) — 0,25% |
 | `SWAP_SLIPPAGE_PCT` | `api-server`, `worker` | Não | `2` | Slippage máximo nas quotes SwapKit (%) |
 | `DEX_SWAP_INTERVAL_SECS` | `worker` | Não | `15` | Intervalo do worker de broadcast/track DEX |
 | `COINGECKO_API_BASE_URL` | `worker` | Sim | `https://api.coingecko.com/api/v3` | URL da API do CoinGecko |
@@ -92,6 +108,30 @@ Valores em **unidade mínima** da moeda. Se a env estiver vazia/ausente, vale o 
 | `WITHDRAWAL_APPROVAL_THRESHOLD_SOL` | `600000000` | 6 SOL |
 | `WITHDRAWAL_APPROVAL_THRESHOLD_USDT` | `100000000000` | 1 000 USDT |
 | `WITHDRAWAL_APPROVAL_THRESHOLD_USDC` | `100000000000` | 1 000 USDC |
+| `WITHDRAWAL_APPROVAL_THRESHOLD_ZER` | `10000000000000` | 100 000 ZER |
 
 Saques `>=` limiar ficam `PENDING` (`requires_approval=true`) até `POST /v1/admin/withdrawals/:id/approve`.
+
+---
+
+## 7. Deploy (`scripts/deploy_to_vm.py`)
+
+Sem senha no código. É obrigatório `DEPLOY_SSH_KEY` **ou** `DEPLOY_SSH_PASSWORD` no ambiente do operador. Preferir chave; senha só até o SSH da VM ser key-only ([runbook](vm-security-runbook.md)).
+
+| Variável | Obrigatória? | Exemplo | Descrição |
+|---|---|---|---|
+| `DEPLOY_SSH_HOST` | Não | `203.0.113.10` | IP/hostname da VM (tem default no script) |
+| `DEPLOY_SSH_USER` | Não | `root` | Usuário SSH (default `root`) |
+| `DEPLOY_SSH_KEY` | Uma das duas | `~/.ssh/id_ed25519` | Caminho da chave privada (preferido) |
+| `DEPLOY_SSH_PASSWORD` | Uma das duas | — | Senha SSH; **nunca** commitar. Rotacionar se já esteve no git |
+
+```bash
+export DEPLOY_SSH_HOST=…
+export DEPLOY_SSH_KEY=~/.ssh/id_ed25519
+python3 scripts/deploy_to_vm.py --check-auth   # só valida env
+python3 scripts/deploy_to_vm.py                # client
+python3 scripts/deploy_to_vm.py --backend      # + api/worker
+```
+
+Rotacionar a senha de root se ela já esteve no repositório. Preferir chave e `PasswordAuthentication no`.
 

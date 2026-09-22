@@ -48,9 +48,9 @@ describe('CheckoutPage status branches', () => {
   for (const [id, expectRe] of [
     ['inv-pending', /pending|aguard|QR|bc1q/i],
     ['inv-detected', /blockchain|Aguardando|bc1q/i],
-    ['inv-paid', /Depósito Confirmado|Confirmado|PAGO/i],
-    ['inv-expired', /Tempo Esgotado|expir/i],
-    ['inv-cancelled', /Tempo Esgotado|bc1q|Checkout Seguro/i],
+    ['inv-paid', /Pagamento concluído|Payment complete|On-chain|Saldo SatsPay/i],
+    ['inv-expired', /Tempo esgotado|Time expired|expir/i],
+    ['inv-cancelled', /cancelad|Checkout Seguro|Secure checkout/i],
   ] as const) {
     it(`renders checkout ${id}`, async () => {
       const { container, unmount } = renderWithProviders(<CheckoutPage />, {

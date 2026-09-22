@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { api } from '../lib/api.js';
 import { useAuthStore } from '../stores/auth.js';
 import { coinLogo } from '../lib/coinAssets.js';
-import { COIN_CONFIG, COINS, formatAmount, formatUsdValue, safeBigInt, type WalletBalance } from '@/shared';
+import { COIN_CONFIG, COINS, formatAmountFixed, formatUsdValue, safeBigInt, type WalletBalance } from '@/shared';
 import { Link } from 'react-router-dom';
 
 interface WalletsResp {
@@ -73,7 +73,7 @@ export function WalletsPage() {
                       {t('wallets.balance')}
                     </div>
                     <div className="font-mono text-xl sm:text-2xl font-black text-ink truncate">
-                      {formatAmount(bal, coin)} <span className="text-xs text-ink-muted font-bold">{coin}</span>
+                      {formatAmountFixed(bal, coin)} <span className="text-xs text-ink-muted font-bold">{coin}</span>
                     </div>
                     <div className="text-xs font-semibold text-ink-muted">
                       ≈ {formatUsdValue(bal, coin, pricesQ.data?.prices, pricesQ.data?.priceDecimals)} USD

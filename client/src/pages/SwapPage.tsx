@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useSearchParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { api } from '../lib/api.js';
 import { useAuthStore } from '../stores/auth.js';
@@ -8,15 +9,19 @@ import { formatApiError } from '../lib/formatError.js';
 import { coinLogo } from '../lib/coinAssets.js';
 import {
   COIN_CONFIG,
-  SWAP_L2_COINS,
+  coinsForMode,
+  coinNetwork,
+  defaultPairForMode,
   formatAmount,
+  isBridgePair,
+  isDexSwapPair,
+  isSameSwapNetwork,
   safeBigInt,
   type Coin,
+  type SwapMode,
   type WalletBalance,
 } from '@/shared';
 import { parseHumanAmount } from '../lib/amountInput.js';
-
-const SWAP_COINS: readonly Coin[] = SWAP_L2_COINS;
 
 interface PricesResp {
   priceDecimals: number;
@@ -103,6 +108,72 @@ function formatEta(total?: number | null): string {
   return `${(total / 3600).toFixed(1)} h`;
 }
 
+/** SwapKit assets: `POL.USDT-0xabc…` → `USDT`. */
+function shortAsset(asset: string): string {
+  const leaf = (asset.split('.').pop() || asset).trim();
+  return leaf.split('-')[0] || leaf;
+}
+
+function pickPreferredRoute(routes: QuoteRoute[]): QuoteRoute | null {
+  if (!routes.length) return null;
+  return [...routes].sort((a, b) => {
+    const diff = safeBigInt(b.youReceive.amount) - safeBigInt(a.youReceive.amount);
+    if (diff > 0n) return 1;
+    if (diff < 0n) return -1;
+    return 0;
+  })[0]!;
+}
+
+function feeTypeLabel(type: string): string {
+  switch (type.toLowerCase()) {
+    case 'deposit':
+      return 'Depósito ChangeNOW (fix)';
+    case 'liquidity':
+      return 'Liquidez do DEX';
+    case 'service':
+      return 'Serviço do provedor';
+    case 'inbound':
+      return 'Gas de entrada';
+    case 'outbound':
+      return 'Gas de saída';
+    case 'relayerservice':
+      return 'Serviço Relay (solver)';
+    case 'relayergas':
+      return 'Gas do Relay';
+    case 'relayer':
+      return 'Taxa Relay (total)';
+    case 'gas':
+      return 'Gas da origem';
+    case 'app':
+      return 'App fee Relay';
+    case 'subsidized':
+      return 'Subsídio Relay';
+    default:
+      return `Taxa (${type})`;
+  }
+}
+
+function trimFeeAmount(raw: string): string {
+  if (!raw.includes('.')) return raw;
+  const trimmed = raw.replace(/(\.\d*?[1-9])0+$/, '$1').replace(/\.0+$/, '');
+  return trimmed || raw;
+}
+
+function isSwapInFlight(status: string): boolean {
+  return (
+    status === 'IN_FLIGHT' ||
+    status === 'BROADCASTING' ||
+    status === 'CREDITING' ||
+    status === 'LOCKED' ||
+    status === 'PENDING' ||
+    status === 'QUEUED'
+  );
+}
+
+function isSwapTerminal(status: string): boolean {
+  return status === 'COMPLETED' || status === 'REFUNDED' || status === 'FAILED';
+}
+
 function statusLabel(status: string): { text: string; cls: string } {
   switch (status) {
     case 'COMPLETED':
@@ -115,6 +186,8 @@ function statusLabel(status: string): { text: string; cls: string } {
     case 'BROADCASTING':
     case 'CREDITING':
     case 'LOCKED':
+    case 'PENDING':
+    case 'QUEUED':
       return { text: 'Em andamento', cls: 'bg-sky-500/10 text-sky-700' };
     default:
       return { text: status, cls: 'bg-surface text-ink-muted' };
@@ -124,19 +197,70 @@ function statusLabel(status: string): { text: string; cls: string } {
 export function SwapPage() {
   const { t, i18n } = useTranslation();
   const qc = useQueryClient();
+  const [searchParams, setSearchParams] = useSearchParams();
 
-  const [fromCoin, setFromCoin] = useState<Coin>('POL');
-  const [toCoin, setToCoin] = useState<Coin>('USDT');
+  const mode: SwapMode = searchParams.get('tab') === 'bridge' ? 'bridge' : 'swap';
+  const modeCoins = coinsForMode(mode);
+
+  const [fromCoin, setFromCoin] = useState<Coin>(() => defaultPairForMode(mode).from);
+  const [toCoin, setToCoin] = useState<Coin>(() => defaultPairForMode(mode).to);
   const [inputVal, setInputVal] = useState('');
   const [selectedRouteId, setSelectedRouteId] = useState<string | null>(null);
   const [msg, setMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
+  const [feeDetailsOpen, setFeeDetailsOpen] = useState(false);
+
+  const switchMode = (next: SwapMode) => {
+    const pair = defaultPairForMode(next);
+    setFromCoin(pair.from);
+    setToCoin(pair.to);
+    setInputVal('');
+    setMsg(null);
+    setSelectedRouteId(null);
+    setFeeDetailsOpen(false);
+    const p = new URLSearchParams(searchParams);
+    if (next === 'bridge') p.set('tab', 'bridge');
+    else p.delete('tab');
+    setSearchParams(p, { replace: true });
+  };
+
+  // Keep pair valid when landing with ?tab= or flipping coins.
+  useEffect(() => {
+    const ok =
+      mode === 'swap' ? isDexSwapPair(fromCoin, toCoin) : isBridgePair(fromCoin, toCoin);
+    if (ok) return;
+    const pair = defaultPairForMode(mode);
+    setFromCoin(pair.from);
+    setToCoin(pair.to);
+    setSelectedRouteId(null);
+  }, [mode, fromCoin, toCoin]);
+
+  const toPickerCoins = useMemo(() => {
+    if (mode === 'swap') return modeCoins.filter((c) => c !== fromCoin);
+    return modeCoins.filter((c) => c !== fromCoin && !isSameSwapNetwork(fromCoin, c));
+  }, [mode, modeCoins, fromCoin]);
+
+  const fromPickerCoins = useMemo(() => modeCoins, [modeCoins]);
 
   const user = useAuthStore((s) => s.user);
+
+  const historyQ = useQuery({
+    queryKey: ['swap-history'],
+    queryFn: () => api<{ swaps: SwapHistoryItem[] }>('/swap/history'),
+    enabled: Boolean(user),
+    refetchInterval: 8_000,
+  });
+
+  const hasInFlightSwap = useMemo(
+    () => (historyQ.data?.swaps ?? []).some((s) => isSwapInFlight(s.status)),
+    [historyQ.data],
+  );
 
   const walletsQ = useQuery({
     queryKey: ['wallets', 'PERSONAL'],
     queryFn: () => api<{ wallets: WalletBalance[] }>('/wallet?kind=PERSONAL'),
     enabled: Boolean(user),
+    // Keep "Disponível" fresh while Relay/1inch is still settling.
+    refetchInterval: hasInFlightSwap ? 8_000 : false,
   });
 
   const pricesQ = useQuery({
@@ -145,12 +269,38 @@ export function SwapPage() {
     refetchInterval: 15_000,
   });
 
-  const historyQ = useQuery({
-    queryKey: ['swap-history'],
-    queryFn: () => api<{ swaps: SwapHistoryItem[] }>('/swap/history'),
-    enabled: Boolean(user),
-    refetchInterval: 8_000,
-  });
+  // When Relay/1inch finishes async, history flips to COMPLETED but wallets were
+  // only invalidated at submit — refresh balances without a full page reload.
+  const prevSwapStatusRef = useRef<Map<string, string>>(new Map());
+  useEffect(() => {
+    const swaps = historyQ.data?.swaps;
+    if (!swaps) return;
+
+    const prev = prevSwapStatusRef.current;
+    const next = new Map<string, string>();
+    let settled = false;
+    let completed = false;
+
+    for (const s of swaps) {
+      const before = prev.get(s.id);
+      if (before && isSwapInFlight(before) && isSwapTerminal(s.status)) {
+        settled = true;
+        if (s.status === 'COMPLETED') completed = true;
+      }
+      next.set(s.id, s.status);
+    }
+    prevSwapStatusRef.current = next;
+
+    if (!settled) return;
+    void qc.invalidateQueries({ queryKey: ['wallets'] });
+    void qc.invalidateQueries({ queryKey: ['ledger'] });
+    if (completed) {
+      setMsg({
+        type: 'ok',
+        text: t('swap.success', { defaultValue: 'Swap concluído! Saldo creditado.' }),
+      });
+    }
+  }, [historyQ.data, historyQ.dataUpdatedAt, qc, t]);
 
   const walletsMap = useMemo(() => {
     const m: Partial<Record<Coin, WalletBalance>> = {};
@@ -165,33 +315,28 @@ export function SwapPage() {
 
   const smallestAmount = useMemo(() => parseHumanAmount(inputVal, fromCoin), [inputVal, fromCoin]);
 
+  const pairValid =
+    mode === 'swap' ? isDexSwapPair(fromCoin, toCoin) : isBridgePair(fromCoin, toCoin);
+
   const quoteQ = useQuery({
-    queryKey: ['swap-quote', fromCoin, toCoin, smallestAmount.toString()],
+    queryKey: ['swap-quote', mode, fromCoin, toCoin, smallestAmount.toString()],
     queryFn: () =>
       api<QuoteListResp>(
         `/swap/quote?fromCoin=${fromCoin}&toCoin=${toCoin}&fromAmount=${smallestAmount.toString()}`,
         { skipAuth: true },
       ),
-    enabled: smallestAmount > 0n && fromCoin !== toCoin,
+    enabled: pairValid && smallestAmount > 0n && fromCoin !== toCoin,
     refetchInterval: 20_000,
     staleTime: 10_000,
   });
 
   const routes = quoteQ.data?.routes ?? [];
   const selected =
-    routes.find((r) => r.routeId === selectedRouteId) ??
-    routes.find((r) => r.source === 'swapkit') ??
-    routes.find((r) => r.tags?.includes('RECOMMENDED')) ??
-    routes[0] ??
-    null;
+    routes.find((r) => r.routeId === selectedRouteId) ?? pickPreferredRoute(routes);
 
   useEffect(() => {
     if (routes.length && (!selectedRouteId || !routes.some((r) => r.routeId === selectedRouteId))) {
-      const pref =
-        routes.find((r) => r.source === 'swapkit') ??
-        routes.find((r) => r.tags?.includes('RECOMMENDED')) ??
-        routes[0];
-      setSelectedRouteId(pref?.routeId ?? null);
+      setSelectedRouteId(pickPreferredRoute(routes)?.routeId ?? null);
     }
   }, [routes, selectedRouteId]);
 
@@ -252,12 +397,16 @@ export function SwapPage() {
 
   useEffect(() => {
     if (fromCoin === toCoin) {
-      const next = SWAP_COINS.find((c) => c !== fromCoin);
+      const next = toPickerCoins[0];
       if (next) setToCoin(next);
     }
-  }, [fromCoin, toCoin]);
+  }, [fromCoin, toCoin, toPickerCoins]);
 
   function flip() {
+    if (mode === 'bridge' && isSameSwapNetwork(toCoin, fromCoin)) return;
+    // Bridge flip must stay cross-network; swap flip always stays on Polygon.
+    if (mode === 'bridge' && !isBridgePair(toCoin, fromCoin)) return;
+    if (mode === 'swap' && !isDexSwapPair(toCoin, fromCoin)) return;
     setFromCoin(toCoin);
     setToCoin(fromCoin);
     setInputVal('');
@@ -273,7 +422,12 @@ export function SwapPage() {
 
   const insufficient = smallestAmount > available && available > 0n;
   const canSubmit =
-    !!selected && !insufficient && !executeMutation.isPending && smallestAmount > 0n && !quoteQ.isFetching;
+    pairValid &&
+    !!selected &&
+    !insufficient &&
+    !executeMutation.isPending &&
+    smallestAmount > 0n &&
+    !quoteQ.isFetching;
 
   const dateFmt = new Intl.DateTimeFormat(i18n.resolvedLanguage ?? 'en', {
     month: 'short',
@@ -284,35 +438,107 @@ export function SwapPage() {
 
   const platformPct = selected ? (selected.fees.platform.bps / 100).toFixed(2) : '—';
 
+  const depositFeeWarning = useMemo(() => {
+    if (!selected?.fees.network?.length || smallestAmount <= 0n) return null;
+    const dep = selected.fees.network.find((f) => f.type.toLowerCase() === 'deposit');
+    if (!dep) return null;
+    const feeLedger = parseHumanAmount(dep.amount, fromCoin);
+    if (feeLedger <= 0n) return null;
+    const pct = Number((feeLedger * 10000n) / smallestAmount) / 100;
+    if (pct < 8) return null;
+    return { pct, amountHuman: trimFeeAmount(dep.amount), asset: shortAsset(dep.asset || fromCoin) };
+  }, [selected, smallestAmount, fromCoin]);
+
+  const historyItems = useMemo(() => {
+    const all = historyQ.data?.swaps ?? [];
+    return all.filter((s) =>
+      mode === 'swap' ? isSameSwapNetwork(s.fromCoin, s.toCoin) : !isSameSwapNetwork(s.fromCoin, s.toCoin),
+    );
+  }, [historyQ.data, mode]);
+
   return (
     <div className="space-y-6 max-w-6xl mx-auto pb-16">
-      <header>
-        <div className="mb-1.5 inline-flex items-center gap-2 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 text-xs font-black text-emerald-700">
-          <i className="bi bi-arrow-left-right" />
-          <span>SatsPay Instant Swap</span>
+      <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <div className="mb-1.5 inline-flex items-center gap-2 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 text-xs font-black text-emerald-700">
+            <i className={`bi ${mode === 'swap' ? 'bi-arrow-left-right' : 'bi-globe2'}`} />
+            <span>{mode === 'swap' ? 'SatsPay Instant Swap' : 'SatsPay Bridge'}</span>
+          </div>
+          <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-ink">
+            {mode === 'swap'
+              ? t('swap.title', { defaultValue: 'Swap' })
+              : t('swap.bridgeTitle', { defaultValue: 'Bridge' })}
+          </h1>
+          <p className="text-xs sm:text-sm text-ink-muted mt-1 max-w-2xl">
+            {mode === 'swap'
+              ? t('swap.subtitleSwap', {
+                  defaultValue:
+                    'Troca na mesma rede. Na SatsPay: POL, USDT e USDC na Polygon (DEX / 1inch).',
+                })
+              : t('swap.subtitleBridge', {
+                  defaultValue:
+                    'Cruza redes distintas: Solana ↔ Polygon (Relay) ou L1 nativa ↔ outra moeda (ChangeNOW).',
+                })}
+          </p>
         </div>
-        <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-ink">
-          {t('swap.title', { defaultValue: 'Câmbio & Swap de Criptomoedas' })}
-        </h1>
-        <p className="text-xs sm:text-sm text-ink-muted mt-1">
-          {t('swap.subtitle', {
-            defaultValue:
-              'Swap DEX na Polygon (POL, USDT, USDC). Sem liquidez interna — rota externa via SwapKit.',
-          })}
-        </p>
+
+        <div className="inline-flex rounded-2xl border border-border bg-surface p-1 shadow-xs self-start">
+          <button
+            type="button"
+            onClick={() => switchMode('swap')}
+            className={`inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-xs font-bold transition-all ${
+              mode === 'swap'
+                ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/20'
+                : 'text-ink-muted hover:text-ink hover:bg-paper'
+            }`}
+          >
+            <i className="bi bi-arrow-left-right text-sm" />
+            <span>{t('swap.tabSwap', { defaultValue: 'Swap' })}</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => switchMode('bridge')}
+            className={`inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-xs font-bold transition-all ${
+              mode === 'bridge'
+                ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/20'
+                : 'text-ink-muted hover:text-ink hover:bg-paper'
+            }`}
+          >
+            <i className="bi bi-globe2 text-sm" />
+            <span>{t('swap.tabBridge', { defaultValue: 'Bridge' })}</span>
+          </button>
+        </div>
       </header>
 
       <div className="grid gap-6 lg:grid-cols-12">
         <section className="lg:col-span-7">
           <motion.form
+            key={mode}
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
             onSubmit={(e) => {
               e.preventDefault();
-              if (canSubmit) executeMutation.mutate();
+              if (canSubmit && pairValid) executeMutation.mutate();
             }}
             className="rounded-3xl border border-border bg-paper p-6 sm:p-7 shadow-xs space-y-4"
           >
+            {mode === 'bridge' && (
+              <div className="rounded-2xl border border-sky-500/30 bg-sky-500/10 px-3.5 py-2.5 text-[11px] leading-relaxed text-sky-950">
+                <strong className="font-black">Bridge ≠ Swap.</strong>{' '}
+                {t('swap.bridgeHint', {
+                  defaultValue:
+                    'Origem e destino em redes diferentes. Ex.: SOL (Solana) → USDT (Polygon), ou BTC → POL.',
+                })}
+              </div>
+            )}
+            {mode === 'swap' && (
+              <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 px-3.5 py-2.5 text-[11px] leading-relaxed text-emerald-950">
+                <strong className="font-black">Swap = mesma rede.</strong>{' '}
+                {t('swap.swapHint', {
+                  defaultValue: 'Só Polygon: POL ↔ USDT ↔ USDC. Para mudar de rede, use a aba Bridge.',
+                })}
+              </div>
+            )}
             <div className="rounded-2xl border border-border bg-surface p-4 sm:p-5 transition-all focus-within:border-emerald-500/60 focus-within:ring-2 focus-within:ring-emerald-500/10">
               <div className="mb-2.5 flex items-center justify-between text-xs">
                 <span className="font-black uppercase tracking-wider text-ink-muted flex items-center gap-1.5">
@@ -330,10 +556,15 @@ export function SwapPage() {
               <div className="flex items-center gap-3">
                 <CoinPicker
                   value={fromCoin}
+                  coins={fromPickerCoins}
                   onChange={(c) => {
                     setFromCoin(c);
                     setMsg(null);
                     setSelectedRouteId(null);
+                    if (mode === 'bridge' && isSameSwapNetwork(c, toCoin)) {
+                      const alt = modeCoins.find((x) => x !== c && !isSameSwapNetwork(c, x));
+                      if (alt) setToCoin(alt);
+                    }
                   }}
                   exclude={toCoin}
                 />
@@ -401,6 +632,7 @@ export function SwapPage() {
               <div className="flex items-center gap-3">
                 <CoinPicker
                   value={toCoin}
+                  coins={toPickerCoins}
                   onChange={(c) => {
                     setToCoin(c);
                     setMsg(null);
@@ -460,54 +692,90 @@ export function SwapPage() {
               </div>
             )}
 
-            {/* Transparent fee breakdown */}
+            {/* Resumo da cotação — linguagem clara, sem contratos 0x */}
             {selected && (
-              <div className="space-y-2.5 rounded-2xl border border-emerald-500/30 bg-emerald-500/5 p-4 text-xs">
-                <div className="flex items-center justify-between">
-                  <span className="text-ink-muted font-medium">Provedor</span>
-                  <span className="font-black text-ink">{selected.provider}</span>
-                </div>
-                {selected.fees.network.length > 0 ? (
-                  selected.fees.network.map((f, i) => (
-                    <div key={`${f.type}-${i}`} className="flex items-center justify-between">
-                      <span className="text-ink-muted font-medium capitalize">Taxa de rede ({f.type})</span>
-                      <span className="font-mono text-ink font-semibold">
-                        {f.amount} {f.asset || ''}
-                      </span>
+              <div className="overflow-hidden rounded-2xl border border-border bg-surface/60 text-xs">
+                <div className="flex items-end justify-between gap-3 border-b border-border bg-paper/80 px-4 py-3.5">
+                  <div>
+                    <div className="text-[11px] font-medium text-ink-muted">
+                      {t('swap.receive', { defaultValue: 'Você recebe' })}
                     </div>
-                  ))
-                ) : (
-                  <div className="flex items-center justify-between">
-                    <span className="text-ink-muted font-medium">Taxa de rede</span>
-                    <span className="font-mono text-ink font-semibold">
-                      {selected.source === 'house' ? '0 (pool interno)' : 'incluída no provedor'}
+                    <div className="mt-0.5 font-mono text-xl font-bold text-emerald-700">
+                      +{selected.youReceive.amountHuman} {toCoin}
+                    </div>
+                    {toUsdVal && <div className="mt-0.5 font-mono text-[11px] text-ink-muted">≈ {toUsdVal}</div>}
+                  </div>
+                  <div className="text-right text-[11px] text-ink-muted">
+                    <div className="font-semibold text-ink">via {selected.provider}</div>
+                    <div>~{formatEta(selected.etaSeconds?.total)}</div>
+                  </div>
+                </div>
+
+                <div className="space-y-2 px-4 py-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-ink-muted">Taxa SatsPay ({platformPct}%)</span>
+                    <span className="font-mono font-semibold text-ink">
+                      {trimFeeAmount(selected.fees.platform.amountHuman)}{' '}
+                      {shortAsset(selected.fees.platform.asset || fromCoin)}
                     </span>
                   </div>
-                )}
-                <div className="flex items-center justify-between">
-                  <span className="text-ink-muted font-medium">
-                    {selected.fees.platform.label} ({platformPct}%)
-                  </span>
-                  <span className="font-mono text-ink font-semibold">
-                    {selected.fees.platform.amountHuman} {selected.fees.platform.asset}
-                  </span>
+
+                  {depositFeeWarning && (
+                    <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-900">
+                      <div className="font-bold">Valor pequeno pra esta rota</div>
+                      <div className="mt-0.5">
+                        Depósito fixo do ChangeNOW ({depositFeeWarning.amountHuman}{' '}
+                        {depositFeeWarning.asset}) ≈ <strong>{depositFeeWarning.pct.toFixed(0)}%</strong> do
+                        que você envia — não é a taxa SatsPay (0,25%). Aumente o valor ou use outro par.
+                      </div>
+                    </div>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={() => setFeeDetailsOpen((v) => !v)}
+                    className="flex w-full items-center justify-between rounded-lg py-1 text-left text-[11px] font-medium text-ink-muted hover:text-ink"
+                  >
+                    <span>
+                      {feeDetailsOpen
+                        ? 'Ocultar custos da rota'
+                        : selected.fees.network.length > 0
+                          ? `Custos da rota (${selected.fees.network.length})`
+                          : 'Custos da rota'}
+                    </span>
+                    <i className={`bi bi-chevron-${feeDetailsOpen ? 'up' : 'down'} text-[10px]`} />
+                  </button>
+
+                  {feeDetailsOpen && (
+                    <div className="space-y-2 rounded-xl border border-border bg-paper/70 px-3 py-2.5">
+                      {selected.fees.network.length === 0 ? (
+                        <div className="flex justify-between gap-3 text-ink-muted">
+                          <span>Taxas de rede / provedor</span>
+                          <span className="font-mono text-ink">não detalhadas nesta rota</span>
+                        </div>
+                      ) : (
+                        selected.fees.network.map((f, i) => (
+                          <div key={`${f.type}-${i}`} className="flex items-start justify-between gap-3">
+                            <span className="text-ink-muted">{feeTypeLabel(f.type)}</span>
+                            <span className="max-w-[55%] text-right font-mono font-semibold text-ink">
+                              {trimFeeAmount(f.amount)} {shortAsset(f.asset || '')}
+                            </span>
+                          </div>
+                        ))
+                      )}
+                      <p className="border-t border-border pt-2 text-[10px] leading-relaxed text-ink-muted">
+                        {selected.source === 'relay'
+                          ? 'Custos Relay (solver/gas) vêm na cotação. Em valores pequenos a taxa fixa do solver pode ser alta. “Você recebe” já desconta isso.'
+                          : 'Esses custos vêm do provedor DEX. O valor “Você recebe” já desconta o que a rota cobrou (exceto gas de entrada, quando cobrado à parte).'}
+                      </p>
+                    </div>
+                  )}
+
+                  <p className="text-[10px] leading-relaxed text-ink-muted">
+                    A taxa SatsPay ({platformPct}%) é só a comissão da plataforma. Custos Relay/DEX
+                    aparecem acima e já estão embutidos no “Você recebe”.
+                  </p>
                 </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-ink-muted font-medium">Tempo estimado</span>
-                  <span className="font-mono text-ink font-semibold">
-                    {formatEta(selected.etaSeconds?.total)}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between border-t border-emerald-500/20 pt-2 font-bold">
-                  <span className="text-ink">{t('swap.receive', { defaultValue: 'Você recebe (estimado)' })}</span>
-                  <span className="font-mono text-lg font-black text-emerald-700">
-                    +{selected.youReceive.amountHuman} {toCoin}
-                  </span>
-                </div>
-                <p className="text-[10px] text-ink-muted leading-relaxed">
-                  Taxas de rede/provedor (exceto inbound) já estão refletidas no valor a receber. A taxa SatsPay
-                  é cobrada via affiliate do provedor ({selected.fees.platform.bps} bps).
-                </p>
               </div>
             )}
 
@@ -557,21 +825,28 @@ export function SwapPage() {
                 </>
               ) : (
                 <>
-                  <i className="bi bi-arrow-left-right text-base" />
+                  <i className={`bi ${mode === 'swap' ? 'bi-arrow-left-right' : 'bi-globe2'} text-base`} />
                   <span>
-                    {t('swap.confirm', { defaultValue: 'Confirmar Swap' })}
-                    {selected ? ` · ${selected.provider}` : ''}
+                    {selected
+                      ? `${mode === 'swap' ? t('swap.confirm', { defaultValue: 'Trocar' }) : t('swap.confirmBridge', { defaultValue: 'Bridge' })} ${fromCoin} → ${toCoin}`
+                      : mode === 'swap'
+                        ? t('swap.confirm', { defaultValue: 'Confirmar swap' })
+                        : t('swap.confirmBridge', { defaultValue: 'Confirmar bridge' })}
                   </span>
                 </>
               )}
             </button>
 
-            <div className="flex items-center justify-center gap-2 pt-1 text-center text-[11px] font-bold text-ink-muted">
+            <div className="flex items-center justify-center gap-2 pt-1 text-center text-[11px] text-ink-muted">
               <i className="bi bi-shield-lock-fill text-emerald-600" />
               <span>
-                {t('swap.trustLine', {
-                  defaultValue: 'Custodial · Rota DEX (SwapKit) · Taxa transparente',
-                })}
+                {mode === 'swap'
+                  ? t('swap.trustLineSwap', {
+                      defaultValue: 'Swap Polygon · taxa SatsPay 0,25%',
+                    })
+                  : t('swap.trustLineBridge', {
+                      defaultValue: 'Bridge cross-rede · taxa SatsPay 0,25%',
+                    })}
               </span>
             </div>
           </motion.form>
@@ -581,10 +856,14 @@ export function SwapPage() {
           <div className="flex items-center justify-between px-1">
             <h2 className="text-sm font-black uppercase tracking-wider text-ink flex items-center gap-2">
               <i className="bi bi-clock-history text-emerald-600" />
-              <span>{t('swap.history', { defaultValue: 'Histórico de Swaps' })}</span>
+              <span>
+                {mode === 'swap'
+                  ? t('swap.history', { defaultValue: 'Histórico de swaps' })
+                  : t('swap.historyBridge', { defaultValue: 'Histórico de bridges' })}
+              </span>
             </h2>
             <span className="text-[11px] font-bold text-ink-muted font-mono">
-              {historyQ.data?.swaps?.length ?? 0} registros
+              {historyItems.length} registros
             </span>
           </div>
 
@@ -595,18 +874,20 @@ export function SwapPage() {
                   <div key={i} className="h-14 rounded-2xl bg-surface animate-pulse" />
                 ))}
               </div>
-            ) : !historyQ.data || historyQ.data.swaps.length === 0 ? (
+            ) : historyItems.length === 0 ? (
               <div className="p-10 text-center space-y-2">
                 <div className="mx-auto mb-2 flex h-12 w-12 items-center justify-center rounded-2xl bg-surface text-xl text-ink-muted border border-border">
-                  <i className="bi bi-arrow-left-right" />
+                  <i className={`bi ${mode === 'swap' ? 'bi-arrow-left-right' : 'bi-globe2'}`} />
                 </div>
                 <h3 className="text-sm font-bold text-ink">
-                  {t('swap.empty', { defaultValue: 'Nenhum swap realizado ainda' })}
+                  {mode === 'swap'
+                    ? t('swap.empty', { defaultValue: 'Nenhum swap ainda.' })
+                    : t('swap.emptyBridge', { defaultValue: 'Nenhum bridge ainda.' })}
                 </h3>
               </div>
             ) : (
               <ul className="max-h-[520px] divide-y divide-border overflow-y-auto [scrollbar-width:none]">
-                {historyQ.data.swaps.map((s) => {
+                {historyItems.map((s) => {
                   const st = statusLabel(s.status);
                   return (
                     <li key={s.id} className="p-4 hover:bg-surface/50 transition-colors space-y-1.5">
@@ -629,7 +910,8 @@ export function SwapPage() {
                       <div className="flex items-center justify-between text-[10px] text-ink-muted pt-0.5">
                         <span className="font-mono">{dateFmt.format(new Date(s.createdAt))}</span>
                         <span className="font-mono truncate ml-2">
-                          {s.provider} · {s.feeBps / 100}%
+                          {coinNetwork(s.fromCoin).short}→{coinNetwork(s.toCoin).short} · {s.provider} ·{' '}
+                          {s.feeBps / 100}%
                         </span>
                       </div>
                     </li>
@@ -648,12 +930,17 @@ function CoinPicker({
   value,
   onChange,
   exclude,
+  coins,
 }: {
   value: Coin;
   onChange: (c: Coin) => void;
   exclude?: Coin;
+  coins: readonly Coin[];
 }) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
+  const net = coinNetwork(value);
+  const options = coins.filter((c) => c !== exclude);
 
   return (
     <div className="relative shrink-0">
@@ -661,35 +948,52 @@ function CoinPicker({
         type="button"
         onClick={() => setOpen((v) => !v)}
         className="flex items-center gap-2 rounded-2xl bg-paper px-3.5 py-2 shadow-xs border border-border hover:border-emerald-500 transition-all hover:scale-105 active:scale-95"
+        title={t('swap.networkOn', {
+          network: net.label,
+          defaultValue: `Rede SatsPay: ${net.label}`,
+        })}
       >
         <img src={coinLogo(value)} alt={value} className="h-6 w-6 rounded-full object-contain" />
-        <span className="text-sm font-black text-ink">{value}</span>
+        <span className="flex flex-col items-start leading-tight">
+          <span className="text-sm font-black text-ink">{value}</span>
+          <span className="text-[9px] font-bold uppercase tracking-wide text-ink-muted">{net.short}</span>
+        </span>
         <i className="bi bi-chevron-down text-xs text-ink-muted" />
       </button>
       {open && (
         <>
           <div className="fixed inset-0 z-20" onClick={() => setOpen(false)} />
-          <div className="absolute left-0 top-full z-30 mt-1.5 max-h-72 w-56 overflow-y-auto rounded-2xl border border-border bg-paper p-1.5 shadow-2xl [scrollbar-width:none]">
+          <div className="absolute left-0 top-full z-30 mt-1.5 max-h-72 w-64 overflow-y-auto rounded-2xl border border-border bg-paper p-1.5 shadow-2xl [scrollbar-width:none]">
             <div className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-ink-muted">
-              Selecione a Criptomoeda
+              {t('swap.pickCoin', { defaultValue: 'Selecione a criptomoeda' })}
             </div>
-            {SWAP_COINS.filter((c) => c !== exclude).map((c) => (
-              <button
-                type="button"
-                key={c}
-                onClick={() => {
-                  onChange(c);
-                  setOpen(false);
-                }}
-                className={`flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-xs transition-colors hover:bg-surface ${
-                  c === value ? 'bg-emerald-500/10 font-black text-emerald-700' : 'text-ink font-semibold'
-                }`}
-              >
-                <img src={coinLogo(c)} alt={c} className="h-5 w-5 rounded-full object-contain" />
-                <span>{c}</span>
-                <span className="ml-auto text-[10px] text-ink-muted truncate">{COIN_CONFIG[c]?.name}</span>
-              </button>
-            ))}
+            {options.map((c) => {
+              const n = coinNetwork(c);
+              return (
+                <button
+                  type="button"
+                  key={c}
+                  onClick={() => {
+                    onChange(c);
+                    setOpen(false);
+                  }}
+                  className={`flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-xs transition-colors hover:bg-surface ${
+                    c === value ? 'bg-emerald-500/10 font-black text-emerald-700' : 'text-ink font-semibold'
+                  }`}
+                >
+                  <img src={coinLogo(c)} alt={c} className="h-5 w-5 rounded-full object-contain" />
+                  <span className="flex flex-col items-start leading-tight min-w-0">
+                    <span>{c}</span>
+                    <span className="text-[9px] font-bold uppercase tracking-wide text-ink-muted truncate">
+                      {n.short}
+                    </span>
+                  </span>
+                  <span className="ml-auto text-[10px] text-ink-muted truncate max-w-[40%]">
+                    {COIN_CONFIG[c]?.name}
+                  </span>
+                </button>
+              );
+            })}
           </div>
         </>
       )}

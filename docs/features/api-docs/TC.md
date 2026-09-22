@@ -14,12 +14,7 @@
 | TC-api-docs-06 | obs | Erros inesperados reportados; ruído esperado filtrado | [ ] |
 | TC-api-docs-07 | security | Sem IDOR; sem vazar secrets em UI/logs | [ ] |
 | TC-api-docs-08 | structure | `client/tests/unit/pages/api-docs/` structure test se página SPA | [ ] |
-| TC-api-docs-09 | ui-tab | Aba/seção «cURL» carrega e exibe empty/loading/data | [ ] |
-| TC-api-docs-10 | ui-tab | Aba/seção «Node.js» carrega e exibe empty/loading/data | [ ] |
-| TC-api-docs-11 | ui-tab | Aba/seção «Python» carrega e exibe empty/loading/data | [ ] |
-| TC-api-docs-12 | ui-tab | Aba/seção «PHP» carrega e exibe empty/loading/data | [ ] |
-| TC-api-docs-13 | ui-tab | Aba/seção «Go» carrega e exibe empty/loading/data | [ ] |
-| TC-api-docs-14 | ui-tab | Aba/seção «Rust» carrega e exibe empty/loading/data | [ ] |
+| TC-api-docs-09 | ui-tab | Aba/seção «loja-producao» carrega e exibe empty/loading/data | [ ] |
 
 ## Automatizado
 

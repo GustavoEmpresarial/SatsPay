@@ -2,10 +2,32 @@ import { useState, useEffect } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { clsx } from 'clsx';
-import { COINS, COIN_CONFIG } from '@/shared';
+import { COINS, COIN_CONFIG, INTERNAL_AMOUNT_DECIMALS, isDepositWithdrawPaused } from '@/shared';
+import { CodeBlock, EndpointHeader, MultiLangCodeBlock } from '../components/ApiSnippets.js';
 
-type MainTab = 'deposits' | 'payouts' | 'oauth' | 'security' | 'simulator';
-type CodeLang = 'curl' | 'js' | 'python' | 'php' | 'go' | 'rust';
+type MainTab = 'start' | 'deposits' | 'payouts' | 'oauth' | 'security' | 'simulator';
+
+/**
+ * Canonical origin for every example on this page. The API is served from the
+ * same origin as the app (`client/nginx.conf` proxies `/v1/`), so this is the
+ * base for both the REST calls and the hosted checkout link.
+ *
+ * Keep it a single constant: the page used to mix `satspay.pro` and
+ * `www.satspay.pro` across examples.
+ */
+const API_BASE = 'https://www.satspay.pro';
+
+/** Ledger scale, shared with the backend (`Coin::onchain_decimals` docs). */
+const UNITS_PER_COIN = 10 ** INTERNAL_AMOUNT_DECIMALS;
+
+/** Mirrors `GATEWAY_FEE_BPS` in crates/db/src/merchant_deposits.rs. */
+const GATEWAY_FEE_BPS = 25;
+const GATEWAY_FEE_PERCENT = `${GATEWAY_FEE_BPS / 100}%`.replace('.', ',');
+
+/** "25" USDT → "2500000000". Used in the unit examples below. */
+function toLedgerUnits(coins: number): string {
+  return BigInt(Math.round(coins * UNITS_PER_COIN)).toString();
+}
 
 interface ParamDoc {
   name: string;
@@ -13,112 +35,6 @@ interface ParamDoc {
   required: boolean;
   desc: string;
   example?: string;
-}
-
-function CodeBlock({ code, label }: { code: string; label?: string }) {
-  const [copied, setCopied] = useState(false);
-  return (
-    <div className="relative overflow-hidden rounded-2xl border border-border/80 bg-[#090D16] text-white shadow-xl">
-      {label && (
-        <div className="flex items-center justify-between border-b border-white/10 bg-white/[0.04] px-4 py-2.5">
-          <div className="flex items-center gap-2">
-            <span className="flex h-2 w-2 rounded-full bg-emerald-500" />
-            <span className="font-mono text-[11px] font-bold uppercase tracking-wider text-white/70">{label}</span>
-          </div>
-          <button
-            type="button"
-            onClick={() => {
-              navigator.clipboard.writeText(code);
-              setCopied(true);
-              setTimeout(() => setCopied(false), 1500);
-            }}
-            className="flex items-center gap-1.5 rounded-lg bg-white/5 px-2.5 py-1 text-[11px] font-semibold text-white/80 hover:bg-white/15 hover:text-white transition-all active:scale-95"
-          >
-            <i className={`bi ${copied ? 'bi-check2 text-emerald-400 font-bold' : 'bi-clipboard'}`} />
-            <span>{copied ? 'Copiado!' : 'Copiar'}</span>
-          </button>
-        </div>
-      )}
-      <pre className="overflow-x-auto p-4 sm:p-5 font-mono text-[12px] leading-relaxed text-emerald-400/95 [scrollbar-width:none]">
-        {code}
-      </pre>
-    </div>
-  );
-}
-
-function MultiLangCodeBlock({ snippets }: { snippets: Partial<Record<CodeLang, string>> }) {
-  const [lang, setLang] = useState<CodeLang>('curl');
-
-  const allLanguages: { id: CodeLang; label: string; icon: string }[] = [
-    { id: 'curl', label: 'cURL', icon: 'bi-terminal-fill' },
-    { id: 'js', label: 'Node.js', icon: 'bi-filetype-js' },
-    { id: 'python', label: 'Python', icon: 'bi-filetype-py' },
-    { id: 'php', label: 'PHP', icon: 'bi-filetype-php' },
-    { id: 'go', label: 'Go', icon: 'bi-box-seam' },
-    { id: 'rust', label: 'Rust', icon: 'bi-gear-fill' },
-  ];
-  const languages = allLanguages.filter((l) => Boolean(snippets[l.id]));
-
-  const currentCode = snippets[lang] || snippets.curl || Object.values(snippets)[0] || '';
-
-  return (
-    <div className="space-y-2.5">
-      <div className="flex items-center gap-1.5 overflow-x-auto pb-1 [scrollbar-width:none]">
-        {languages.map((l) => (
-          <button
-            key={l.id}
-            type="button"
-            onClick={() => setLang(l.id)}
-            className={clsx(
-              'flex items-center gap-1.5 rounded-xl px-3.5 py-1.5 text-xs font-bold transition-all',
-              lang === l.id
-                ? 'bg-bitcoin text-white shadow-md shadow-bitcoin/25 scale-102'
-                : 'bg-surface text-ink-muted hover:bg-paper hover:text-ink border border-border',
-            )}
-          >
-            <i className={`bi ${l.icon}`} />
-            <span>{l.label}</span>
-          </button>
-        ))}
-      </div>
-      <CodeBlock label={languages.find((l) => l.id === lang)?.label.toUpperCase()} code={currentCode} />
-    </div>
-  );
-}
-
-function MethodBadge({ method }: { method: 'GET' | 'POST' | 'DELETE' }) {
-  const color =
-    method === 'GET'
-      ? 'bg-blue-500/15 text-blue-600 border-blue-500/30'
-      : method === 'POST'
-      ? 'bg-emerald-500/15 text-emerald-600 border-emerald-500/30'
-      : 'bg-rose-500/15 text-rose-600 border-rose-500/30';
-  return (
-    <span className={clsx('rounded-lg border px-2.5 py-0.5 font-mono text-[11px] font-black tracking-wider', color)}>
-      {method}
-    </span>
-  );
-}
-
-function EndpointHeader({ method, path, title, badge }: { method: 'GET' | 'POST' | 'DELETE'; path: string; title: string; badge?: string }) {
-  return (
-    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-border pb-4">
-      <div className="space-y-1">
-        <div className="flex items-center gap-2.5 flex-wrap">
-          <MethodBadge method={method} />
-          <code className="rounded-xl border border-border bg-surface px-3 py-1 font-mono text-xs sm:text-sm font-bold text-ink">
-            {path}
-          </code>
-          {badge && (
-            <span className="rounded-full bg-bitcoin/10 px-2.5 py-0.5 text-[10px] font-extrabold text-bitcoin-dark">
-              {badge}
-            </span>
-          )}
-        </div>
-        <h3 className="text-lg sm:text-xl font-black text-ink">{title}</h3>
-      </div>
-    </div>
-  );
 }
 
 function ParamsTable({ params }: { params: ParamDoc[] }) {
@@ -185,20 +101,24 @@ async function computeHmacSha256(secret: string, message: string): Promise<strin
 }
 
 function WebhookSimulator() {
-  const [secret, setSecret] = useState('sats_sec_demo_98234791823791823');
-  const [timestamp, setTimestamp] = useState(() => Math.floor(Date.now() / 1000).toString());
+  const [secret, setSecret] = useState('');
   const [payload, setPayload] = useState(() =>
     JSON.stringify(
       {
-        event: 'invoice.paid',
+        event: 'deposit.confirmed',
         invoiceId: '550e8400-e29b-41d4-a716-446655440000',
         orderId: 'ORD-99821',
+        siteUserId: 'user_4412',
         coin: 'USDT',
-        amount: '25.00',
-        status: 'CONFIRMED',
-        depositAddress: '0x71C6705624342490cf03323decB0C392A8892A88',
+        amount: '2500000000',
+        fee: '6250000',
+        netAmount: '2493750000',
         txHash: '0x4a8f9c2d1e0b3a7f8e6c5d4b3a2f1e0d9c8b7a6f5e4d3c2b1a0f9e8d7c6b5a4',
+        status: 'CONFIRMED',
+        paidAt: '2026-09-02T17:32:10.442Z',
+        customerEmail: 'cliente@email.com',
         timestamp: Math.floor(Date.now() / 1000),
+        attempt: 1,
       },
       null,
       2,
@@ -223,7 +143,8 @@ function WebhookSimulator() {
       setIsValid(null);
       return;
     }
-    const clean = verificationInput.replace(/^v1=/, '').trim();
+    // Aceita com ou sem o prefixo `sha256=`, como o header real envia.
+    const clean = verificationInput.trim().replace(/^sha256=/i, '');
     setIsValid(clean.toLowerCase() === calculatedSig.toLowerCase());
   };
 
@@ -238,9 +159,16 @@ function WebhookSimulator() {
             Simulador de Assinaturas Webhook & HMAC-SHA256
           </h2>
           <p className="text-xs sm:text-sm text-ink-muted">
-            Calcule e depure em tempo real a validação de assinaturas para testar seu endpoint receptor antes de ir para produção.
+            Reproduz exatamente o que o servidor envia: HMAC-SHA256 do corpo cru, com o prefixo <code className="font-mono">sha256=</code>.
           </p>
         </div>
+      </div>
+
+      <div className="rounded-2xl border border-amber-500/30 bg-amber-500/5 p-4 text-xs text-ink-muted leading-relaxed">
+        <b className="text-amber-700">O segredo não é o secret da sua API Key.</b> A chave de assinatura do webhook é
+        própria de cada comerciante e você a obtém autenticado no painel, em{' '}
+        <code className="font-mono text-ink font-bold">GET /v1/merchant/webhook-signing-secret</code>. Cole o valor do
+        campo <code className="font-mono text-ink font-bold">secret</code> abaixo.
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -248,36 +176,30 @@ function WebhookSimulator() {
         <div className="space-y-4">
           <div className="space-y-1.5">
             <label className="text-xs font-bold text-ink uppercase tracking-wider block">
-              1. API Secret da sua Chave (Chave Secreta)
+              1. Segredo de assinatura do webhook (hex)
             </label>
             <input
               type="text"
               value={secret}
               onChange={(e) => setSecret(e.target.value)}
-              placeholder="sats_sec_..."
+              placeholder="cole aqui o campo secret de /v1/merchant/webhook-signing-secret"
               className="w-full rounded-xl border border-border bg-surface px-3.5 py-2 font-mono text-xs text-ink focus:outline-none focus:ring-2 focus:ring-bitcoin/30"
             />
           </div>
 
           <div className="space-y-1.5">
-            <div className="flex items-center justify-between">
-              <label className="text-xs font-bold text-ink uppercase tracking-wider block">
-                2. Payload JSON do Webhook (Body Raw)
-              </label>
-              <button
-                type="button"
-                onClick={() => setTimestamp(Math.floor(Date.now() / 1000).toString())}
-                className="text-[11px] text-bitcoin font-bold hover:underline"
-              >
-                Atualizar Timestamp
-              </button>
-            </div>
+            <label className="text-xs font-bold text-ink uppercase tracking-wider block">
+              2. Corpo cru do webhook (raw body)
+            </label>
             <textarea
-              rows={10}
+              rows={14}
               value={payload}
               onChange={(e) => setPayload(e.target.value)}
               className="w-full rounded-xl border border-border bg-surface p-3 font-mono text-[11px] leading-relaxed text-ink focus:outline-none focus:ring-2 focus:ring-bitcoin/30 [scrollbar-width:none]"
             />
+            <p className="text-[11px] text-ink-muted">
+              Assine o corpo <b>exatamente como chegou</b> (bytes brutos). Reserializar o JSON muda a assinatura.
+            </p>
           </div>
         </div>
 
@@ -285,36 +207,42 @@ function WebhookSimulator() {
         <div className="space-y-4 flex flex-col justify-between">
           <div className="space-y-3">
             <label className="text-xs font-bold text-ink uppercase tracking-wider block">
-              3. Cabeçalhos HTTP Gerados pela SatsPay
+              3. Cabeçalhos que a SatsPay envia
             </label>
 
             <div className="space-y-2 rounded-2xl bg-surface p-4 border border-border text-xs font-mono">
               <div>
-                <span className="text-ink-muted font-bold block mb-0.5">X-SatsPay-Timestamp:</span>
-                <code className="text-emerald-600 font-bold bg-paper px-2 py-1 rounded border border-border block truncate">
-                  {timestamp}
-                </code>
-              </div>
-
-              <div>
                 <span className="text-ink-muted font-bold block mb-0.5">X-SatsPay-Signature:</span>
                 <code className="text-indigo-600 font-bold bg-paper px-2 py-1 rounded border border-border block break-all text-[11px]">
-                  t={timestamp},v1={calculatedSig}
+                  sha256={calculatedSig || '…'}
                 </code>
               </div>
 
               <div>
-                <span className="text-ink-muted font-bold block mb-0.5">Digest HMAC-SHA256 Puro (v1):</span>
-                <code className="text-amber-600 font-bold bg-paper px-2 py-1 rounded border border-border block break-all text-[11px]">
-                  {calculatedSig}
+                <span className="text-ink-muted font-bold block mb-0.5">X-SatsPay-Event:</span>
+                <code className="text-emerald-600 font-bold bg-paper px-2 py-1 rounded border border-border block">
+                  deposit.confirmed
                 </code>
               </div>
+
+              <div>
+                <span className="text-ink-muted font-bold block mb-0.5">X-SatsPay-Timestamp / X-SatsPay-Delivery:</span>
+                <code className="text-amber-600 font-bold bg-paper px-2 py-1 rounded border border-border block break-all text-[11px]">
+                  {'<unix seconds>'} / {'<uuid por tentativa>'}
+                </code>
+              </div>
+
+              <p className="text-[11px] text-ink-muted font-sans leading-relaxed pt-1">
+                O <code className="font-mono">timestamp</code> também vai <b>dentro</b> do corpo assinado — valide-o contra o
+                seu relógio (tolerância de 300s) para bloquear replay. Não existe header no formato{' '}
+                <code className="font-mono">t=…,v1=…</code>.
+              </p>
             </div>
           </div>
 
           <div className="rounded-2xl border border-border bg-paper p-4 space-y-3 shadow-xs">
             <span className="text-xs font-bold text-ink uppercase tracking-wider block">
-              4. Testar Validação no seu Servidor
+              4. Testar a validação do seu servidor
             </span>
             <div className="flex gap-2">
               <input
@@ -324,7 +252,7 @@ function WebhookSimulator() {
                   setVerificationInput(e.target.value);
                   setIsValid(null);
                 }}
-                placeholder="Cole aqui a assinatura gerada pelo seu código..."
+                placeholder="Cole a assinatura que seu código calculou..."
                 className="flex-1 rounded-xl border border-border bg-surface px-3 py-1.5 font-mono text-xs text-ink focus:outline-none focus:ring-2 focus:ring-bitcoin/30"
               />
               <button
@@ -345,7 +273,7 @@ function WebhookSimulator() {
             {isValid === false && (
               <div className="p-2.5 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-700 text-xs font-bold flex items-center gap-2">
                 <i className="bi bi-x-circle-fill text-rose-600 text-sm" />
-                <span>Assinatura divergente! Verifique o Secret ou a codificação UTF-8 do body.</span>
+                <span>Assinatura divergente! Confira o segredo, o prefixo sha256= e se você assinou o corpo cru.</span>
               </div>
             )}
           </div>
@@ -355,16 +283,228 @@ function WebhookSimulator() {
   );
 }
 
+/**
+ * Everything an integrator has to do *before* the first invoice.
+ *
+ * This whole path was undocumented: the page opened on "create an invoice"
+ * and mentioned `scopes`, `allowedIps` and `requireSignature` without ever
+ * saying how a key is issued, or that a merchant has to be approved first.
+ * Someone following the docs from the top hit `403` and had to read the
+ * Rust source to find out why.
+ */
+function OnboardingTab() {
+  return (
+    <motion.div
+      key="start"
+      initial={{ opacity: 0, y: 6 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: -6 }}
+      className="space-y-6"
+    >
+      <section className="rounded-3xl border border-border bg-paper p-6 sm:p-8 shadow-xs space-y-8">
+        <div className="flex items-center gap-3 border-b border-border/80 pb-4">
+          <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-sky-500/10 text-sky-600 text-2xl">
+            <i className="bi bi-signpost-split-fill" />
+          </div>
+          <div>
+            <h2 className="text-xl sm:text-2xl font-black text-ink">Começar do zero</h2>
+            <p className="text-xs sm:text-sm text-ink-muted">
+              Os quatro passos entre criar a conta e receber o primeiro pagamento — na ordem em que acontecem.
+            </p>
+          </div>
+        </div>
+
+        <ol className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {[
+            { n: '1', t: 'Pedir credenciamento', d: 'POST /v1/merchant/apply', i: 'bi-person-badge' },
+            { n: '2', t: 'Aguardar aprovação', d: 'GET /v1/merchant/status', i: 'bi-hourglass-split' },
+            { n: '3', t: 'Emitir a chave', d: 'POST /v1/api-keys', i: 'bi-key-fill' },
+            { n: '4', t: 'Criar a cobrança', d: 'POST /v1/merchant/deposits', i: 'bi-qr-code' },
+          ].map((s) => (
+            <li key={s.n} className="rounded-2xl border border-border bg-surface/50 p-4 space-y-1.5">
+              <div className="flex items-center gap-2">
+                <span className="flex h-6 w-6 items-center justify-center rounded-lg bg-sky-500/15 text-[11px] font-black text-sky-600">
+                  {s.n}
+                </span>
+                <i className={clsx('bi text-sky-600', s.i)} />
+              </div>
+              <div className="text-sm font-black text-ink">{s.t}</div>
+              <code className="block text-[10px] font-mono text-ink-muted break-all">{s.d}</code>
+            </li>
+          ))}
+        </ol>
+
+        {/* ---------------------------------------------------------------- */}
+        <div className="space-y-4">
+          <EndpointHeader method="POST" path="/v1/merchant/apply" title="1. Pedir credenciamento" badge="Bearer JWT" />
+          <p className="text-xs text-ink-muted leading-relaxed">
+            O gateway de cobranças não está aberto a toda conta: é preciso ser aprovado como comerciante.
+            Enquanto isso não acontece, uma chave com escopo <code className="font-mono">deposits</code> é
+            emitida normalmente, mas criar fatura responde <code className="font-mono">403</code>.
+          </p>
+          <MultiLangCodeBlock
+            snippets={{
+              curl: `curl -X POST ${API_BASE}/v1/merchant/apply \\
+  -H "Authorization: Bearer $SEU_JWT" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "businessName": "Loja Cripto",
+    "website": "https://lojacripto.com",
+    "description": "E-commerce aceitando pagamentos em cripto"
+  }'`,
+              js: `await fetch('${API_BASE}/v1/merchant/apply', {
+  method: 'POST',
+  headers: {
+    Authorization: \`Bearer \${seuJwt}\`,
+    'Content-Type': 'application/json',
+  },
+  body: JSON.stringify({
+    businessName: 'Loja Cripto',
+    website: 'https://lojacripto.com',
+    description: 'E-commerce aceitando pagamentos em cripto',
+  }),
+});`,
+            }}
+          />
+        </div>
+
+        {/* ---------------------------------------------------------------- */}
+        <div className="space-y-4">
+          <EndpointHeader method="GET" path="/v1/merchant/status" title="2. Consultar o credenciamento" badge="Bearer JWT" />
+          <p className="text-xs text-ink-muted leading-relaxed">
+            Responde o estado do pedido. Só com <code className="font-mono">APPROVED</code> as rotas de
+            <code className="font-mono"> /v1/merchant/deposits</code> passam a funcionar.
+          </p>
+          <CodeBlock
+            label="Resposta"
+            code={`{
+  "status": "APPROVED",        // PENDING | APPROVED | REJECTED
+  "businessName": "Loja Cripto",
+  "appliedAt": "2026-09-10T12:00:00Z",
+  "reviewedAt": "2026-09-11T09:30:00Z"
+}`}
+          />
+        </div>
+
+        {/* ---------------------------------------------------------------- */}
+        <div className="space-y-4">
+          <EndpointHeader method="POST" path="/v1/api-keys" title="3. Emitir a chave de API" badge="Bearer JWT" />
+          <div className="rounded-2xl border border-amber-500/30 bg-amber-500/5 p-4 text-xs text-amber-800 leading-relaxed">
+            <i className="bi bi-exclamation-triangle-fill mr-1.5" />
+            <strong>A chave em claro aparece uma única vez</strong>, nesta resposta. Não existe endpoint que
+            a recupere depois — guarde-a no cofre de segredos do seu servidor. Perdida, use a rotação abaixo.
+          </div>
+          <ParamsTable
+            params={[
+              { name: 'label', type: 'string', required: true, desc: 'Nome para você reconhecer a chave depois.', example: 'loja-producao' },
+              { name: 'scopes', type: 'string[]', required: true, desc: 'Permissões. Verificados de verdade: "deposits" (gateway), "send" (envio interno) e "*" (tudo).', example: '["deposits"]' },
+              { name: 'allowedIps', type: 'string[]', required: false, desc: 'Allowlist de IPs. Vazio = qualquer origem. Preenchido, a chave só vale a partir desses endereços.', example: '["203.0.113.10"]' },
+              { name: 'expiresInDays', type: 'number', required: false, desc: 'Validade. Ausente = sem expiração.', example: '365' },
+              { name: 'requireSignature', type: 'boolean', required: false, desc: 'Exige HMAC-SHA256 em cada requisição desta chave. Recomendado em produção.', example: 'true' },
+            ]}
+          />
+          <MultiLangCodeBlock
+            snippets={{
+              curl: `curl -X POST ${API_BASE}/v1/api-keys \\
+  -H "Authorization: Bearer $SEU_JWT" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "label": "loja-producao",
+    "scopes": ["deposits"],
+    "allowedIps": ["203.0.113.10"],
+    "expiresInDays": 365,
+    "requireSignature": true
+  }'`,
+              js: `const res = await fetch('${API_BASE}/v1/api-keys', {
+  method: 'POST',
+  headers: {
+    Authorization: \`Bearer \${seuJwt}\`,
+    'Content-Type': 'application/json',
+  },
+  body: JSON.stringify({
+    label: 'loja-producao',
+    scopes: ['deposits'],
+    allowedIps: ['203.0.113.10'],
+    expiresInDays: 365,
+    requireSignature: true,
+  }),
+});
+const { id, key, prefix } = await res.json();
+// o campo 'key' é o segredo em claro — guarde agora, não volta mais.`,
+              python: `import requests
+
+res = requests.post(
+    "${API_BASE}/v1/api-keys",
+    headers={"Authorization": f"Bearer {seu_jwt}"},
+    json={
+        "label": "loja-producao",
+        "scopes": ["deposits"],
+        "allowedIps": ["203.0.113.10"],
+        "expiresInDays": 365,
+        "requireSignature": True,
+    },
+)
+api_key = res.json()["key"]  # segredo em claro: guarde agora, não volta mais`,
+            }}
+          />
+        </div>
+
+        {/* ---------------------------------------------------------------- */}
+        <div className="space-y-4">
+          <EndpointHeader method="GET" path="/v1/api-keys" title="Listar suas chaves" badge="Bearer JWT" />
+          <p className="text-xs text-ink-muted leading-relaxed">
+            Devolve prefixo, escopos, allowlist, expiração, último uso e desativação — <strong>nunca o segredo</strong>.
+            Serve para auditar o que existe emitido, não para recuperar uma chave perdida.
+          </p>
+        </div>
+
+        <div className="space-y-4">
+          <EndpointHeader method="POST" path="/v1/api-keys/:id/rotate" title="Rotacionar uma chave" badge="Bearer JWT" />
+          <p className="text-xs text-ink-muted leading-relaxed">
+            Gera um segredo novo mantendo id, escopos, allowlist, expiração e política de assinatura.
+            <strong> O segredo anterior para de valer na hora</strong> — troque no servidor antes de rotacionar,
+            ou aceite a janela de falha.
+          </p>
+          <CodeBlock code={`curl -X POST ${API_BASE}/v1/api-keys/$KEY_ID/rotate \\
+  -H "Authorization: Bearer $SEU_JWT"`} />
+        </div>
+
+        <div className="space-y-4">
+          <EndpointHeader method="DELETE" path="/v1/api-keys/:id" title="Revogar uma chave" badge="Bearer JWT" />
+          <p className="text-xs text-ink-muted leading-relaxed">
+            Desativa imediatamente. O registro continua existindo para a auditoria não perder o rastro
+            de quem usou o quê — revogar não apaga histórico.
+          </p>
+          <CodeBlock code={`curl -X DELETE ${API_BASE}/v1/api-keys/$KEY_ID \\
+  -H "Authorization: Bearer $SEU_JWT"`} />
+        </div>
+
+        <div className="rounded-2xl border border-rose-500/25 bg-rose-500/5 p-4 space-y-2">
+          <div className="flex items-center gap-2 text-rose-700 font-bold text-xs">
+            <i className="bi bi-shield-exclamation text-base" />
+            <span>Nenhuma chave vai para o navegador</span>
+          </div>
+          <ul className="text-xs text-ink-muted leading-relaxed space-y-1 list-disc pl-5">
+            <li><strong>Pode</strong>: variável de ambiente ou cofre de segredos do seu servidor.</li>
+            <li><strong>Não pode</strong>: JavaScript da página, app mobile, repositório, ou qualquer lugar que o cliente leia. Quem tem a chave pode cobrar e movimentar em seu nome — no navegador, isso é qualquer visitante. O botão de pagamento oficial foi desenhado para isso — ele recebe só o <code className="font-mono">checkoutUrl</code> que o seu backend já criou.</li>
+            <li>Hoje <code className="font-mono">GET /v1/public/balance</code> aceita <strong>qualquer</strong> chave válida, sem checar escopo: uma chave de <code className="font-mono">deposits</code> lê o saldo inteiro da conta. Para integração de terceiro, use uma conta separada.</li>
+          </ul>
+        </div>
+      </section>
+    </motion.div>
+  );
+}
+
 export function ApiDocsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const initialTab = (searchParams.get('tab') as MainTab) || 'deposits';
   const [activeTab, setActiveTab] = useState<MainTab>(
-    ['deposits', 'payouts', 'oauth', 'security', 'simulator'].includes(initialTab) ? initialTab : 'deposits'
+    ['start', 'deposits', 'payouts', 'oauth', 'security', 'simulator'].includes(initialTab) ? initialTab : 'deposits'
   );
 
   useEffect(() => {
     const tabParam = searchParams.get('tab') as MainTab;
-    if (tabParam && ['deposits', 'payouts', 'oauth', 'security', 'simulator'].includes(tabParam)) {
+    if (tabParam && ['start', 'deposits', 'payouts', 'oauth', 'security', 'simulator'].includes(tabParam)) {
       setActiveTab(tabParam);
     }
   }, [searchParams]);
@@ -405,7 +545,21 @@ export function ApiDocsPage() {
       </header>
 
       {/* SELETOR DE ABAS PRINCIPAIS */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2 p-1.5 rounded-2xl bg-surface border border-border">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 p-1.5 rounded-2xl bg-surface border border-border">
+        <button
+          type="button"
+          onClick={() => handleTabChange('start')}
+          className={clsx(
+            'flex items-center justify-center gap-2 py-3 px-3 rounded-xl font-bold text-xs sm:text-sm transition-all',
+            activeTab === 'start'
+              ? 'bg-paper text-sky-600 shadow-sm border border-border'
+              : 'text-ink-muted hover:text-ink',
+          )}
+        >
+          <i className="bi bi-signpost-split-fill text-base" />
+          <span>0. Começar</span>
+        </button>
+
         <button
           type="button"
           onClick={() => handleTabChange('deposits')}
@@ -479,6 +633,8 @@ export function ApiDocsPage() {
 
       {/* CONTEÚDO DA ABA SELECIONADA */}
       <AnimatePresence mode="wait">
+        {activeTab === 'start' && <OnboardingTab />}
+
         {activeTab === 'deposits' && (
           /* ========================================================================= */
           /* ABA 1: API DE DEPÓSITOS & GATEWAY DE COBRANÇAS */
@@ -513,9 +669,55 @@ export function ApiDocsPage() {
                 </div>
                 <p className="text-xs text-ink-muted leading-relaxed">
                   1. Seu backend faz uma requisição autenticada <code className="font-mono text-ink font-bold">POST /v1/merchant/deposits</code> usando sua API Key.<br />
-                  2. A SatsPay retorna uma fatura com o link oficial <code className="font-mono text-ink font-bold">checkoutUrl: "https://satspay.pro/pay/:invoice_id"</code>.<br />
-                  3. Você redireciona o usuário para este link sob o domínio seguro SatsPay (com TLS 1.3 e proteção anti-tampering).<br />
-                  4. Quando o pagamento for liquidado, nosso gateway dispara uma notificação assinada via Webhook e redireciona o cliente para sua <code className="font-mono text-ink font-bold">successUrl</code>.
+                  2. A SatsPay responde <code className="font-mono text-ink font-bold">201 Created</code> com <code className="font-mono text-ink font-bold">checkoutUrl</code> (absoluto) e <code className="font-mono text-ink font-bold">payUrl</code> (relativo, <code>/pay/:id</code>).<br />
+                  3. Você redireciona o cliente para o <code className="font-mono text-ink font-bold">checkoutUrl</code>, hospedado no domínio oficial SatsPay.<br />
+                  4. Quando o pagamento é confirmado, disparamos o webhook assinado <code className="font-mono text-ink font-bold">deposit.confirmed</code> e o cliente volta para a sua <code className="font-mono text-ink font-bold">successUrl</code>.
+                </p>
+              </div>
+
+              {/* REGRA DE UNIDADE — O ERRO MAIS CARO DA INTEGRAÇÃO */}
+              <div className="rounded-2xl border border-rose-500/30 bg-rose-500/5 p-4 space-y-3">
+                <div className="flex items-center gap-2 text-rose-700 font-bold text-xs">
+                  <i className="bi bi-exclamation-octagon-fill text-base" />
+                  <span>Leia antes de integrar: `amount` é em unidades de 1e-8</span>
+                </div>
+                <p className="text-xs text-ink-muted leading-relaxed">
+                  Todos os valores da API (depósitos e envios) são <b>inteiros na menor fração interna</b>, com {INTERNAL_AMOUNT_DECIMALS} casas
+                  decimais — nunca a quantidade decimal da moeda. Enviar <code className="font-mono text-ink font-bold">"25.00"</code> para USDT
+                  não cobra 25 USDT: seriam 25 × 10<sup>-8</sup> USDT. Por isso a API <b>rejeita</b> valores com ponto ou vírgula
+                  (<code className="font-mono text-ink font-bold">400 AMOUNT_NOT_INTEGER</code>).
+                </p>
+                <div className="overflow-x-auto rounded-xl border border-border bg-paper">
+                  <table className="w-full text-left text-xs">
+                    <thead className="border-b border-border bg-surface/60 text-[10px] font-extrabold uppercase tracking-wider text-ink-muted">
+                      <tr>
+                        <th className="px-3 py-2">Você quer cobrar</th>
+                        <th className="px-3 py-2">Envie em `amount`</th>
+                        <th className="px-3 py-2">Nunca envie</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border font-mono">
+                      <tr>
+                        <td className="px-3 py-2 text-ink">25 USDT</td>
+                        <td className="px-3 py-2 font-bold text-emerald-700">"{toLedgerUnits(25)}"</td>
+                        <td className="px-3 py-2 text-rose-600">"25.00"</td>
+                      </tr>
+                      <tr>
+                        <td className="px-3 py-2 text-ink">1 POL</td>
+                        <td className="px-3 py-2 font-bold text-emerald-700">"{toLedgerUnits(1)}"</td>
+                        <td className="px-3 py-2 text-rose-600">"1.0"</td>
+                      </tr>
+                      <tr>
+                        <td className="px-3 py-2 text-ink">0,005 BCH</td>
+                        <td className="px-3 py-2 font-bold text-emerald-700">"{toLedgerUnits(0.005)}"</td>
+                        <td className="px-3 py-2 text-rose-600">"0.005"</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+                <p className="text-[11px] text-ink-muted">
+                  Valores muito pequenos também são recusados (<code className="font-mono text-ink font-bold">AMOUNT_BELOW_MINIMUM</code>) quando
+                  arredondariam para zero na rede — USDT e USDC têm 6 casas on-chain, então o mínimo é 100 unidades internas.
                 </p>
               </div>
 
@@ -525,21 +727,29 @@ export function ApiDocsPage() {
                   method="POST"
                   path="/v1/merchant/deposits"
                   title="1.1 Criar Cobrança de Depósito (Gerar Fatura / Invoice)"
-                  badge="Idempotente"
+                  badge="Idempotente por orderId"
                 />
                 <p className="text-xs sm:text-sm text-ink-muted">
-                  Cria uma fatura segura com endereço de depósito dedicado, link público de checkout hospedado no domínio oficial <code className="font-mono font-bold text-ink">https://satspay.pro/pay/:id</code> e QR Code pronto.
+                  Cria uma fatura com endereço de depósito dedicado, link público de checkout hospedado em{' '}
+                  <code className="font-mono font-bold text-ink">{API_BASE}/pay/:id</code> e QR Code pronto.
+                  Os caminhos <code className="font-mono font-bold text-ink">/v1/merchant/deposits/create</code> e{' '}
+                  <code className="font-mono font-bold text-ink">/v1/merchant/invoices</code> são aliases do mesmo endpoint.
                 </p>
 
                 <ParamsTable
                   params={[
-                    { name: 'coin', type: 'String', required: true, desc: 'Criptomoeda do depósito (BTC, LTC, DOGE, BCH, POL, DGB, SOL, USDT, USDC).', example: '"USDT"' },
-                    { name: 'amount', type: 'String', required: true, desc: 'Quantidade exata de criptoativos a receber no depósito (ex: "25.00").', example: '"25.00"' },
-                    { name: 'orderId', type: 'String', required: true, desc: 'Identificador único do pedido no seu sistema para conciliação.', example: '"ORD-99821"' },
-                    { name: 'callbackUrl', type: 'String', required: true, desc: 'URL HTTPS do seu servidor onde o webhook assinado com HMAC será disparado.', example: '"https://meusite.com/webhook"' },
+                    { name: 'coin', type: 'String', required: true, desc: 'Criptomoeda do depósito. Apenas moedas ativas (veja a tabela no fim desta página) — moeda pausada retorna 503 DEPOSIT_PAUSED.', example: '"USDT"' },
+                    { name: 'amount', type: 'String', required: true, desc: `Inteiro na menor fração interna (${INTERNAL_AMOUNT_DECIMALS} decimais). 25 USDT = "${toLedgerUnits(25)}". Ponto/vírgula são rejeitados.`, example: `"${toLedgerUnits(25)}"` },
+                    { name: 'orderId', type: 'String', required: true, desc: 'Identificador único do pedido no seu sistema (1-128 caracteres). É a chave de idempotência: repetir a mesma chamada devolve a mesma fatura.', example: '"ORD-99821"' },
+                    { name: 'callbackUrl', type: 'String', required: true, desc: 'URL HTTPS pública do seu servidor para o webhook assinado. Endereços internos/localhost são recusados (INVALID_CALLBACK_URL).', example: '"https://meusite.com/webhook"' },
                     { name: 'successUrl', type: 'String', required: false, desc: 'URL de retorno após o cliente pagar com sucesso no checkout.', example: '"https://meusite.com/obrigado"' },
-                    { name: 'customerEmail', type: 'String', required: false, desc: 'E-mail do cliente para notificações e recibo.', example: '"cliente@email.com"' },
-                    { name: 'siteName', type: 'String', required: false, desc: 'Nome da sua loja para exibir no topo da página de pagamento.', example: '"Minha Loja"' },
+                    { name: 'cancelUrl', type: 'String', required: false, desc: 'URL de retorno se o cliente cancelar o pagamento.', example: '"https://meusite.com/carrinho"' },
+                    { name: 'siteUserId', type: 'String', required: false, desc: 'Seu identificador interno do comprador. Volta igual no webhook, para você creditar o usuário certo.', example: '"user_4412"' },
+                    { name: 'customerEmail', type: 'String', required: false, desc: 'E-mail do cliente para notificação de confirmação.', example: '"cliente@email.com"' },
+                    { name: 'customerName', type: 'String', required: false, desc: 'Nome do cliente, exibido no checkout.', example: '"Maria Silva"' },
+                    { name: 'siteName', type: 'String', required: false, desc: 'Nome da sua loja, exibido no topo da página de pagamento.', example: '"Minha Loja"' },
+                    { name: 'description', type: 'String', required: false, desc: 'Descrição do pedido exibida no checkout.', example: '"Plano Pro - 1 mês"' },
+                    { name: 'expiryMinutes', type: 'Number', required: false, desc: 'Validade da fatura em minutos. Padrão 60; limitado entre 5 e 1440.', example: '60' },
                   ]}
                 />
 
@@ -549,26 +759,26 @@ export function ApiDocsPage() {
                   </h4>
                   <MultiLangCodeBlock
                     snippets={{
-                      curl: `curl -X POST https://satspay.pro/v1/merchant/deposits \\
+                      curl: `curl -X POST ${API_BASE}/v1/merchant/deposits \\
   -H "x-api-key: SUA_CHAVE_DE_API" \\
   -H "Content-Type: application/json" \\
   -d '{
     "coin": "USDT",
-    "amount": "25.00",
+    "amount": "${toLedgerUnits(25)}",
     "orderId": "ORD-99821",
     "callbackUrl": "https://meusite.com/api/webhook",
     "customerEmail": "cliente@email.com",
     "siteName": "Minha Loja Online"
   }'`,
-                      js: `const response = await fetch('https://satspay.pro/v1/merchant/deposits', {
+                      js: `const response = await fetch('${API_BASE}/v1/merchant/deposits', {
   method: 'POST',
   headers: {
-    'x-api-key': 'SUA_CHAVE_DE_API',
+    'x-api-key': process.env.SATSPAY_API_KEY,
     'Content-Type': 'application/json'
   },
   body: JSON.stringify({
     coin: 'USDT',
-    amount: '25.00',
+    amount: '${toLedgerUnits(25)}', // 25 USDT em unidades de 1e-8
     orderId: 'ORD-99821',
     callbackUrl: 'https://meusite.com/api/webhook',
     customerEmail: 'cliente@email.com',
@@ -576,19 +786,20 @@ export function ApiDocsPage() {
   })
 });
 
-const data = await response.json();
-// Redirecione seu cliente com segurança para o checkout hospedado na infraestrutura SatsPay:
-window.location.href = data.checkoutUrl;`,
-                      python: `import requests
+const invoice = await response.json();
+// 201 Created. Redirecione o cliente para o checkout hospedado:
+window.location.href = invoice.checkoutUrl;`,
+                      python: `import os
+import requests
 
-url = "https://satspay.pro/v1/merchant/deposits"
+url = "${API_BASE}/v1/merchant/deposits"
 headers = {
-    "x-api-key": "SUA_CHAVE_DE_API",
+    "x-api-key": os.environ["SATSPAY_API_KEY"],
     "Content-Type": "application/json"
 }
 payload = {
     "coin": "USDT",
-    "amount": "25.00",
+    "amount": "${toLedgerUnits(25)}",  # 25 USDT em unidades de 1e-8
     "orderId": "ORD-99821",
     "callbackUrl": "https://meusite.com/api/webhook",
     "customerEmail": "cliente@email.com",
@@ -596,14 +807,15 @@ payload = {
 }
 
 response = requests.post(url, json=payload, headers=headers)
+response.raise_for_status()
 invoice = response.json()
-print("Redirecionar Cliente Para:", invoice.get("checkoutUrl"))`,
+print("Redirecionar cliente para:", invoice["checkoutUrl"])`,
                       php: `<?php
 $curl = curl_init();
 
 $payload = [
   "coin" => "USDT",
-  "amount" => "25.00",
+  "amount" => "${toLedgerUnits(25)}", // 25 USDT em unidades de 1e-8
   "orderId" => "ORD-99821",
   "callbackUrl" => "https://meusite.com/api/webhook",
   "customerEmail" => "cliente@email.com",
@@ -611,19 +823,19 @@ $payload = [
 ];
 
 curl_setopt_array($curl, [
-  CURLOPT_URL => "https://satspay.pro/v1/merchant/deposits",
+  CURLOPT_URL => "${API_BASE}/v1/merchant/deposits",
   CURLOPT_RETURNTRANSFER => true,
   CURLOPT_POST => true,
   CURLOPT_POSTFIELDS => json_encode($payload),
   CURLOPT_HTTPHEADER => [
-    "x-api-key: SUA_CHAVE_DE_API",
+    "x-api-key: " . getenv("SATSPAY_API_KEY"),
     "Content-Type: application/json"
   ],
 ]);
 
 $response = curl_exec($curl);
-$data = json_decode($response, true);
-header("Location: " . $data['checkoutUrl']);
+$invoice = json_decode($response, true);
+header("Location: " . $invoice['checkoutUrl']);
 exit;`,
                       go: `package main
 
@@ -632,29 +844,34 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 )
 
 func main() {
 	payload, _ := json.Marshal(map[string]interface{}{
 		"coin":          "USDT",
-		"amount":        "25.00",
+		"amount":        "${toLedgerUnits(25)}", // 25 USDT em unidades de 1e-8
 		"orderId":       "ORD-99821",
 		"callbackUrl":   "https://meusite.com/api/webhook",
 		"customerEmail": "cliente@email.com",
 		"siteName":      "Minha Loja Online",
 	})
 
-	req, _ := http.NewRequest("POST", "https://satspay.pro/v1/merchant/deposits", bytes.NewBuffer(payload))
-	req.Header.Set("x-api-key", "SUA_CHAVE_DE_API")
+	req, _ := http.NewRequest("POST", "${API_BASE}/v1/merchant/deposits", bytes.NewBuffer(payload))
+	req.Header.Set("x-api-key", os.Getenv("SATSPAY_API_KEY"))
 	req.Header.Set("Content-Type", "application/json")
 
-	client := &http.Client{}
-	resp, err := client.Do(req)
+	resp, err := (&http.Client{}).Do(req)
 	if err != nil {
 		panic(err)
 	}
 	defer resp.Body.Close()
-	fmt.Println("Status:", resp.Status)
+
+	var invoice struct {
+		CheckoutURL string \`json:"checkoutUrl"\`
+	}
+	json.NewDecoder(resp.Body).Decode(&invoice)
+	fmt.Println("Redirecionar cliente para:", invoice.CheckoutURL)
 }`,
                       rust: `use reqwest::Client;
 use serde_json::json;
@@ -662,12 +879,12 @@ use serde_json::json;
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let client = Client::new();
-    let res = client
-        .post("https://satspay.pro/v1/merchant/deposits")
-        .header("x-api-key", "SUA_CHAVE_DE_API")
+    let invoice = client
+        .post("${API_BASE}/v1/merchant/deposits")
+        .header("x-api-key", std::env::var("SATSPAY_API_KEY")?)
         .json(&json!({
             "coin": "USDT",
-            "amount": "25.00",
+            "amount": "${toLedgerUnits(25)}", // 25 USDT em unidades de 1e-8
             "orderId": "ORD-99821",
             "callbackUrl": "https://meusite.com/api/webhook",
             "customerEmail": "cliente@email.com",
@@ -678,7 +895,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .json::<serde_json::Value>()
         .await?;
 
-    println!("Checkout URL: {}", res["checkoutUrl"]);
+    println!("Checkout URL: {}", invoice["checkoutUrl"]);
     Ok(())
 }`,
                     }}
@@ -687,24 +904,345 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                 <div className="space-y-2">
                   <h4 className="text-xs font-bold uppercase tracking-wider text-ink-muted">
-                    Resposta de Sucesso (200 OK):
+                    Resposta de Sucesso (201 Created):
                   </h4>
                   <CodeBlock
                     label="JSON RESPONSE"
                     code={`{
   "id": "550e8400-e29b-41d4-a716-446655440000",
-  "orderId": "ORD-99821",
-  "coin": "USDT",
-  "amount": "25.00",
-  "depositAddress": "0x71C6705624342490cf03323decB0C392A8892A88",
-  "qrCode": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAMgAAADICAY...",
-  "checkoutUrl": "https://satspay.pro/pay/550e8400-e29b-41d4-a716-446655440000",
   "status": "PENDING",
+  "coin": "USDT",
+  "amount": "${toLedgerUnits(25)}",
+  "feeAmount": "${toLedgerUnits(0.0625)}",
+  "netAmount": "${toLedgerUnits(24.9375)}",
+  "depositAddress": "0x71C6705624342490cf03323decB0C392A8892A88",
+  "payUrl": "/pay/550e8400-e29b-41d4-a716-446655440000",
+  "checkoutUrl": "${API_BASE}/pay/550e8400-e29b-41d4-a716-446655440000",
+  "qrCode": "0x71C6705624342490cf03323decB0C392A8892A88",
+  "orderId": "ORD-99821",
   "expiresAt": "2026-09-02T18:00:00.000Z",
-  "createdAt": "2026-09-02T16:00:00.000Z"
+  "createdAt": "2026-09-02T17:00:00.000Z"
 }`}
                   />
+                  <p className="text-[11px] text-ink-muted leading-relaxed">
+                    <b>qrCode</b> de POL, USDT, USDC e PEPE é só o endereço <code className="font-mono">0x</code>.
+                    <code className="font-mono">pol:</code> e <code className="font-mono">ethereum:</code> a carteira mostra como texto.
+                    UTXO fica BIP21 (<code className="font-mono">btc:endereço?amount=…</code>).
+                    Não é imagem base64. <b>checkoutUrl</b> já vem absoluto; <b>payUrl</b> é o mesmo
+                    caminho relativo, caso você monte a URL por conta própria.
+                  </p>
                 </div>
+
+                {/* TAXA */}
+                <div className="rounded-2xl border-2 border-bitcoin/40 bg-bitcoin/5 p-4 space-y-3">
+                  <div className="flex items-center gap-2 text-bitcoin-dark font-black text-sm">
+                    <i className="bi bi-percent text-base" />
+                    <span>Taxa do gateway: {GATEWAY_FEE_PERCENT} por fatura recebida</span>
+                  </div>
+                  <p className="text-xs text-ink-muted leading-relaxed">
+                    O cliente paga <code className="font-mono text-ink font-bold">amount</code> integral; você é creditado em{' '}
+                    <code className="font-mono text-ink font-bold">netAmount</code>, que é{' '}
+                    <code className="font-mono">amount − feeAmount</code>. A taxa é <b>truncada para unidades inteiras</b>
+                    {' '}de 1e-8, sempre a seu favor, então <code className="font-mono">feeAmount + netAmount</code> é
+                    exatamente igual a <code className="font-mono">amount</code>.
+                  </p>
+                  <div className="overflow-x-auto rounded-xl border border-border bg-paper">
+                    <table className="w-full text-left text-xs">
+                      <thead className="border-b border-border bg-surface/60 text-[10px] font-extrabold uppercase tracking-wider text-ink-muted">
+                        <tr>
+                          <th className="px-3 py-2">Cobrança</th>
+                          <th className="px-3 py-2">amount</th>
+                          <th className="px-3 py-2">feeAmount ({GATEWAY_FEE_PERCENT})</th>
+                          <th className="px-3 py-2">netAmount (você recebe)</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-border font-mono">
+                        {[25, 100, 1].map((coins) => {
+                          const units = Number(toLedgerUnits(coins));
+                          const fee = Math.floor((units * GATEWAY_FEE_BPS) / 10_000);
+                          return (
+                            <tr key={coins}>
+                              <td className="px-3 py-2 text-ink">{coins} USDT</td>
+                              <td className="px-3 py-2 text-ink-muted">{units}</td>
+                              <td className="px-3 py-2 text-bitcoin-dark font-bold">{fee}</td>
+                              <td className="px-3 py-2 text-emerald-700 font-bold">{units - fee}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                  <p className="text-[11px] text-ink-muted">
+                    Taxa única para todos os comerciantes — não há plano ou tarifa por conta. No webhook o campo
+                    chama-se <code className="font-mono text-ink font-bold">fee</code>; na criação da fatura,{' '}
+                    <code className="font-mono text-ink font-bold">feeAmount</code>.
+                  </p>
+                </div>
+
+                {/* DUAS FORMAS DE PRECIFICAR */}
+                <div className="rounded-2xl border-2 border-emerald-500/40 bg-emerald-500/5 p-4 space-y-3">
+                  <div className="flex items-center gap-2 text-emerald-700 font-black text-sm">
+                    <i className="bi bi-coin text-base" />
+                    <span>Duas formas de cobrar — escolha uma</span>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div className="rounded-xl border border-border bg-paper p-3 space-y-1.5">
+                      <div className="text-xs font-bold text-ink">A. Em cripto (você escolhe a moeda)</div>
+                      <code className="block font-mono text-[11px] text-ink-muted">
+                        {'{ coin: "USDT", amount: "2500000000" }'}
+                      </code>
+                      <p className="text-[11px] text-ink-muted leading-relaxed">
+                        A fatura nasce travada naquela moeda, com o endereço daquela rede. O cliente
+                        não escolhe nada. É o contrato original e ele não mudou.
+                      </p>
+                    </div>
+
+                    <div className="rounded-xl border border-emerald-500/40 bg-emerald-500/5 p-3 space-y-1.5">
+                      <div className="text-xs font-bold text-ink">B. Em dólar (o cliente escolhe)</div>
+                      <code className="block font-mono text-[11px] text-ink-muted">
+                        {'{ amountUsd: "25.00" }'}
+                      </code>
+                      <p className="text-[11px] text-ink-muted leading-relaxed">
+                        O checkout mostra um seletor com as moedas que você aceita, cada uma já com a
+                        quantia calculada. O cliente escolhe e a cotação trava.
+                      </p>
+                    </div>
+                  </div>
+
+                  <p className="text-xs text-ink-muted leading-relaxed">
+                    Mandar as duas juntas devolve <code className="font-mono text-ink font-bold">400 AMBIGUOUS_AMOUNT</code>;
+                    nenhuma delas, <code className="font-mono text-ink font-bold">400 INVALID_AMOUNT</code>.
+                    Atenção à diferença: <code className="font-mono text-ink font-bold">amount</code> é
+                    <b> inteiro</b> em unidades de 1e-8, mas{' '}
+                    <code className="font-mono text-ink font-bold">amountUsd</code> é <b>decimal</b>, porque é
+                    dinheiro de verdade.
+                  </p>
+                </div>
+
+                {/* COMO A COTAÇÃO TRAVA */}
+                <div className="rounded-2xl border border-amber-500/30 bg-amber-500/5 p-4 space-y-2">
+                  <div className="flex items-center gap-2 text-amber-700 font-bold text-xs">
+                    <i className="bi bi-lock-fill text-base" />
+                    <span>Quando a cotação trava, e quem carrega a variação</span>
+                  </div>
+                  <ol className="text-xs text-ink-muted leading-relaxed list-decimal pl-4 space-y-1">
+                    <li>Você cria a fatura em dólar. Nada foi cotado ainda — nenhuma exposição.</li>
+                    <li>
+                      O cliente escolhe a moeda. <b>Nesse instante</b> a cotação trava e vale até a fatura
+                      expirar.
+                    </li>
+                    <li>
+                      Da trava até o pagamento chegar na rede, quem carrega a variação de preço é{' '}
+                      <b>você</b>: pediu US$ 25 e recebe a cripto que valia US$ 25 naquele instante. A
+                      plataforma não absorve a diferença.
+                    </li>
+                    <li>
+                      A conversão arredonda <b>para cima</b>, sempre a seu favor — nunca a menos do que
+                      você pediu.
+                    </li>
+                  </ol>
+                  <p className="text-[11px] text-ink-muted">
+                    O cliente pode trocar de moeda enquanto nada chegou. Assim que qualquer endereço da
+                    fatura recebe dinheiro, a moeda congela — trocar ali abandonaria um pagamento em
+                    trânsito. E se ele pagou num endereço que já tinha visto antes de trocar, esse
+                    pagamento <b>é honrado</b>: a fatura passa a apontar para a moeda que recebeu.
+                  </p>
+                </div>
+
+                {/* SELECT-COIN */}
+                <div className="space-y-3">
+                  <EndpointHeader
+                    method="POST"
+                    path="/v1/public/pay/:id/select-coin"
+                    title="Escolher a moeda (chamado pelo checkout)"
+                    badge="Público · sem chave"
+                  />
+                  <p className="text-xs sm:text-sm text-ink-muted">
+                    O checkout hospedado já faz isso sozinho. Está documentado porque a resposta é o
+                    mesmo payload de <code className="font-mono font-bold text-ink">GET /v1/public/pay/:id</code>,
+                    e porque quem monta o próprio checkout precisa dele.
+                  </p>
+                  <CodeBlock
+                    label="CURL"
+                    code={`curl -X POST ${API_BASE}/v1/public/pay/550e8400-.../select-coin \\
+  -H "Content-Type: application/json" \\
+  -d '{ "coin": "POL" }'`}
+                  />
+                  <div className="overflow-x-auto rounded-2xl border border-border bg-surface">
+                    <table className="w-full text-left text-xs">
+                      <thead className="border-b border-border bg-paper text-[10px] font-extrabold uppercase tracking-wider text-ink-muted">
+                        <tr>
+                          <th className="px-4 py-2.5">Código</th>
+                          <th className="px-4 py-2.5">HTTP</th>
+                          <th className="px-4 py-2.5">Quando</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-border font-mono text-[11px]">
+                        <tr>
+                          <td className="px-4 py-2.5 font-bold text-rose-600">COIN_NOT_ACCEPTED</td>
+                          <td className="px-4 py-2.5 text-ink">400</td>
+                          <td className="px-4 py-2.5 font-sans text-ink-muted">
+                            Moeda fora da lista da fatura, pausada, ou fatura de moeda única.
+                          </td>
+                        </tr>
+                        <tr>
+                          <td className="px-4 py-2.5 font-bold text-purple-600">COIN_LOCKED</td>
+                          <td className="px-4 py-2.5 text-ink">409</td>
+                          <td className="px-4 py-2.5 font-sans text-ink-muted">
+                            Já existe pagamento em andamento — a moeda congelou.
+                          </td>
+                        </tr>
+                        <tr>
+                          <td className="px-4 py-2.5 font-bold text-amber-600">PRICE_UNAVAILABLE</td>
+                          <td className="px-4 py-2.5 text-ink">503</td>
+                          <td className="px-4 py-2.5 font-sans text-ink-muted">
+                            Sem cotação fresca para a moeda. Nunca cotamos com preço velho.
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                {/* MOEDAS ACEITAS */}
+                <div className="space-y-3">
+                  <EndpointHeader
+                    method="GET"
+                    path="/v1/merchant/settings"
+                    title="Moedas que você aceita receber"
+                  />
+                  <p className="text-xs sm:text-sm text-ink-muted">
+                    Define o seletor que o cliente vê nas cobranças em dólar. Configure uma vez no painel
+                    (Gateway de Depósitos) ou por API. Lista vazia significa <b>todas as ativas</b>, então
+                    uma moeda que sai da pausa passa a ser oferecida sozinha. Pausadas nunca aparecem.
+                  </p>
+                  <CodeBlock
+                    label="CURL"
+                    code={`curl -X PUT ${API_BASE}/v1/merchant/settings \\
+  -H "x-api-key: SUA_CHAVE_DE_API" \\
+  -H "Content-Type: application/json" \\
+  -d '{ "acceptedCoins": ["USDT", "USDC", "POL", "SOL"] }'`}
+                  />
+                  <p className="text-[11px] text-ink-muted">
+                    Uma lista em que nenhuma moeda está ativa devolve{' '}
+                    <code className="font-mono font-bold text-ink">400 NO_USABLE_COIN</code> — melhor recusar
+                    do que deixar você com um checkout que ninguém consegue pagar.
+                  </p>
+                </div>
+              </div>
+
+              {/* BOTÃO DE PAGAMENTO */}              {/* BOTÃO DE PAGAMENTO */}
+              <div className="space-y-4 pt-6 border-t border-border/80">
+                <EndpointHeader
+                  method="GET"
+                  path={`${API_BASE}/sdk/satspay-pay.js`}
+                  title="1.2 Botão de Pagamento Oficial (com a nossa marca)"
+                  badge="Sem chave no navegador"
+                />
+                <p className="text-xs sm:text-sm text-ink-muted">
+                  Botão oficial com a logo SatsPay, em quatro temas (inclusive <b>branco</b>), três tamanhos e três
+                  formatos. Seu backend cria a fatura e entrega o{' '}
+                  <code className="font-mono font-bold text-ink">checkoutUrl</code> ao botão — que só leva o cliente até o
+                  checkout hospedado. Nenhuma chave de API vai para o navegador, e o valor não pode ser adulterado no
+                  DevTools, porque o link já foi emitido pelo seu servidor.
+                </p>
+
+                <CodeBlock
+                  label="HTML SNIPPET"
+                  code={`<!-- 1. Carregue o SDK do botão -->
+<script src="${API_BASE}/sdk/satspay-pay.js" async defer></script>
+
+<!-- 2. Seu backend criou a fatura e devolveu checkoutUrl -->
+<div class="satspay-pay"
+     data-checkout_url="${API_BASE}/pay/550e8400-e29b-41d4-a716-446655440000"
+     data-theme="bitcoin"
+     data-size="large"
+     data-shape="rounded"
+     data-label="Pagar com cripto"
+     data-amount="25 USDT"></div>`}
+                />
+
+                <ParamsTable
+                  params={[
+                    { name: 'data-checkout_url', type: 'String', required: true, desc: 'O checkoutUrl devolvido pela criação da fatura. Só https/http é aceito — javascript: é recusado e o botão fica desabilitado.', example: `"${API_BASE}/pay/:id"` },
+                    { name: 'data-theme', type: 'String', required: false, desc: 'bitcoin (padrão, laranja), light (branco com a logo), dark (escuro) ou outline (contorno).', example: '"light"' },
+                    { name: 'data-size', type: 'String', required: false, desc: 'small, medium (padrão) ou large.', example: '"large"' },
+                    { name: 'data-shape', type: 'String', required: false, desc: 'rounded (padrão), pill ou square.', example: '"pill"' },
+                    { name: 'data-label', type: 'String', required: false, desc: 'Texto do botão. Tratado como texto puro, nunca como HTML.', example: '"Pagar com cripto"' },
+                    { name: 'data-amount', type: 'String', required: false, desc: 'Sufixo exibido ao lado do rótulo, só visual.', example: '"25 USDT"' },
+                    { name: 'data-target', type: 'String', required: false, desc: 'self (padrão) ou blank — blank já vai com rel="noopener".', example: '"blank"' },
+                    { name: 'data-onclick', type: 'String', required: false, desc: 'Nome de uma função global chamada antes de navegar; retornar false cancela o redirecionamento.', example: '"beforeCheckout"' },
+                  ]}
+                />
+
+                <div className="rounded-2xl border border-border bg-surface p-4 space-y-2">
+                  <div className="flex items-center gap-2 text-ink font-bold text-xs">
+                    <i className="bi bi-arrow-repeat text-bitcoin text-base" />
+                    <span>SPA / conteúdo injetado depois</span>
+                  </div>
+                  <p className="text-xs text-ink-muted leading-relaxed">
+                    Os botões são renderizados no <code className="font-mono">DOMContentLoaded</code>. Se você injetar a
+                    marcação depois (React, Vue…), chame{' '}
+                    <code className="font-mono text-ink font-bold">window.SatsPay.renderButtons()</code> — botões já
+                    renderizados não são duplicados.
+                  </p>
+                </div>
+
+                <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/5 p-4 text-xs text-ink-muted leading-relaxed">
+                  <b className="text-emerald-700">Quer ver antes de integrar?</b> Abra{' '}
+                  <a href="/pay/demo" className="font-mono font-bold text-bitcoin hover:underline">{API_BASE}/pay/demo</a>{' '}
+                  — é o checkout real com uma fatura de demonstração: endereço fictício, nenhum pagamento processado,
+                  nenhum webhook disparado.
+                </div>
+              </div>
+
+              {/* CATÁLOGO DE MOEDAS */}
+              <div className="space-y-4 pt-6 border-t border-border/80">
+                <EndpointHeader
+                  method="GET"
+                  path="/v1/public/coins"
+                  title="1.3 Catálogo de Moedas, Preços e Logos"
+                  badge="Público · sem chave"
+                />
+                <p className="text-xs sm:text-sm text-ink-muted">
+                  Tudo que a sua interface precisa para montar um seletor de moeda: símbolo, nome, escala, confirmações
+                  exigidas, se o depósito está ativo, o ícone servido pelo nosso domínio e a cotação em dólar. Pode ser
+                  chamado direto do navegador.
+                </p>
+
+                <CodeBlock
+                  label="CURL"
+                  code={`curl -s ${API_BASE}/v1/public/coins`}
+                />
+
+                <CodeBlock
+                  label="JSON RESPONSE"
+                  code={`{
+  "priceDecimals": 8,
+  "amountDecimals": 8,
+  "coins": [
+    {
+      "symbol": "USDT",
+      "name": "Tether USD",
+      "decimals": 8,
+      "onchainDecimals": 6,
+      "minConfirmations": 30,
+      "depositsEnabled": true,
+      "logoUrl": "${API_BASE}/sdk/coins/usdt.svg",
+      "priceUsd": "100000000"
+    }
+  ]
+}`}
+                />
+                <p className="text-[11px] text-ink-muted leading-relaxed">
+                  <b>priceUsd</b> vem escalado por <code className="font-mono">priceDecimals</code> (100000000 ÷ 10<sup>8</sup> = US$ 1,00)
+                  e é <b>cotação de referência</b>, não trava de preço — a fatura é sempre cobrada na quantidade de cripto
+                  que você definiu. <b>depositsEnabled: false</b> é a mesma pausa que devolve{' '}
+                  <code className="font-mono">503 DEPOSIT_PAUSED</code> na criação. Os ícones ficam em{' '}
+                  <code className="font-mono">/sdk/coins/&lt;símbolo&gt;.svg</code>, servidos com{' '}
+                  <code className="font-mono">Access-Control-Allow-Origin: *</code>, então você pode usá-los direto.
+                </p>
               </div>
 
               {/* ENDPOINT 1.2: CONSULTAR FATURA */}
@@ -712,17 +1250,159 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 <EndpointHeader
                   method="GET"
                   path="/v1/merchant/deposits/:id"
-                  title="1.2 Consultar Status da Fatura de Depósito"
+                  title="1.4 Consultar Status da Fatura de Depósito"
                 />
                 <p className="text-xs sm:text-sm text-ink-muted">
-                  Retorna o estado em tempo real da fatura (PENDING, DETECTED, CONFIRMED, PAID, EXPIRED).
+                  Retorna a fatura completa, incluindo <code className="font-mono font-bold text-ink">receivedAmount</code>{' '}
+                  (quanto já chegou no endereço) e o estado de entrega do webhook.
                 </p>
 
                 <CodeBlock
                   label="CURL"
-                  code={`curl -X GET https://satspay.pro/v1/merchant/deposits/550e8400-e29b-41d4-a716-446655440000 \\
+                  code={`curl -X GET ${API_BASE}/v1/merchant/deposits/550e8400-e29b-41d4-a716-446655440000 \\
   -H "x-api-key: SUA_CHAVE_DE_API"`}
                 />
+
+                <div className="overflow-x-auto rounded-2xl border border-border bg-surface">
+                  <table className="w-full text-left text-xs">
+                    <thead className="border-b border-border bg-paper text-[10px] font-extrabold uppercase tracking-wider text-ink-muted">
+                      <tr>
+                        <th className="px-4 py-2.5">Status</th>
+                        <th className="px-4 py-2.5">Significado</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border">
+                      <tr>
+                        <td className="px-4 py-2.5 font-mono font-bold text-ink">PENDING</td>
+                        <td className="px-4 py-2.5 text-ink-muted">Fatura criada; nada recebido no endereço ainda.</td>
+                      </tr>
+                      <tr>
+                        <td className="px-4 py-2.5 font-mono font-bold text-blue-600">DETECTED</td>
+                        <td className="px-4 py-2.5 text-ink-muted">
+                          Pagamento visto na rede, mas ainda sem confirmações suficientes <b>ou</b> abaixo do valor cobrado
+                          (veja <code className="font-mono">receivedAmount</code>). Não credite nada aqui.
+                        </td>
+                      </tr>
+                      <tr>
+                        <td className="px-4 py-2.5 font-mono font-bold text-emerald-600">CONFIRMED</td>
+                        <td className="px-4 py-2.5 text-ink-muted">Pago e creditado. É quando o webhook <code className="font-mono">deposit.confirmed</code> é enviado.</td>
+                      </tr>
+                      <tr>
+                        <td className="px-4 py-2.5 font-mono font-bold text-amber-600">EXPIRED</td>
+                        <td className="px-4 py-2.5 text-ink-muted">Passou de <code className="font-mono">expiresAt</code> sem pagamento completo.</td>
+                      </tr>
+                      <tr>
+                        <td className="px-4 py-2.5 font-mono font-bold text-rose-600">CANCELLED</td>
+                        <td className="px-4 py-2.5 text-ink-muted">Cancelada administrativamente.</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+                <p className="text-[11px] text-ink-muted">
+                  Não existe status <code className="font-mono">PAID</code>: o estado final de sucesso é{' '}
+                  <code className="font-mono font-bold text-ink">CONFIRMED</code>.
+                </p>
+              </div>
+            </section>
+
+            {/* ===================================================================== */}
+            {/* TESTAR A INTEGRAÇÃO ANTES DE SUBIR                                     */}
+            {/* ===================================================================== */}
+            <section className="rounded-3xl border border-border bg-paper p-6 sm:p-8 shadow-xs space-y-8">
+              <div className="flex items-center gap-3 border-b border-border/80 pb-4">
+                <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-violet-500/10 text-violet-600 text-2xl">
+                  <i className="bi bi-beaker" />
+                </div>
+                <div>
+                  <h2 className="text-xl sm:text-2xl font-black text-ink">Testar antes de subir</h2>
+                  <p className="text-xs sm:text-sm text-ink-muted">
+                    Verifique o webhook e o checkout sem esperar uma transação real chegar na blockchain.
+                  </p>
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                <EndpointHeader
+                  method="POST"
+                  path="/v1/merchant/deposits/:id/test-webhook"
+                  title="Disparar um webhook de teste"
+                  badge="Bearer JWT"
+                />
+                <p className="text-xs text-ink-muted leading-relaxed">
+                  Envia para a sua <code className="font-mono">callbackUrl</code> uma entrega
+                  <strong> assinada exatamente como a real</strong>, com o mesmo header
+                  <code className="font-mono"> X-SatsPay-Signature</code>. É como confirmar que sua verificação
+                  de HMAC funciona sem depender de um pagamento on-chain — e a forma de descobrir que a
+                  assinatura está errada <em>antes</em> de um cliente pagar.
+                </p>
+                <div className="rounded-2xl border border-amber-500/30 bg-amber-500/5 p-3 text-[11px] text-amber-800 leading-relaxed">
+                  <i className="bi bi-info-circle-fill mr-1.5" />
+                  Exige sessão do painel (JWT), não chave de API: é uma ferramenta de quem está integrando,
+                  e não deve ser disparável por uma credencial de servidor comprometida.
+                </div>
+                <CodeBlock code={`curl -X POST ${API_BASE}/v1/merchant/deposits/$INVOICE_ID/test-webhook \\
+  -H "Authorization: Bearer $SEU_JWT"`} />
+              </div>
+
+              <div className="space-y-4">
+                <EndpointHeader method="GET" path="/v1/public/pay/demo" title="Checkout de demonstração" badge="Público" />
+                <p className="text-xs text-ink-muted leading-relaxed">
+                  Uma fatura sintética que renderiza o checkout <strong>real</strong> sem linha no banco, sem
+                  dinheiro e sem webhook. Oferece as moedas que você configurou como aceitas quando há sessão,
+                  e todas as ativas quando não há — serve para ver o seletor de moedas funcionando.
+                </p>
+                <p className="text-[11px] text-ink-muted leading-relaxed">
+                  Os endereços mostrados são <strong>propositalmente inválidos</strong> em suas redes (todos
+                  contêm <code className="font-mono">-DEMO-</code>), para que nenhuma carteira consiga enviar
+                  moeda de verdade para uma página de exemplo.
+                </p>
+                <CodeBlock code={`# abra no navegador
+${API_BASE}/pay/demo
+
+# ou consulte o JSON
+curl ${API_BASE}/v1/public/pay/demo`} />
+              </div>
+
+              <div className="space-y-4">
+                <EndpointHeader
+                  method="POST"
+                  path="/v1/public/pay/demo/select-coin"
+                  title="Trocar a moeda na demonstração"
+                  badge="Público"
+                />
+                <p className="text-xs text-ink-muted leading-relaxed">
+                  Mesmo contrato do <code className="font-mono">select-coin</code> real, mas não grava nada:
+                  não consome índice HD, não cria endereço e não trava cotação de dinheiro real.
+                </p>
+                <CodeBlock code={`curl -X POST ${API_BASE}/v1/public/pay/demo/select-coin \\
+  -H "Content-Type: application/json" \\
+  -d '{"coin": "POL"}'`} />
+              </div>
+
+              <div className="space-y-4">
+                <EndpointHeader
+                  method="POST"
+                  path="/v1/public/pay/:id/balance"
+                  title="Pagar a fatura com saldo SatsPay"
+                  badge="Bearer JWT"
+                />
+                <p className="text-xs text-ink-muted leading-relaxed">
+                  O cliente que já tem conta SatsPay pode quitar a cobrança com o saldo interno, sem transação
+                  on-chain e sem esperar confirmação. A fatura vai direto a
+                  <code className="font-mono"> CONFIRMED</code> e o webhook{' '}
+                  <code className="font-mono">deposit.confirmed</code> dispara igual — do seu lado,
+                  <strong> nada muda</strong>: mesma assinatura, mesmo corpo, mesma taxa de {GATEWAY_FEE_PERCENT}.
+                </p>
+                <p className="text-[11px] text-ink-muted leading-relaxed">
+                  Exige a sessão de <strong>quem paga</strong> (não a sua). Saldo insuficiente, fatura expirada
+                  ou já paga são recusados com <code className="font-mono">code</code> próprio.
+                  A conta logada <strong>não pode ser a dona da fatura</strong>: nesse caso a resposta é{' '}
+                  <code className="font-mono">400 CANNOT_PAY_OWN_INVOICE</code> e nada é debitado. O checkout
+                  é para outro cliente. Passar da sua carteira pessoal para a de comerciante é a transferência
+                  dentro da conta logada, não esta rota.
+                </p>
+                <CodeBlock code={`curl -X POST ${API_BASE}/v1/public/pay/$INVOICE_ID/balance \\
+  -H "Authorization: Bearer $JWT_DO_CLIENTE"`} />
               </div>
             </section>
           </motion.div>
@@ -762,12 +1442,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                   title="2.1 Consultar Saldos da Tesouraria Comercial"
                 />
                 <p className="text-xs sm:text-sm text-ink-muted">
-                  Retorna os saldos disponíveis em caixa em todas as 9 criptomoedas suportadas prontos para envio (representados em 8 decimais / satoshis).
+                  Retorna os saldos disponíveis em caixa em todas as moedas da conta ({COINS.join(', ')}), em unidades de ledger de 8 decimais.
                 </p>
 
                 <CodeBlock
                   label="CURL"
-                  code={`curl -X GET https://satspay.pro/v1/public/balance \\
+                  code={`curl -X GET ${API_BASE}/v1/public/balance \\
   -H "x-api-key: SUA_CHAVE_DE_API"`}
                 />
 
@@ -782,7 +1462,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
   "LTC": "25000000",           // 0.25 LTC (8 decimais: 100,000,000 = 1.0 LTC)
   "DOGE": "100000000",         // 1.00 DOGE (8 decimais: 100,000,000 = 1.0 DOGE)
   "BCH": "1500000",            // 0.015 BCH (8 decimais: 100,000,000 = 1.0 BCH)
-  "DGB": "50000000"            // 0.50 DGB (8 decimais: 100,000,000 = 1.0 DGB)
+  "DGB": "50000000",            // 0.50 DGB
+  "ZER": "100000000",           // 1.00 ZER
+  "PEPE": "100000000"           // 1.00 PEPE (ledger 8 decimais; na BNB Smart Chain o token tem 18)
 }`}
                 />
               </div>
@@ -796,21 +1478,64 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                   badge="Liquidação Instantânea (0ms)"
                 />
                 <p className="text-xs sm:text-sm text-ink-muted">
-                  Transfere fundos da sua carteira comercial para a conta SatsPay do usuário indicado pelo e-mail com garantia anti-duplicação via <code className="font-mono font-bold text-ink">idempotencyKey</code>.
+                  Debita a sua carteira comercial e credita a conta SatsPay do campo <code className="font-mono font-bold text-ink">toEmail</code>. Liquidação interna, sem taxa de rede. <code className="font-mono font-bold text-ink">idempotencyKey</code> impede o mesmo envio duas vezes.
                 </p>
+
+                <div className="rounded-2xl border border-border bg-surface p-4 space-y-2">
+                  <div className="flex items-center gap-2 text-ink font-bold text-xs">
+                    <i className="bi bi-envelope-check text-bitcoin text-base" />
+                    <span>De onde sai o toEmail</span>
+                  </div>
+                  <p className="text-xs text-ink-muted leading-relaxed">
+                    É o e-mail da conta que recebe. Não é o e-mail da sua chave de API e não é endereço de carteira. Os dois jeitos abaixo são válidos — use o que o seu cliente escolheu:
+                  </p>
+                  <ol className="text-xs text-ink-muted leading-relaxed list-decimal pl-4 space-y-1">
+                    <li><b className="text-ink">Ele digita</b> o e-mail da conta SatsPay num campo do seu site. Esse texto vai em <code className="font-mono text-ink font-bold">toEmail</code>.</li>
+                    <li><b className="text-ink">Ele entra com SatsPay.</b> O <code className="font-mono text-ink font-bold">email</code> de <code className="font-mono text-ink font-bold">GET /v1/oauth/userinfo</code> (<code className="font-mono text-ink font-bold">email_verified: true</code>) também vai em <code className="font-mono text-ink font-bold">toEmail</code>.</li>
+                  </ol>
+                  <p className="text-xs text-ink-muted leading-relaxed">
+                    Se não existir conta SatsPay com esse e-mail, a chamada falha com <code className="font-mono text-ink font-bold">TARGET_INELIGIBLE</code> e nada é debitado.
+                  </p>
+                </div>
+
+                <div className="rounded-2xl border border-amber-500/30 bg-amber-500/5 p-4 space-y-2">
+                  <div className="flex items-center gap-2 text-ink font-bold text-xs">
+                    <i className="bi bi-person-x text-amber-600 text-base" />
+                    <span>Não dá para enviar para a conta dona da chave</span>
+                  </div>
+                  <p className="text-xs text-ink-muted leading-relaxed">
+                    <code className="font-mono text-ink font-bold">toEmail</code> não pode ser o e-mail da conta SatsPay que emitiu a chave de API. A resposta é <code className="font-mono text-ink font-bold">400</code> com <code className="font-mono text-ink font-bold">code: SEND_TO_SELF</code> e a frase <code className="font-mono text-ink font-bold">cannot send to the SatsPay account that owns this API key</code>. Nada é debitado. Isso não é falta de saldo.
+                  </p>
+                  <p className="text-xs text-ink-muted leading-relaxed">
+                    Acontece quando você testa o envio logado com o mesmo e-mail do comerciante. O jogador ou cliente real, com outra conta SatsPay, passa. Mostre o <code className="font-mono text-ink font-bold">error</code> e o <code className="font-mono text-ink font-bold">code</code> para quem chama — não troque por um texto genérico de “tente de novo”.
+                  </p>
+                </div>
+
+                <div className="rounded-2xl border border-border bg-surface p-4 space-y-2">
+                  <div className="flex items-center gap-2 text-ink font-bold text-xs">
+                    <i className="bi bi-shield-lock text-bitcoin text-base" />
+                    <span>Requisitos desta rota</span>
+                  </div>
+                  <ul className="text-xs text-ink-muted leading-relaxed list-disc pl-4 space-y-1">
+                    <li>A chave precisa do escopo <code className="font-mono text-ink font-bold">send</code> — sem ele, <code className="font-mono text-ink font-bold">403 MISSING_SCOPE</code>.</li>
+                    <li>Existe um limite diário de envios por chave; ao estourar, <code className="font-mono text-ink font-bold">DAILY_LIMIT_REACHED</code>.</li>
+                    <li>O destinatário precisa ter conta SatsPay com o e-mail informado. Endereço on-chain não é aceito aqui.</li>
+                    <li>Diferente do gateway de depósitos, <b>nenhuma moeda fica pausada</b> aqui — o envio é interno (ledger).</li>
+                  </ul>
+                </div>
 
                 <ParamsTable
                   params={[
-                    { name: 'coin', type: 'String', required: true, desc: 'Criptomoeda a transferir (USDT, USDC, BTC, SOL, POL, LTC, DOGE, BCH, DGB).', example: '"USDT"' },
-                    { name: 'toEmail', type: 'String', required: true, desc: 'E-mail cadastrado na conta SatsPay do usuário destinatário.', example: '"usuario@email.com"' },
-                    { name: 'amount', type: 'String', required: true, desc: 'Quantidade na menor fração / 8 decimais (ex: "100000000" = 1.00 moeda).', example: '"1000000000"' },
+                    { name: 'coin', type: 'String', required: true, desc: 'Criptomoeda a transferir (USDT, USDC, BTC, SOL, POL, LTC, DOGE, BCH, DGB, ZER, PEPE).', example: '"USDT"' },
+                    { name: 'toEmail', type: 'String', required: true, desc: 'E-mail da conta SatsPay que recebe. O seu usuário pode digitá-lo, ou você usa o email verificado do Login com SatsPay (GET /v1/oauth/userinfo). Os dois servem. Sem conta: 400 TARGET_INELIGIBLE, nada debitado. Se for a conta dona da chave: 400 SEND_TO_SELF, nada debitado — não é falta de saldo.', example: '"usuario@email.com"' },
+                    { name: 'amount', type: 'String', required: true, desc: `Inteiro na menor fração interna (${INTERNAL_AMOUNT_DECIMALS} decimais), igual ao gateway de depósitos: "${toLedgerUnits(1)}" = 1,00 moeda.`, example: `"${toLedgerUnits(10)}"` },
                     { name: 'idempotencyKey', type: 'String', required: true, desc: 'ID único da sua operação para evitar cobrança ou envio duplicado.', example: '"payout_ord_99812"' },
                   ]}
                 />
 
                 <MultiLangCodeBlock
                   snippets={{
-                    curl: `curl -X POST https://satspay.pro/v1/public/send \\
+                    curl: `curl -X POST ${API_BASE}/v1/public/send \\
   -H "x-api-key: SUA_CHAVE_DE_API" \\
   -H "Content-Type: application/json" \\
   -d '{
@@ -819,7 +1544,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     "amount": "1000000000",
     "idempotencyKey": "payout_tx_99821"
   }'`,
-                    js: `const res = await fetch('https://satspay.pro/v1/public/send', {
+                    js: `const res = await fetch('${API_BASE}/v1/public/send', {
   method: 'POST',
   headers: {
     'x-api-key': 'SUA_CHAVE_DE_API',
@@ -837,7 +1562,7 @@ const data = await res.json();
 console.log('ID da Transação:', data.referenceId);`,
                     python: `import requests
 
-url = "https://satspay.pro/v1/public/send"
+url = "${API_BASE}/v1/public/send"
 headers = {
     "x-api-key": "SUA_CHAVE_DE_API",
     "Content-Type": "application/json"
@@ -862,7 +1587,7 @@ $payload = [
 ];
 
 curl_setopt_array($curl, [
-  CURLOPT_URL => "https://satspay.pro/v1/public/send",
+  CURLOPT_URL => "${API_BASE}/v1/public/send",
   CURLOPT_RETURNTRANSFER => true,
   CURLOPT_POST => true,
   CURLOPT_POSTFIELDS => json_encode($payload),
@@ -891,7 +1616,7 @@ func main() {
 		"idempotencyKey": "payout_tx_99821",
 	})
 
-	req, _ := http.NewRequest("POST", "https://satspay.pro/v1/public/send", bytes.NewBuffer(payload))
+	req, _ := http.NewRequest("POST", "${API_BASE}/v1/public/send", bytes.NewBuffer(payload))
 	req.Header.Set("x-api-key", "SUA_CHAVE_DE_API")
 	req.Header.Set("Content-Type", "application/json")
 
@@ -910,7 +1635,7 @@ use serde_json::json;
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let client = Client::new();
     let res = client
-        .post("https://satspay.pro/v1/public/send")
+        .post("${API_BASE}/v1/public/send")
         .header("x-api-key", "SUA_CHAVE_DE_API")
         .json(&json!({
             "coin": "USDT",
@@ -1003,7 +1728,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
               <div className="space-y-4 pt-4 border-t border-border/80">
                 <EndpointHeader
                   method="GET"
-                  path="https://www.satspay.pro/sdk/satspay-auth.v2.js"
+                  path={`${API_BASE}/sdk/satspay-auth.v2.js`}
                   title="3.1 Integração Frontend via JavaScript SDK"
                   badge="Recomendado"
                 />
@@ -1014,7 +1739,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 <CodeBlock
                   label="HTML SNIPPET"
                   code={`<!-- 1. Carregue o SDK JavaScript oficial do SatsPay -->
-<script src="https://www.satspay.pro/sdk/satspay-auth.v2.js" async defer></script>
+<script src="${API_BASE}/sdk/satspay-auth.v2.js" async defer></script>
 
 <!-- 2. Adicione o elemento do botão na sua página de login -->
 <div class="satspay-signin"
@@ -1053,7 +1778,7 @@ function onSatsPaySignIn(response) {
 
                 <MultiLangCodeBlock
                   snippets={{
-                    curl: `curl -X POST https://www.satspay.pro/v1/oauth/token \\
+                    curl: `curl -X POST ${API_BASE}/v1/oauth/token \\
   -H "Content-Type: application/x-www-form-urlencoded" \\
   -d "grant_type=authorization_code" \\
   -d "code=sats_code_xyz123abc456" \\
@@ -1061,7 +1786,7 @@ function onSatsPaySignIn(response) {
   -d "client_secret=sats_sec_SEU_CLIENT_SECRET" \\
   -d "redirect_uri=https://seusite.com/auth/callback"`,
 
-                    js: `const response = await fetch('https://www.satspay.pro/v1/oauth/token', {
+                    js: `const response = await fetch('${API_BASE}/v1/oauth/token', {
   method: 'POST',
   headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
   body: new URLSearchParams({
@@ -1076,7 +1801,7 @@ const { access_token } = await response.json();`,
 
                     python: `import requests
 
-res = requests.post('https://www.satspay.pro/v1/oauth/token', data={
+res = requests.post('${API_BASE}/v1/oauth/token', data={
     'grant_type': 'authorization_code',
     'code': auth_code,
     'client_id': SATSPAY_CLIENT_ID,
@@ -1086,7 +1811,7 @@ res = requests.post('https://www.satspay.pro/v1/oauth/token', data={
 access_token = res.json()['access_token']`,
 
                     php: `<?php
-$ch = curl_init('https://www.satspay.pro/v1/oauth/token');
+$ch = curl_init('${API_BASE}/v1/oauth/token');
 curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
 curl_setopt($ch, CURLOPT_POST, true);
 curl_setopt($ch, CURLOPT_POSTFIELDS, http_build_query([
@@ -1115,7 +1840,7 @@ func exchangeCode(code, clientID, clientSecret, redirectURI string) (string, err
         "client_secret": {clientSecret},
         "redirect_uri":  {redirectURI},
     }
-    resp, err := http.PostForm("https://www.satspay.pro/v1/oauth/token", formData)
+    resp, err := http.PostForm("${API_BASE}/v1/oauth/token", formData)
     if err != nil { return "", err }
     defer resp.Body.Close()
 
@@ -1138,7 +1863,7 @@ async fn exchange_token(code: &str, client_id: &str, secret: &str, redirect_uri:
 
     let client = Client::new();
     let res = client
-        .post("https://www.satspay.pro/v1/oauth/token")
+        .post("${API_BASE}/v1/oauth/token")
         .form(&params)
         .send()
         .await?
@@ -1174,10 +1899,10 @@ async fn exchange_token(code: &str, client_id: &str, secret: &str, redirect_uri:
 
                 <MultiLangCodeBlock
                   snippets={{
-                    curl: `curl -X GET https://www.satspay.pro/v1/oauth/userinfo \\
+                    curl: `curl -X GET ${API_BASE}/v1/oauth/userinfo \\
   -H "Authorization: Bearer sats_tok_a1b2c3d4e5f6g7h8i9j0"`,
 
-                    js: `const userRes = await fetch('https://www.satspay.pro/v1/oauth/userinfo', {
+                    js: `const userRes = await fetch('${API_BASE}/v1/oauth/userinfo', {
   headers: {
     'Authorization': \`Bearer \${accessToken}\`
   }
@@ -1185,14 +1910,14 @@ async fn exchange_token(code: &str, client_id: &str, secret: &str, redirect_uri:
 const user = await userRes.json();
 console.log('ID:', user.sub, 'Username:', user.username, 'Email:', user.email);`,
 
-                    python: `user_res = requests.get('https://www.satspay.pro/v1/oauth/userinfo', headers={
+                    python: `user_res = requests.get('${API_BASE}/v1/oauth/userinfo', headers={
     'Authorization': f'Bearer {access_token}'
 })
 user = user_res.json()
 print(f"Logado como @{user['username']} ({user['email']})")`,
 
                     rust: `let user_info = reqwest::Client::new()
-    .get("https://www.satspay.pro/v1/oauth/userinfo")
+    .get("${API_BASE}/v1/oauth/userinfo")
     .bearer_auth(access_token)
     .send()
     .await?
@@ -1228,8 +1953,139 @@ println!("Usuário: {}", user_info["username"]);`,
                   </div>
                 </div>
                 <code className="rounded-xl bg-paper px-3 py-1 font-mono text-xs font-bold text-bitcoin border border-border select-all">
-                  https://www.satspay.pro/.well-known/openid-configuration
+                  {API_BASE}/.well-known/openid-configuration
                 </code>
+              </div>
+            </section>
+
+            {/* ===================================================================== */}
+            {/* FLUXO MANUAL: QUEM NÃO USA O SDK                                       */}
+            {/* ===================================================================== */}
+            <section className="rounded-3xl border border-border bg-paper p-6 sm:p-8 shadow-xs space-y-8">
+              <div className="flex items-center gap-3 border-b border-border/80 pb-4">
+                <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-indigo-500/10 text-indigo-600 text-2xl">
+                  <i className="bi bi-braces-asterisk" />
+                </div>
+                <div>
+                  <h2 className="text-xl sm:text-2xl font-black text-ink">Fluxo manual (sem o SDK)</h2>
+                  <p className="text-xs sm:text-sm text-ink-muted">
+                    Os parâmetros do <code className="font-mono">authorize</code> para quem implementa o
+                    <em> authorization code</em> na mão ou usa uma biblioteca OIDC genérica.
+                  </p>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-emerald-500/25 bg-emerald-500/5 p-4 text-xs text-emerald-800 leading-relaxed">
+                <i className="bi bi-shield-lock-fill mr-1.5" />
+                <strong>PKCE é obrigatório</strong> — <code className="font-mono">code_challenge_method=S256</code>.
+                Sem ele a autorização é recusada, inclusive para clientes confidenciais.
+              </div>
+
+              <div className="space-y-4">
+                <EndpointHeader method="GET" path="/v1/oauth/authorize/info" title="Dados da tela de consentimento" badge="JWT opcional" />
+                <p className="text-xs text-ink-muted leading-relaxed">
+                  Valida os parâmetros antes de mostrar qualquer coisa ao usuário e devolve o nome do app e os
+                  escopos pedidos, para você desenhar a tela de consentimento. Sem sessão, indica que é preciso
+                  autenticar primeiro.
+                </p>
+                <ParamsTable
+                  params={[
+                    { name: 'client_id', type: 'string', required: true, desc: 'ID do aplicativo OAuth.' },
+                    { name: 'redirect_uri', type: 'string', required: true, desc: 'Precisa bater EXATAMENTE com uma das URLs cadastradas no app. Prefixo não basta — é essa checagem que impede o código de vazar para outro domínio.' },
+                    { name: 'scope', type: 'string', required: true, desc: 'Escopos separados por espaço. Inclua "openid" para receber id_token.', example: 'openid profile email' },
+                    { name: 'state', type: 'string', required: true, desc: 'Valor opaco e aleatório. Volta intacto no redirect — é como você detecta CSRF.' },
+                    { name: 'code_challenge', type: 'string', required: true, desc: 'SHA-256 do code_verifier, em base64url sem padding.' },
+                    { name: 'code_challenge_method', type: 'string', required: true, desc: 'Sempre "S256". "plain" não é aceito.', example: 'S256' },
+                  ]}
+                />
+              </div>
+
+              <div className="space-y-4">
+                <EndpointHeader method="POST" path="/v1/oauth/authorize" title="Registrar o consentimento" badge="Bearer JWT" />
+                <p className="text-xs text-ink-muted leading-relaxed">
+                  Chamado quando o usuário aceita. Devolve o <code className="font-mono">code</code> para o
+                  <code className="font-mono"> redirect_uri</code>, junto com o <code className="font-mono">state</code>.
+                  O código é de <strong>uso único</strong> e expira em minutos.
+                </p>
+                <MultiLangCodeBlock
+                  snippets={{
+                    curl: `curl -X POST ${API_BASE}/v1/oauth/authorize \\
+  -H "Authorization: Bearer $JWT_DO_USUARIO" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "client_id": "app_123",
+    "redirect_uri": "https://sua-loja.com/callback",
+    "scope": "openid profile email",
+    "state": "$STATE_ALEATORIO",
+    "code_challenge": "$CODE_CHALLENGE",
+    "code_challenge_method": "S256"
+  }'`,
+                    js: `// 1. gere o verifier e o challenge
+const verifier = base64url(crypto.getRandomValues(new Uint8Array(32)));
+const challenge = base64url(
+  new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier))),
+);
+
+// 2. peça o consentimento
+const res = await fetch('${API_BASE}/v1/oauth/authorize', {
+  method: 'POST',
+  headers: { Authorization: \`Bearer \${jwt}\`, 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    client_id: 'app_123',
+    redirect_uri: 'https://sua-loja.com/callback',
+    scope: 'openid profile email',
+    state,
+    code_challenge: challenge,
+    code_challenge_method: 'S256',
+  }),
+});
+
+// 3. guarde o verifier: o token exchange vai precisar dele`,
+                  }}
+                />
+              </div>
+
+              <div className="space-y-4 pt-4 border-t border-border/80">
+                <h3 className="text-sm font-black text-ink">Gerenciar seus aplicativos</h3>
+                <div className="space-y-4">
+                  <EndpointHeader method="GET" path="/v1/oauth/apps" title="Listar / criar aplicativos" badge="Bearer JWT" />
+                  <p className="text-xs text-ink-muted leading-relaxed">
+                    <code className="font-mono">GET</code> lista os seus; <code className="font-mono">POST</code> cria
+                    um novo com <code className="font-mono">name</code>, <code className="font-mono">redirectUris</code> e
+                    logo. O <strong>client_secret aparece uma única vez</strong>, na resposta da criação.
+                  </p>
+                </div>
+                <div className="space-y-4">
+                  <EndpointHeader method="POST" path="/v1/oauth/apps/:id" title="Atualizar ou remover (PUT / DELETE)" badge="Bearer JWT" />
+                  <p className="text-xs text-ink-muted leading-relaxed">
+                    <code className="font-mono">PUT</code> altera nome, logo e
+                    <code className="font-mono"> redirectUris</code>; <code className="font-mono">DELETE</code> remove o
+                    app. App de outro dono responde <code className="font-mono">403</code>.
+                  </p>
+                </div>
+                <div className="space-y-4">
+                  <EndpointHeader method="POST" path="/v1/oauth/apps/:id/rotate-secret" title="Rotacionar o client secret" badge="Bearer JWT" />
+                  <p className="text-xs text-ink-muted leading-relaxed">
+                    Gera um segredo novo; o anterior deixa de valer imediatamente.
+                  </p>
+                </div>
+              </div>
+
+              <div className="space-y-4 pt-4 border-t border-border/80">
+                <h3 className="text-sm font-black text-ink">Do outro lado: o que o usuário autorizou</h3>
+                <div className="space-y-4">
+                  <EndpointHeader method="GET" path="/v1/oauth/authorized-apps" title="Aplicativos autorizados pelo usuário" badge="Bearer JWT" />
+                  <p className="text-xs text-ink-muted leading-relaxed">
+                    Lista os apps a que <strong>este</strong> usuário concedeu acesso. É o que alimenta a tela de
+                    "aplicativos conectados" da conta.
+                  </p>
+                </div>
+                <div className="space-y-4">
+                  <EndpointHeader method="DELETE" path="/v1/oauth/authorized-apps/:id" title="Revogar um consentimento" badge="Bearer JWT" />
+                  <p className="text-xs text-ink-muted leading-relaxed">
+                    Revoga o acesso e invalida os tokens daquele app. O usuário sempre pode desfazer o que autorizou.
+                  </p>
+                </div>
               </div>
             </section>
           </motion.div>
@@ -1261,71 +2117,163 @@ println!("Usuário: {}", user_info["username"]);`,
                 </div>
               </div>
 
-              {/* 4 PILARES DE SEGURANÇA */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="rounded-2xl border border-border bg-surface p-4 space-y-2">
-                  <div className="flex items-center gap-2 text-emerald-600 font-bold text-xs">
-                    <i className="bi bi-link-45deg text-base" />
-                    <span>1. Checkout Hospedado Seguro (Isolamento de Credenciais)</span>
+              {/* AUTENTICAÇÃO */}
+              <div className="space-y-4">
+                <h3 className="text-lg font-black text-ink flex items-center gap-2">
+                  <i className="bi bi-key-fill text-bitcoin" />
+                  <span>Como autenticar suas chamadas</span>
+                </h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="rounded-2xl border border-border bg-surface p-4 space-y-2">
+                    <div className="flex items-center gap-2 text-emerald-600 font-bold text-xs">
+                      <i className="bi bi-1-circle-fill text-base" />
+                      <span>Header simples: `x-api-key`</span>
+                    </div>
+                    <p className="text-xs text-ink-muted leading-relaxed">
+                      Envie sua chave de 64 caracteres hexadecimais no header{' '}
+                      <code className="font-mono text-ink font-bold">x-api-key</code>. Simples e suficiente para a maioria
+                      das integrações.
+                    </p>
+                  </div>
+
+                  <div className="rounded-2xl border border-border bg-surface p-4 space-y-2">
+                    <div className="flex items-center gap-2 text-blue-600 font-bold text-xs">
+                      <i className="bi bi-2-circle-fill text-base" />
+                      <span>Requisição assinada (HMAC)</span>
+                    </div>
+                    <p className="text-xs text-ink-muted leading-relaxed">
+                      Envie <code className="font-mono text-ink font-bold">x-key-id</code>,{' '}
+                      <code className="font-mono text-ink font-bold">x-timestamp</code> e{' '}
+                      <code className="font-mono text-ink font-bold">x-signature</code>. A assinatura cobre{' '}
+                      <code className="font-mono">timestamp + método + caminho + SHA-256 do corpo</code>, a janela é de 300s
+                      e cada assinatura só pode ser usada uma vez (proteção contra replay).
+                    </p>
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-amber-500/30 bg-amber-500/5 p-4 space-y-2">
+                  <div className="flex items-center gap-2 text-amber-700 font-bold text-xs">
+                    <i className="bi bi-exclamation-triangle-fill text-base" />
+                    <span>Chave criada com “exigir assinatura”</span>
                   </div>
                   <p className="text-xs text-ink-muted leading-relaxed">
-                    O seu cliente é redirecionado com segurança para o domínio oficial <code className="font-mono text-ink font-bold">https://satspay.pro/pay/:id</code>. Suas chaves de API <b>nunca são expostas</b> no navegador do cliente nem no código HTML do seu site.
+                    Uma chave emitida com <code className="font-mono text-ink font-bold">requireSignature: true</code> recusa o
+                    caminho do <code className="font-mono text-ink font-bold">x-api-key</code> em <b>todos</b> os endpoints e
+                    responde <code className="font-mono text-ink font-bold">401 KEY_REQUIRES_SIGNATURE</code>. Use requisições
+                    assinadas com essa chave — ou emita uma chave sem essa opção.
                   </p>
                 </div>
 
-                <div className="rounded-2xl border border-border bg-surface p-4 space-y-2">
-                  <div className="flex items-center gap-2 text-blue-600 font-bold text-xs">
-                    <i className="bi bi-shield-lock-fill text-base" />
-                    <span>2. Assinatura HMAC-SHA256 & Anti-Replay</span>
-                  </div>
-                  <p className="text-xs text-ink-muted leading-relaxed">
-                    Todas as notificações enviadas para a sua URL de Webhook contêm a assinatura <code className="font-mono text-ink font-bold">x-satspay-signature</code> gerada com seu Secret e timestamp. Isso impede fraudes e ataques de repetição.
-                  </p>
+                <div className="overflow-x-auto rounded-2xl border border-border bg-surface">
+                  <table className="w-full text-left text-xs">
+                    <thead className="border-b border-border bg-paper text-[10px] font-extrabold uppercase tracking-wider text-ink-muted">
+                      <tr>
+                        <th className="px-4 py-2.5">Escopo</th>
+                        <th className="px-4 py-2.5">Libera</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border">
+                      <tr>
+                        <td className="px-4 py-2.5 font-mono font-bold text-ink">deposits</td>
+                        <td className="px-4 py-2.5 text-ink-muted">Gateway de cobranças (<code className="font-mono">/v1/merchant/*</code>)</td>
+                      </tr>
+                      <tr>
+                        <td className="px-4 py-2.5 font-mono font-bold text-ink">send</td>
+                        <td className="px-4 py-2.5 text-ink-muted">Envios/payouts (<code className="font-mono">POST /v1/public/send</code>)</td>
+                      </tr>
+                    </tbody>
+                  </table>
                 </div>
+                <p className="text-[11px] text-ink-muted">
+                  Escopos são <b>minúsculos</b> e comparados literalmente; <code className="font-mono">"*"</code> libera tudo.
+                  Uma chave sem <code className="font-mono">deposits</code> recebe{' '}
+                  <code className="font-mono font-bold text-ink">403 MISSING_SCOPE</code> ao criar faturas.
+                  Se você cadastrar IPs na whitelist da chave, apenas o IP de origem real do seu servidor é aceito —
+                  qualquer outro recebe <code className="font-mono font-bold text-ink">401 IP_NOT_ALLOWED</code>.
+                </p>
+              </div>
 
-                <div className="rounded-2xl border border-border bg-surface p-4 space-y-2">
-                  <div className="flex items-center gap-2 text-bitcoin text-xs font-bold">
-                    <i className="bi bi-fingerprint text-base" />
-                    <span>3. Restrição por Whitelist de IPs</span>
-                  </div>
-                  <p className="text-xs text-ink-muted leading-relaxed">
-                    Ao cadastrar suas chaves na aba <b>API Keys</b>, você pode restringir o acesso exclusivamente aos endereços IP dos seus servidores. Qualquer requisição vinda de outro IP é bloqueada pelo firewall do gateway.
-                  </p>
-                </div>
+              {/* WEBHOOK: CONTRATO REAL */}
+              <div className="space-y-4 pt-6 border-t border-border/80">
+                <h3 className="text-lg font-black text-ink flex items-center gap-2">
+                  <i className="bi bi-broadcast-pin text-emerald-600" />
+                  <span>Webhook: contrato exato</span>
+                </h3>
+                <p className="text-xs sm:text-sm text-ink-muted">
+                  Um único evento é emitido hoje: <code className="font-mono font-bold text-ink">deposit.confirmed</code>,
+                  quando a fatura vira <code className="font-mono font-bold text-ink">CONFIRMED</code>. Ele é entregue por{' '}
+                  <code className="font-mono font-bold text-ink">POST</code> na sua{' '}
+                  <code className="font-mono font-bold text-ink">callbackUrl</code>, com até 8 tentativas e backoff
+                  exponencial enquanto a resposta não for 2xx.
+                </p>
 
-                <div className="rounded-2xl border border-border bg-surface p-4 space-y-2">
-                  <div className="flex items-center gap-2 text-purple-600 font-bold text-xs">
-                    <i className="bi bi-arrow-repeat text-base" />
-                    <span>4. Chave de Idempotência Obrigatória</span>
-                  </div>
-                  <p className="text-xs text-ink-muted leading-relaxed">
-                    Envios e saques exigem o parâmetro <code className="font-mono text-ink font-bold">idempotencyKey</code>. Em caso de oscilações de rede ou reenvios automáticos, a operação é executada exatamente uma única vez, prevenindo transferências duplicadas.
-                  </p>
-                </div>
+                <CodeBlock
+                  label="HTTP REQUEST"
+                  code={`POST https://meusite.com/api/webhook
+Content-Type: application/json
+X-SatsPay-Signature: sha256=<hex HMAC-SHA256 do corpo cru>
+X-SatsPay-Event: deposit.confirmed
+X-SatsPay-Timestamp: 1789412330
+X-SatsPay-Delivery: 7c6f1f0e-1d2a-4a55-9a1e-6b2c0d9f4e11`}
+                />
+
+                <CodeBlock
+                  label="JSON BODY"
+                  code={`{
+  "event": "deposit.confirmed",
+  "invoiceId": "550e8400-e29b-41d4-a716-446655440000",
+  "orderId": "ORD-99821",
+  "siteUserId": "user_4412",
+  "coin": "USDT",
+  "amount": "2500000000",
+  "fee": "6250000",
+  "netAmount": "2493750000",
+  "txHash": "0x4a8f9c2d1e0b3a7f8e6c5d4b3a2f1e0d9c8b7a6f5e4d3c2b1a0f9e8d7c6b5a4",
+  "status": "CONFIRMED",
+  "paidAt": "2026-09-02T17:32:10.442Z",
+  "customerEmail": "cliente@email.com",
+  "timestamp": 1789412330,
+  "attempt": 1
+}`}
+                />
+                <p className="text-[11px] text-ink-muted leading-relaxed">
+                  Note que o campo da taxa no webhook chama-se <code className="font-mono text-ink font-bold">fee</code>,
+                  enquanto na resposta de criação da fatura ele é <code className="font-mono text-ink font-bold">feeAmount</code>.
+                  Pagamentos feitos com saldo SatsPay chegam com{' '}
+                  <code className="font-mono text-ink font-bold">txHash: "internal_satspay"</code>.
+                </p>
               </div>
 
               {/* CHECKLIST DE SEGURANÇA EM PRODUÇÃO */}
               <div className="rounded-2xl border border-blue-500/20 bg-blue-500/5 p-5 space-y-3">
                 <div className="flex items-center gap-2 text-blue-700 font-bold text-sm">
                   <i className="bi bi-check2-square text-base" />
-                  <span>Checklist de Segurança Antes de Publicar em Produção:</span>
+                  <span>Checklist antes de publicar em produção:</span>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs text-ink">
                   <div className="flex items-start gap-2 bg-paper/60 p-2.5 rounded-xl border border-border">
                     <i className="bi bi-check-circle-fill text-emerald-600 shrink-0 mt-0.5" />
-                    <span>Guardar API Key e Secret exclusivamente em variáveis de ambiente (<code>.env</code>) no backend.</span>
+                    <span>Guardar API Key e segredo do webhook em variáveis de ambiente no backend — nunca no front.</span>
                   </div>
                   <div className="flex items-start gap-2 bg-paper/60 p-2.5 rounded-xl border border-border">
                     <i className="bi bi-check-circle-fill text-emerald-600 shrink-0 mt-0.5" />
-                    <span>Cadastrar o IP fixo do seu servidor na Whitelist da API Key no painel.</span>
+                    <span>Cadastrar o IP fixo do seu servidor na whitelist da API Key.</span>
                   </div>
                   <div className="flex items-start gap-2 bg-paper/60 p-2.5 rounded-xl border border-border">
                     <i className="bi bi-check-circle-fill text-emerald-600 shrink-0 mt-0.5" />
-                    <span>Comparar a assinatura HMAC com funções de tempo constante (<code>timingSafeEqual</code> / <code>hash_equals</code>).</span>
+                    <span>Comparar a assinatura com função de tempo constante (<code>timingSafeEqual</code> / <code>hash_equals</code>).</span>
                   </div>
                   <div className="flex items-start gap-2 bg-paper/60 p-2.5 rounded-xl border border-border">
                     <i className="bi bi-check-circle-fill text-emerald-600 shrink-0 mt-0.5" />
-                    <span>Validar que o timestamp do webhook não difira mais de 300 segundos do horário atual.</span>
+                    <span>Rejeitar webhooks cujo <code>timestamp</code> (no corpo) difira mais de 300s do seu relógio.</span>
+                  </div>
+                  <div className="flex items-start gap-2 bg-paper/60 p-2.5 rounded-xl border border-border">
+                    <i className="bi bi-check-circle-fill text-emerald-600 shrink-0 mt-0.5" />
+                    <span>Tratar entregas repetidas: credite por <code>invoiceId</code>/<code>orderId</code> uma única vez.</span>
+                  </div>
+                  <div className="flex items-start gap-2 bg-paper/60 p-2.5 rounded-xl border border-border">
+                    <i className="bi bi-check-circle-fill text-emerald-600 shrink-0 mt-0.5" />
+                    <span>Responder 2xx rápido; qualquer outra resposta agenda nova tentativa.</span>
                   </div>
                 </div>
               </div>
@@ -1337,42 +2285,51 @@ println!("Usuário: {}", user_info["username"]);`,
                   <span>Como Validar a Assinatura do Webhook no Seu Servidor</span>
                 </h3>
                 <p className="text-xs sm:text-sm text-ink-muted">
-                  Sempre valide o cabeçalho <code className="font-mono font-bold text-ink">x-satspay-signature</code> antes de liberar produtos ou creditar o usuário no seu banco de dados:
+                  O header chega como <code className="font-mono font-bold text-ink">sha256=&lt;hex&gt;</code> — remova o
+                  prefixo antes de comparar, e assine o <b>corpo cru</b>, não o JSON reserializado:
                 </p>
 
                 <MultiLangCodeBlock
                   snippets={{
                     js: `import crypto from 'crypto';
 
-// No seu endpoint de Webhook (Express / Next.js / Fastify):
-function verifySatsPayWebhook(rawBodyString, signatureHeader, apiSecret) {
-  const expectedSignature = crypto
-    .createHmac('sha256', apiSecret)
-    .update(rawBodyString)
-    .digest('hex');
+// Express: use express.raw({ type: 'application/json' }) nesta rota.
+function verifySatsPayWebhook(rawBody, signatureHeader, webhookSecret) {
+  const received = String(signatureHeader || '').replace(/^sha256=/i, '');
+  const expected = crypto.createHmac('sha256', webhookSecret).update(rawBody).digest('hex');
 
-  // Comparação segura contra Timing Attacks:
-  return crypto.timingSafeEqual(
-    Buffer.from(signatureHeader, 'hex'),
-    Buffer.from(expectedSignature, 'hex')
-  );
+  const a = Buffer.from(received, 'hex');
+  const b = Buffer.from(expected, 'hex');
+  if (a.length !== b.length) return false;              // timingSafeEqual exige mesmo tamanho
+  if (!crypto.timingSafeEqual(a, b)) return false;
+
+  const body = JSON.parse(rawBody.toString('utf8'));
+  const ageSeconds = Math.abs(Date.now() / 1000 - body.timestamp);
+  return ageSeconds <= 300;                              // anti-replay
 }`,
                     python: `import hmac
 import hashlib
+import json
+import time
 
-def verify_satspay_webhook(raw_body_bytes, signature_header, api_secret):
-    expected = hmac.new(
-        api_secret.encode('utf-8'),
-        raw_body_bytes,
-        hashlib.sha256
-    ).hexdigest()
-    
-    # Comparação timing-safe:
-    return hmac.compare_digest(signature_header, expected)`,
+def verify_satspay_webhook(raw_body: bytes, signature_header: str, webhook_secret: str) -> bool:
+    received = (signature_header or "").removeprefix("sha256=")
+    expected = hmac.new(webhook_secret.encode("utf-8"), raw_body, hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(received, expected):
+        return False
+
+    body = json.loads(raw_body)
+    return abs(time.time() - body["timestamp"]) <= 300`,
                     php: `<?php
-function verifySatsPayWebhook($rawBody, $signatureHeader, $apiSecret) {
-    $expected = hash_hmac('sha256', $rawBody, $apiSecret);
-    return hash_equals($signatureHeader, $expected);
+function verifySatsPayWebhook(string $rawBody, string $signatureHeader, string $webhookSecret): bool {
+    $received = preg_replace('/^sha256=/i', '', $signatureHeader);
+    $expected = hash_hmac('sha256', $rawBody, $webhookSecret);
+    if (!hash_equals($expected, $received)) {
+        return false;
+    }
+
+    $body = json_decode($rawBody, true);
+    return abs(time() - $body['timestamp']) <= 300;
 }`,
                     go: `package main
 
@@ -1380,26 +2337,40 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
+	"math"
+	"strings"
+	"time"
 )
 
-func VerifyWebhook(rawBody []byte, signatureHeader string, apiSecret string) bool {
-	mac := hmac.New(sha256.New, []byte(apiSecret))
+func VerifyWebhook(rawBody []byte, signatureHeader, webhookSecret string) bool {
+	received := strings.TrimPrefix(signatureHeader, "sha256=")
+	mac := hmac.New(sha256.New, []byte(webhookSecret))
 	mac.Write(rawBody)
 	expected := hex.EncodeToString(mac.Sum(nil))
-	return hmac.Equal([]byte(signatureHeader), []byte(expected))
+	if !hmac.Equal([]byte(received), []byte(expected)) {
+		return false
+	}
+
+	var body struct {
+		Timestamp int64 \`json:"timestamp"\`
+	}
+	if err := json.Unmarshal(rawBody, &body); err != nil {
+		return false
+	}
+	return math.Abs(float64(time.Now().Unix()-body.Timestamp)) <= 300
 }`,
                     rust: `use hmac::{Hmac, Mac};
 use sha2::Sha256;
 
-pub fn verify_webhook(raw_body: &[u8], signature_hex: &str, secret: &str) -> bool {
-    let mut mac = match Hmac::<Sha256>::new_from_slice(secret.as_bytes()) {
-        Ok(m) => m,
-        Err(_) => return false,
-    };
+pub fn verify_webhook(raw_body: &[u8], signature_header: &str, webhook_secret: &str) -> bool {
+    let received = signature_header.trim_start_matches("sha256=");
+    let Ok(received) = hex::decode(received) else { return false };
+
+    let Ok(mut mac) = Hmac::<Sha256>::new_from_slice(webhook_secret.as_bytes()) else { return false };
     mac.update(raw_body);
-    let expected = hex::encode(mac.finalize().into_bytes());
-    // Comparação timing-safe via constante:
-    subtle::ConstantTimeEq::ct_eq(signature_hex.as_bytes(), expected.as_bytes()).into()
+    // verify_slice já é comparação em tempo constante.
+    mac.verify_slice(&received).is_ok()
 }`,
                   }}
                 />
@@ -1411,6 +2382,10 @@ pub fn verify_webhook(raw_body: &[u8], signature_hex: &str, secret: &str) -> boo
                   <i className="bi bi-exclamation-triangle-fill text-amber-500" />
                   <span>Catálogo de Códigos de Erro & Resoluções</span>
                 </h3>
+                <p className="text-xs text-ink-muted">
+                  Toda falha responde <code className="font-mono font-bold text-ink">{'{ "error": "...", "code": "..." }'}</code>.
+                  Trate pelo <code className="font-mono font-bold text-ink">code</code>, nunca pela mensagem.
+                </p>
                 <div className="overflow-x-auto rounded-2xl border border-border bg-surface">
                   <table className="w-full text-left text-xs">
                     <thead className="border-b border-border bg-paper text-[10px] font-extrabold uppercase tracking-wider text-ink-muted">
@@ -1422,42 +2397,49 @@ pub fn verify_webhook(raw_body: &[u8], signature_hex: &str, secret: &str) -> boo
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-border font-mono text-[11px]">
-                      <tr>
-                        <td className="px-4 py-2.5 font-bold text-rose-600">INVALID_API_KEY</td>
-                        <td className="px-4 py-2.5 text-ink">401</td>
-                        <td className="px-4 py-2.5 font-sans text-ink-muted">Chave inexistente ou desativada.</td>
-                        <td className="px-4 py-2.5 font-sans text-ink">Gere uma nova chave no menu API Keys.</td>
-                      </tr>
-                      <tr>
-                        <td className="px-4 py-2.5 font-bold text-rose-600">IP_NOT_WHITELISTED</td>
-                        <td className="px-4 py-2.5 text-ink">401 / 403</td>
-                        <td className="px-4 py-2.5 font-sans text-ink-muted">IP do servidor não está na lista permitida.</td>
-                        <td className="px-4 py-2.5 font-sans text-ink">Adicione o IP do seu host na configuração da chave.</td>
-                      </tr>
-                      <tr>
-                        <td className="px-4 py-2.5 font-bold text-amber-600">INSUFFICIENT_FUNDS</td>
-                        <td className="px-4 py-2.5 text-ink">400</td>
-                        <td className="px-4 py-2.5 font-sans text-ink-muted">Saldo da carteira comercial insuficiente.</td>
-                        <td className="px-4 py-2.5 font-sans text-ink">Efetue um depósito na moeda correspondente.</td>
-                      </tr>
-                      <tr>
-                        <td className="px-4 py-2.5 font-bold text-purple-600">DUPLICATE_ORDER_ID</td>
-                        <td className="px-4 py-2.5 text-ink">409</td>
-                        <td className="px-4 py-2.5 font-sans text-ink-muted">O orderId já foi utilizado em fatura anterior.</td>
-                        <td className="px-4 py-2.5 font-sans text-ink">Envie um identificador único para cada pedido.</td>
-                      </tr>
-                      <tr>
-                        <td className="px-4 py-2.5 font-bold text-blue-600">RATE_LIMIT_EXCEEDED</td>
-                        <td className="px-4 py-2.5 text-ink">429</td>
-                        <td className="px-4 py-2.5 font-sans text-ink-muted">Limite de requisições por minuto excedido.</td>
-                        <td className="px-4 py-2.5 font-sans text-ink">Adote retry com exponential backoff e jitter.</td>
-                      </tr>
-                      <tr>
-                        <td className="px-4 py-2.5 font-bold text-amber-600">SIGNATURE_MISMATCH</td>
-                        <td className="px-4 py-2.5 text-ink">401</td>
-                        <td className="px-4 py-2.5 font-sans text-ink-muted">Assinatura HMAC incorreta.</td>
-                        <td className="px-4 py-2.5 font-sans text-ink">Utilize o Simulador HMAC da aba 5 para depurar.</td>
-                      </tr>
+                      {[
+                        ['INVALID_API_KEY', '401', 'Chave inexistente, desativada ou com formato inválido.', 'Gere uma nova chave no menu API Keys.', 'rose'],
+                        ['API_KEY_EXPIRED', '401', 'A chave passou de expiresAt.', 'Rotacione ou emita uma nova chave.', 'rose'],
+                        ['IP_NOT_ALLOWED', '401', 'IP de origem fora da whitelist da chave.', 'Adicione o IP real do seu servidor na chave.', 'rose'],
+                        ['KEY_REQUIRES_SIGNATURE', '401', 'Chave exige requisição assinada e veio x-api-key.', 'Assine a requisição ou use uma chave sem requireSignature.', 'rose'],
+                        ['SIGNATURE_MISMATCH', '401', 'HMAC da requisição não confere.', 'Assine timestamp + método + caminho + SHA-256 do corpo.', 'amber'],
+                        ['TIMESTAMP_OUT_OF_WINDOW', '401', 'x-timestamp fora da janela de 300s.', 'Sincronize o relógio do servidor (NTP).', 'amber'],
+                        ['SIGNATURE_REPLAY', '401', 'Assinatura já usada antes.', 'Gere uma assinatura nova a cada requisição.', 'amber'],
+                        ['MISSING_SCOPE', '403', 'A chave não tem o escopo exigido pela rota.', 'Emita a chave com deposits ou send conforme o uso.', 'rose'],
+                        ['UNKNOWN_COIN', '400', 'Símbolo de moeda não suportado.', 'Use um dos símbolos da tabela de moedas.', 'amber'],
+                        ['DEPOSIT_PAUSED', '503', 'Depósitos dessa moeda estão temporariamente pausados.', 'Ofereça outra moeda ativa no checkout.', 'amber'],
+                        ['AMOUNT_NOT_INTEGER', '400', 'amount veio com ponto/vírgula (ex.: "25.00").', 'Envie inteiro em unidades de 1e-8: 25 USDT = "2500000000".', 'rose'],
+                        ['AMOUNT_BELOW_MINIMUM', '400', 'Valor arredondaria para zero na rede.', 'Aumente o valor (USDT/USDC: mínimo 100 unidades).', 'amber'],
+                        ['INVALID_AMOUNT', '400', 'amount ausente, zero, negativo ou não numérico.', 'Envie um inteiro positivo como string.', 'amber'],
+                        ['INVALID_ORDER_ID', '400', 'orderId vazio ou acima de 128 caracteres.', 'Use o identificador do pedido no seu sistema.', 'amber'],
+                        ['INVALID_CALLBACK_URL', '400', 'callbackUrl não é https público (localhost/IP interno).', 'Aponte para uma URL https acessível pela internet.', 'amber'],
+                        ['DUPLICATE_ORDER_ID', '409', 'orderId já usado para outra cobrança.', 'Use um orderId único por pedido (repetir o mesmo pedido devolve 200).', 'purple'],
+                        ['ADDRESS_UNAVAILABLE', '503', 'Não foi possível derivar um endereço dedicado para a fatura.', 'Tente novamente; se persistir, avise o suporte (problema de nó/RPC).', 'amber'],
+                        ['INVOICE_NOT_FOUND', '404', 'Fatura inexistente.', 'Confira o id retornado na criação.', 'amber'],
+                        ['INVOICE_FORBIDDEN', '403', 'A fatura pertence a outro comerciante.', 'Use a chave do dono da fatura.', 'rose'],
+                        ['INVOICE_INVALID_STATE', '400', 'Fatura já paga, expirada ou cancelada.', 'Crie uma nova fatura.', 'amber'],
+                        ['INSUFFICIENT_BALANCE', '400', 'Saldo insuficiente para a operação.', 'Deposite na moeda correspondente.', 'amber'],
+                        ['SEND_TO_SELF', '400', 'toEmail é a conta que emitiu a chave. Não é falta de saldo.', 'Mande para outra conta SatsPay. Nada foi debitado. Mostre o campo error, não um texto genérico.', 'rose'],
+                        ['TARGET_INELIGIBLE', '400', 'Não existe conta SatsPay com esse toEmail.', 'Peça um e-mail de conta já cadastrada. Nada foi debitado.', 'amber'],
+                        ['DAILY_LIMIT_REACHED', '400', 'A chave estourou o limite diário de envios.', 'Espere o dia virar ou use outra chave. Nada foi debitado.', 'amber'],
+                        ['WALLET_NOT_FOUND', '400', 'Não há carteira do remetente ou do destinatário nessa moeda.', 'Confira a moeda e se o destinatário já tem carteira. Nada foi debitado.', 'amber'],
+                        ['CANNOT_PAY_OWN_INVOICE', '400', 'Quem pagou a fatura com saldo é o dono da cobrança.', 'O checkout é para outro cliente. Nada foi debitado. Use a transferência entre carteiras da conta logada.', 'rose'],
+                        ['RATE_LIMITED', '429', 'Limite de requisições por IP excedido.', 'Use retry com backoff exponencial e jitter (veja Retry-After).', 'blue'],
+                      ].map(([code, http, cause, fix, color]) => (
+                        <tr key={code}>
+                          <td className={clsx('px-4 py-2.5 font-bold', {
+                            'text-rose-600': color === 'rose',
+                            'text-amber-600': color === 'amber',
+                            'text-purple-600': color === 'purple',
+                            'text-blue-600': color === 'blue',
+                          })}>
+                            {code}
+                          </td>
+                          <td className="px-4 py-2.5 text-ink">{http}</td>
+                          <td className="px-4 py-2.5 font-sans text-ink-muted">{cause}</td>
+                          <td className="px-4 py-2.5 font-sans text-ink">{fix}</td>
+                        </tr>
+                      ))}
                     </tbody>
                   </table>
                 </div>
@@ -1479,15 +2461,18 @@ pub fn verify_webhook(raw_body: &[u8], signature_hex: &str, secret: &str) -> boo
         )}
       </AnimatePresence>
 
-      {/* REFERÊNCIA COMPARTILHADA (MOEDAS 100% 8 DECIMAIS) */}
+      {/* REFERÊNCIA COMPARTILHADA — MOEDAS, UNIDADES E CONFIRMAÇÕES */}
       <section className="rounded-3xl border border-border bg-paper p-6 sm:p-8 shadow-xs space-y-6">
         <div className="flex items-center gap-2.5 border-b border-border/80 pb-3">
           <i className="bi bi-info-circle-fill text-bitcoin text-xl" />
-          <h3 className="text-lg sm:text-xl font-black text-ink">Moedas Suportadas & Decimais (Padrão 8 Decimais)</h3>
+          <h3 className="text-lg sm:text-xl font-black text-ink">Moedas, Unidades e Confirmações</h3>
         </div>
 
         <p className="text-xs text-ink-muted">
-          Na plataforma SatsPay, todas as 9 criptomoedas operam sob o padrão universal de <b>8 casas decimais</b> (<code className="font-mono font-bold text-ink">10^-8</code> / escala Satoshi), simplificando cálculos contábeis e garantindo precisão em micropagamentos.
+          Todos os valores da API usam o padrão interno de <b>{INTERNAL_AMOUNT_DECIMALS} casas decimais</b>{' '}
+          (<code className="font-mono font-bold text-ink">10<sup>-{INTERNAL_AMOUNT_DECIMALS}</sup></code>), independente das
+          casas decimais que a moeda tem na própria rede. <b>Confirmações</b> é o número de blocos exigidos antes de a
+          fatura virar <code className="font-mono font-bold text-ink">CONFIRMED</code> e o webhook ser disparado.
         </p>
 
         <div className="overflow-x-auto rounded-2xl border border-border bg-surface shadow-xs">
@@ -1496,28 +2481,46 @@ pub fn verify_webhook(raw_body: &[u8], signature_hex: &str, secret: &str) -> boo
               <tr>
                 <th className="px-4 py-3">Símbolo</th>
                 <th className="px-4 py-3">Nome</th>
-                <th className="px-4 py-3">Decimais</th>
-                <th className="px-4 py-3">Menor Unidade</th>
-                <th className="px-4 py-3">Exemplo (1.0 Moeda)</th>
+                <th className="px-4 py-3">1.0 moeda = `amount`</th>
+                <th className="px-4 py-3">Confirmações</th>
+                <th className="px-4 py-3">Gateway de depósito</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
               {COINS.map((c) => {
                 const conf = COIN_CONFIG[c];
-                const factor = Math.pow(10, conf.decimals);
+                const paused = isDepositWithdrawPaused(c);
                 return (
-                  <tr key={c} className="hover:bg-paper/50">
+                  <tr key={c} className={clsx('hover:bg-paper/50', paused && 'opacity-70')}>
                     <td className="px-4 py-3 font-mono font-bold text-ink">{c}</td>
                     <td className="px-4 py-3 text-ink-muted">{conf.name}</td>
-                    <td className="px-4 py-3 font-mono text-ink-muted">{conf.decimals}</td>
-                    <td className="px-4 py-3 font-mono text-xs text-bitcoin-dark">10^-{conf.decimals}</td>
-                    <td className="px-4 py-3 font-mono text-ink">{factor.toLocaleString('en-US')}</td>
+                    <td className="px-4 py-3 font-mono text-ink">{toLedgerUnits(1)}</td>
+                    <td className="px-4 py-3 font-mono text-ink-muted">{conf.minConfirmations}</td>
+                    <td className="px-4 py-3">
+                      {paused ? (
+                        <span className="rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] font-bold text-amber-700">
+                          Pausado · 503 DEPOSIT_PAUSED
+                        </span>
+                      ) : (
+                        <span className="rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-bold text-emerald-700">
+                          Ativo
+                        </span>
+                      )}
+                    </td>
                   </tr>
                 );
               })}
             </tbody>
           </table>
         </div>
+
+        <p className="text-[11px] text-ink-muted leading-relaxed">
+          Moedas pausadas continuam listadas porque voltarão a ser aceitas, mas hoje{' '}
+          <code className="font-mono text-ink font-bold">POST /v1/merchant/deposits</code> responde{' '}
+          <code className="font-mono text-ink font-bold">503 DEPOSIT_PAUSED</code> para elas. A pausa{' '}
+          <b>não</b> afeta <code className="font-mono text-ink font-bold">POST /v1/public/send</code> (payouts em ledger),
+          que continua funcionando para todas as moedas.
+        </p>
       </section>
     </div>
   );

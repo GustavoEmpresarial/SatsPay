@@ -23,7 +23,7 @@ pub fn routes<R: AuthRepo + 'static>() -> Router<AppState<R>> {
 async fn strategies<R: AuthRepo>(State(state): State<AppState<R>>) -> Response {
     match db::stake::list_staking_strategies(&state.pool).await {
         Ok(strategies) => Json(json!({ "strategies": strategies })).into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e.to_string() }))).into_response(),
+        Err(e) => crate::http_error::internal_error(&e),
     }
 }
 
@@ -60,7 +60,7 @@ impl From<db::stake::StakeRow> for StakeResponse {
 async fn list<R: AuthRepo>(State(state): State<AppState<R>>, user: AuthUser) -> Response {
     match db::stake::list_stakes(&state.pool, user.id).await {
         Ok(stakes) => Json(stakes.into_iter().map(StakeResponse::from).collect::<Vec<_>>()).into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e.to_string() }))).into_response(),
+        Err(e) => crate::http_error::internal_error(&e),
     }
 }
 

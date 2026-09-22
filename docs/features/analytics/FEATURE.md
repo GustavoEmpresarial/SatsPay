@@ -72,6 +72,9 @@ Preferir chaves em `client/src/i18n/locales/{pt,en}.json` quando a página for t
 
 ## Bugs / armadilhas conhecidas
 
+- “Por operação” **não** inclui `ADJUSTMENT` (seed/manual admin) — inflava USD sem ser atividade do usuário.
+- Estorno de saque (`WITHDRAWAL_REVERSAL`) liquida o volume de `WITHDRAWAL` (não soma as duas barras).
+- Dust faucet/depósito → `formatPortfolioUsd` mostra `< $0.01` quando há movimento real.
 - Não short-circuit hooks (`useA() || useB()`) — React #311.
 - Admin: `AdminLayout` labels em pt-BR; ignore language switch do app.
 - Erros esperados de produto (faucet inventory, login 400) não devem floodar telemetria.

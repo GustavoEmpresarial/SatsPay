@@ -15,7 +15,7 @@
 
 ## Keywords (busca)
 
-`support SupportPage /support   user`
+`support SupportPage /support /support/tickets /support/tickets/:id /support/tickets/:id/messages  user`
 
 ## Rotas
 
@@ -27,7 +27,9 @@
 
 ## APIs usadas (client → `/v1…`)
 
-- (sem chamadas `api()` na página / domínio)
+- `/support/tickets` (prefixo `/v1` no servidor)
+- `/support/tickets/:id` (prefixo `/v1` no servidor)
+- `/support/tickets/:id/messages` (prefixo `/v1` no servidor)
 
 ## Arquivos-chave
 
@@ -36,7 +38,7 @@
 
 ## Comportamento (bruto)
 
-Página React `SupportPage`. Chama 0 endpoint(s) via `api()`.
+Página React `SupportPage`. Chama 3 endpoint(s) via `api()`.
 
 ## Notas de overview legado
 

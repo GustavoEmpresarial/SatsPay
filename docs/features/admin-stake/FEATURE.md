@@ -1,45 +1,87 @@
-# FEATURE — Admin Stake / Tesouraria
+# FEATURE — Admin Stake
 
-> Doc bruta. Rota UI: `/admin/stake`. Nav label: **Tesouraria** (não “Tesouraria & Hot”).
+> Doc bruta para busca por IA/humanos. Atualizar quando a feature mudar.
+> Gerado/atualizado por `scripts/generate_feature_docs.py`.
 
-## Keywords
+## Identidade
 
-`tesouraria treasury hot custody solvency fee_margin network_fees P&L break-even runway buffer FEE_MARGIN_HARD_BLOCK DGB Cryptoid`
+| Campo | Valor |
+|-------|-------|
+| Slug | `admin-stake` |
+| Título | Admin Stake |
+| Componente | `AdminStakePage` |
+| Auth | **admin** — RequireAdmin — role ADMIN ou sessão admin store |
+| UI pt-BR | Admin sempre pt-BR hardcoded; app usuário usa i18n |
 
-## O que mostra
+## Keywords (busca)
 
-1. Tabela hot on-chain × custódia ledger × depósitos × saques × endereço hot  
-2. Saúde financeira (solvência, fluxo, receita/custo, atividade 24h, charts)  
-3. **9 painéis operacionais** via `GET /v1/admin/treasury-health`:  
-   - Resultado (USD) via `price_cache`  
-   - Equilíbrio do saque (taxa cobrada × média rede)  
-   - Autonomia HOUSE (runway faucet)  
-   - Passivos pendentes (saques na fila)  
-   - Varreduras pendentes (depósitos não swept)  
-   - Reserva da hot (buffer alvo)  
-   - Trava de margem (`FEE_MARGIN_HARD_BLOCK`)  
-   - Taxas × rede (série 7d)  
-   - DGB saldo (fallback Cryptoid se Insight 404)  
+`admin stake AdminStakePage /admin/stake /admin/economics /admin/treasury-health /admin/treasury-wallets Depósitos user 24h Gateway pago 24h Saques 24h Claims de faucet 24h admin`
 
-## APIs
+## Rotas
 
-- `GET /v1/admin/treasury-wallets`  
-- `GET /v1/admin/treasury-health`  
-- `GET /v1/admin/economics`  
+- `/admin/stake`
 
-## Backend
+## Abas / seções internas
 
-- `crates/db/src/treasury_health.rs`  
-- `crates/db/src/network_fees.rs` + migration `0024_network_fee_events.sql`  
-- Hard block: faucet + withdrawals → `FEE_MARGIN_NEGATIVE`  
-- Domínio: [`../domain-treasury-health/FEATURE.md`](../domain-treasury-health/FEATURE.md)  
+- Depósitos user 24h
+- Gateway pago 24h
+- Saques 24h
+- Claims de faucet 24h
 
-## Labels pt-BR (não reverter para EN)
+## APIs usadas (client → `/v1…`)
 
-Resultado (USD), Equilíbrio do saque, Autonomia da HOUSE, Varreduras pendentes, Reserva da hot, diferença (+/−), histórico (não all-time), tipos rede: saque / varredura / depósito DEX  
+- `/admin/economics` (prefixo `/v1` no servidor)
+- `/admin/treasury-health` (prefixo `/v1` no servidor)
+- `/admin/treasury-wallets` (prefixo `/v1` no servidor)
 
-## Arquivos
+## Arquivos-chave
 
-- `client/src/pages/AdminStakePage.tsx`  
-- `client/src/components/AdminTreasuryMonitor.tsx`  
-- `docs/pages/admin-stake/`  
+- `client/src/pages/AdminStakePage.tsx`
+- `docs/pages/admin-stake/`
+
+## Comportamento (bruto)
+
+Página React `AdminStakePage`. Chama 3 endpoint(s) via `api()`. Abas/labels: Depósitos user 24h, Gateway pago 24h, Saques 24h, Claims de faucet 24h. Tesouraria: hot vs custódia, economia, 9 painéis health, labels pt-BR (Resultado USD, Equilíbrio do saque, Autonomia HOUSE, Reserva da hot). UI admin sempre pt-BR.
+
+## Notas de overview legado
+
+# Admin Stake — Overview
+
+## Papel
+
+Página **Admin Stake** (`AdminStakePage.tsx`).
+
+- Auth gate: **admin**
+- Rotas: `/admin/stake`
+- Nota: Nested under /admin
+
+## Comportamento esperado
+
+1. Usuário navega para a rota.
+2. Layout adequado renderiza (`MarketingLayout` / `AppLayout` / `AdminLayout` / standalone).
+3. Dados carregam via React Query / fetch quando aplicável.
+4. Erros de API passam por `formatApiError` / telemetria quando aplicável.
+
+## i18n
+
+Preferir chaves em `client/src/i18n/locales/{pt,en}.json` quando a página for traduzida.
+
+## Segurança
+
+- Respeitar gate `admin` (RequireAuth / RequireAdmin / público).
+- Não persistir segredos em localStorage.
+- Validar inputs antes de POST.
+
+
+## Bugs / armadilhas conhecidas
+
+- Não short-circuit hooks (`useA() || useB()`) — React #311.
+- Admin: `AdminLayout` labels em pt-BR; ignore language switch do app.
+- Erros esperados de produto (faucet inventory, login 400) não devem floodar telemetria.
+- Saldos: nunca confiar em coluna `balance` mutável — usar ledger.
+
+## Links relacionados
+
+- Mapa geral: [`docs/README.md`](../../README.md)
+- Índice features: [`../README.md`](../README.md)
+- Testes: [`TC.md`](TC.md)

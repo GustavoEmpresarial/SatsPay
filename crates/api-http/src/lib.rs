@@ -8,6 +8,7 @@ pub mod auth;
 pub mod client_ip;
 pub mod deposits;
 pub mod faucet;
+pub mod http_error;
 pub mod lend;
 pub mod merchant;
 pub mod merchant_deposits;
@@ -18,6 +19,7 @@ pub mod oauth;
 pub mod oauth_pkce;
 pub mod oauth_redirect;
 pub mod public_api;
+pub mod public_catalog;
 pub mod rate_limit;
 pub mod referral;
 pub mod rewards;
@@ -79,6 +81,7 @@ fn route_tree<R: AuthRepo + 'static>() -> Router<AppState<R>> {
         .merge(merchant_deposits::routes::<R>())
         .merge(admin::routes::<R>())
         .merge(public_api::routes::<R>())
+        .merge(public_catalog::routes::<R>())
         .merge(rewards::routes::<R>())
         .merge(referral::routes::<R>())
         .merge(airdrop::routes::<R>())
@@ -150,9 +153,9 @@ async fn record_server_errors<R: AuthRepo + 'static>(
                 method: Some(method),
                 status_code: Some(status_code),
                 user_id: None,
-                ip_address,
+                ip_address: ip_address.map(|ip| state.secrets.ip_fingerprint(&ip)),
                 request_payload: None,
-                user_agent,
+                user_agent: user_agent.map(|ua| ua.chars().take(80).collect()),
             };
             let _ = db::telemetry::record_error(&pool, payload).await;
         });

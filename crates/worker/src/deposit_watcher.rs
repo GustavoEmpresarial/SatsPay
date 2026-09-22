@@ -26,15 +26,18 @@ pub async fn run_once(pool: &PgPool, registry: &ChainRegistry) {
         let Some(coin) = parse_coin(&coin_str) else { continue };
         let client = registry.get(coin);
 
+        // A failed history lookup must not skip the sweep. USDT often fails
+        // the indexer while the tokens are already on the HD address.
         let deposits = match client.fetch_deposits(&address).await {
             Ok(d) => d,
             Err(e) => {
-                tracing::warn!(wallet_id = %wallet_id, error = %e, "deposit_watcher: fetch_deposits failed");
-                continue;
+                tracing::warn!(wallet_id = %wallet_id, error = %e, "deposit_watcher: fetch_deposits failed; still attempting sweep");
+                Vec::new()
             }
         };
 
         let mut credited = false;
+        let user_id: Uuid = row.get("user_id");
         for onchain_tx in deposits {
             let amount = bigdecimal::BigDecimal::from(onchain_tx.amount);
             match db::deposits::credit_deposit(
@@ -48,7 +51,27 @@ pub async fn run_once(pool: &PgPool, registry: &ChainRegistry) {
             )
             .await
             {
-                Ok(()) => credited = true,
+                Ok(db::deposits::CreditDepositOutcome::NewlyCredited) => {
+                    credited = true;
+                    if let Err(e) = db::airdrop::award_airdrop_points(
+                        pool,
+                        user_id,
+                        100,
+                        0,
+                        "DEPOSIT_CONFIRMED",
+                    )
+                    .await
+                    {
+                        tracing::warn!(
+                            %user_id,
+                            %wallet_id,
+                            tx_hash = %onchain_tx.tx_hash,
+                            error = %e,
+                            "deposit_watcher: airdrop DEPOSIT_CONFIRMED award failed"
+                        );
+                    }
+                }
+                Ok(_) => {}
                 Err(e) => {
                     tracing::error!(wallet_id = %wallet_id, tx_hash = %onchain_tx.tx_hash, error = %e, "deposit_watcher: credit_deposit failed");
                 }

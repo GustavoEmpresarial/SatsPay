@@ -64,12 +64,17 @@ async fn main() {
             .unwrap_or(60),
     };
 
-    let auth_repo = Arc::new(PgAuthRepo::new(pool.clone()));
     let jwt = crypto::JwtService::new(&jwt_secret).expect("JWT_ACCESS_SECRET must be ≥32 bytes");
     let encryption_key = std::env::var("ENCRYPTION_KEY").expect("ENCRYPTION_KEY must be set (64 hex chars)");
     let secrets = Arc::new(
         crypto::SecretsService::from_hex(&encryption_key).expect("ENCRYPTION_KEY must be 64 hex chars"),
     );
+    match db::privacy::run_boot_privacy_jobs(&pool, &secrets).await {
+        Ok(r) => tracing::info!(?r, "pii backfill complete"),
+        Err(e) => tracing::error!(error = %e, "pii backfill failed"),
+    }
+
+    let auth_repo = Arc::new(PgAuthRepo::with_secrets(pool.clone(), secrets.clone()));
     let hot_mnemonic = crypto::bootstrap_hot_mnemonic(&secrets)
         .expect("hot mnemonic bootstrap failed")
         .map(Arc::<str>::from);
@@ -127,6 +132,23 @@ async fn main() {
         }
     }
 
+    // Absolute origin for hosted checkout links. Explicit `PUBLIC_BASE_URL`
+    // wins; otherwise reuse the first CORS origin so no new required env is
+    // introduced for existing deployments.
+    let public_base_url = std::env::var("PUBLIC_BASE_URL")
+        .ok()
+        .map(|s| s.trim().trim_end_matches('/').to_string())
+        .filter(|s| !s.is_empty())
+        .or_else(|| {
+            std::env::var("CORS_ORIGIN").ok().and_then(|raw| {
+                raw.split(',')
+                    .map(str::trim)
+                    .find(|o| !o.is_empty())
+                    .map(|o| o.trim_end_matches('/').to_string())
+            })
+        })
+        .unwrap_or_else(|| "https://www.satspay.pro".to_string());
+
     let settings = api_http::AppSettings {
         faucet_cooldown_minutes: required_env("FAUCET_COOLDOWN_MINUTES"),
         public_api_daily_send_limit: required_env("PUBLIC_API_DAILY_SEND_LIMIT"),
@@ -135,6 +157,7 @@ async fn main() {
         price_max_stale: std::time::Duration::from_secs(required_env("PRICE_MAX_STALE_SECS")),
         public_api_signature_max_skew: std::time::Duration::from_secs(required_env("PUBLIC_API_SIGNATURE_MAX_SKEW_SECS")),
         smtp_enabled: std::env::var("SMTP_ENABLED").map(|v| v == "true").unwrap_or(false),
+        public_base_url,
     };
 
     let state = api_http::AppState {
@@ -147,6 +170,8 @@ async fn main() {
         captcha: captcha_verifier,
         settings,
         swapkit: Arc::new(swapkit::SwapKitClient::from_env()),
+        relay: Arc::new(relay::RelayClient::from_env()),
+        changenow: Arc::new(changenow::ChangeNowClient::from_env()),
     };
     let app = api_http::app(state);
     let addr = std::env::var("BIND_ADDR").unwrap_or_else(|_| "0.0.0.0:4000".to_string());

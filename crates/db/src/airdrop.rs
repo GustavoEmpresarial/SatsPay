@@ -3,7 +3,7 @@
 use bigdecimal::BigDecimal;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use sqlx::{PgPool, Row};
+use sqlx::{PgPool, Postgres, Row, Transaction};
 use uuid::Uuid;
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -33,6 +33,14 @@ pub struct UserAirdropProfile {
     pub claimed: bool,
     pub projected_reward_usd: String,
     pub days_remaining: i64,
+    /// False when no `airdrop_seasons` row has `status='ACTIVE'`.
+    pub season_active: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AwardResult {
+    Awarded,
+    NoActiveSeason,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -81,16 +89,43 @@ pub async fn get_active_season(pool: &PgPool) -> Result<Option<AirdropSeasonInfo
 }
 
 /// Awards points to a user in the active season and recalibrates their tier.
+/// Log + balance update run in one transaction; concurrent awards serialize via row lock.
+/// Returns `NoActiveSeason` (observable, not silent) when no ACTIVE season exists.
 pub async fn award_airdrop_points(
     pool: &PgPool,
     user_id: Uuid,
     base_add: i64,
     bonus_add: i64,
     activity: &str,
-) -> Result<(), sqlx::Error> {
-    let Some(season) = get_active_season(pool).await? else {
-        return Ok(());
+) -> Result<AwardResult, sqlx::Error> {
+    let mut tx = pool.begin().await?;
+    let result = award_airdrop_points_tx(&mut tx, user_id, base_add, bonus_add, activity).await?;
+    match result {
+        AwardResult::Awarded => tx.commit().await?,
+        AwardResult::NoActiveSeason => tx.rollback().await?,
+    }
+    Ok(result)
+}
+
+/// Same award as [`award_airdrop_points`], on a caller-owned transaction.
+/// Faucet uses this so the ledger credit and the +50 points commit together.
+pub async fn award_airdrop_points_tx(
+    tx: &mut Transaction<'_, Postgres>,
+    user_id: Uuid,
+    base_add: i64,
+    bonus_add: i64,
+    activity: &str,
+) -> Result<AwardResult, sqlx::Error> {
+    let season = sqlx::query(
+        "SELECT id FROM airdrop_seasons WHERE status = 'ACTIVE' ORDER BY season_number DESC LIMIT 1",
+    )
+    .fetch_optional(&mut **tx)
+    .await?;
+    let Some(season) = season else {
+        tracing::info!(%user_id, activity, "airdrop award skipped: no ACTIVE season");
+        return Ok(AwardResult::NoActiveSeason);
     };
+    let season_id: Uuid = season.get("id");
 
     let description = match activity {
         "REFERRAL_SIGNUP" => "Bônus de Indicação: amigo cadastrado pelo seu link exclusivo (+50 pts)",
@@ -102,62 +137,175 @@ pub async fn award_airdrop_points(
         other => other,
     };
 
-    // Insert tracking audit log
-    let _ = sqlx::query(
+    sqlx::query(
         "INSERT INTO airdrop_point_logs (season_id, user_id, activity_type, description, points, bonus_points)
          VALUES ($1, $2, $3, $4, $5, $6)"
     )
-    .bind(season.id)
+    .bind(season_id)
     .bind(user_id)
     .bind(activity)
     .bind(description)
     .bind(base_add)
     .bind(bonus_add)
-    .execute(pool)
-    .await;
-
-    // Calculate tier and multiplier based on projected new total
-    let current_row = sqlx::query(
-        "SELECT base_points, bonus_points FROM airdrop_user_points WHERE season_id = $1 AND user_id = $2"
-    )
-    .bind(season.id)
-    .bind(user_id)
-    .fetch_optional(pool)
+    .execute(&mut **tx)
     .await?;
 
-    let (cur_base, cur_bonus): (i64, i64) = current_row
-        .map(|r| (r.get("base_points"), r.get("bonus_points")))
-        .unwrap_or((0, 0));
+    // Atomic increment so concurrent faucet/swap awards cannot clobber each other.
+    let points_row = sqlx::query(
+        "INSERT INTO airdrop_user_points
+            (season_id, user_id, base_points, bonus_points, total_points, tier, multiplier, updated_at)
+         VALUES ($1, $2, $3, $4, $3 + $4, 'BRONZE', 1, NOW())
+         ON CONFLICT (season_id, user_id) DO UPDATE SET
+            base_points = airdrop_user_points.base_points + EXCLUDED.base_points,
+            bonus_points = airdrop_user_points.bonus_points + EXCLUDED.bonus_points,
+            updated_at = NOW()
+         RETURNING base_points, bonus_points"
+    )
+    .bind(season_id)
+    .bind(user_id)
+    .bind(base_add)
+    .bind(bonus_add)
+    .fetch_one(&mut **tx)
+    .await?;
 
-    let new_base = cur_base + base_add;
-    let new_bonus = cur_bonus + bonus_add;
+    let new_base: i64 = points_row.get("base_points");
+    let new_bonus: i64 = points_row.get("bonus_points");
     let raw_points = new_base + new_bonus;
-
     let (tier, mult) = calculate_tier(raw_points);
     let total_with_mult = (raw_points as f64 * mult).round() as i64;
 
     sqlx::query(
-        "INSERT INTO airdrop_user_points (season_id, user_id, base_points, bonus_points, total_points, tier, multiplier, updated_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
-         ON CONFLICT (season_id, user_id) DO UPDATE SET
-            base_points = $3,
-            bonus_points = $4,
-            total_points = $5,
-            tier = $6,
-            multiplier = $7,
-            updated_at = NOW()"
+        "UPDATE airdrop_user_points
+         SET total_points = $3, tier = $4, multiplier = $5, updated_at = NOW()
+         WHERE season_id = $1 AND user_id = $2"
     )
-    .bind(season.id)
+    .bind(season_id)
     .bind(user_id)
-    .bind(new_base)
-    .bind(new_bonus)
     .bind(total_with_mult)
     .bind(tier)
     .bind(BigDecimal::try_from(mult).unwrap_or_else(|_| BigDecimal::from(1)))
-    .execute(pool)
+    .execute(&mut **tx)
     .await?;
 
-    Ok(())
+    Ok(AwardResult::Awarded)
+}
+
+/// Idempotent repair for activity that created side-effects (referrals / credited
+/// deposits) before airdrop awards were reliably persisted.
+pub async fn backfill_missed_airdrop_points(pool: &PgPool) -> Result<u64, sqlx::Error> {
+    let mut awarded = 0u64;
+
+    let referral_gaps = sqlx::query(
+        "SELECT rl.referrer_id AS user_id,
+                COUNT(*)::bigint AS expected,
+                COALESCE((
+                    SELECT COUNT(*)::bigint FROM airdrop_point_logs l
+                    WHERE l.user_id = rl.referrer_id AND l.activity_type = 'REFERRAL_SIGNUP'
+                ), 0) AS already
+         FROM referral_links rl
+         GROUP BY rl.referrer_id
+         HAVING COUNT(*) > COALESCE((
+                    SELECT COUNT(*)::bigint FROM airdrop_point_logs l
+                    WHERE l.user_id = rl.referrer_id AND l.activity_type = 'REFERRAL_SIGNUP'
+                ), 0)"
+    )
+    .fetch_all(pool)
+    .await?;
+
+    for row in referral_gaps {
+        let user_id: Uuid = row.get("user_id");
+        let missing = row.get::<i64, _>("expected") - row.get::<i64, _>("already");
+        for _ in 0..missing.max(0) {
+            award_airdrop_points(pool, user_id, 50, 0, "REFERRAL_SIGNUP").await?;
+            awarded += 1;
+        }
+    }
+
+    let welcome_gaps = sqlx::query(
+        "SELECT rl.referred_id AS user_id
+         FROM referral_links rl
+         WHERE NOT EXISTS (
+             SELECT 1 FROM airdrop_point_logs l
+             WHERE l.user_id = rl.referred_id AND l.activity_type = 'REFERRAL_WELCOME'
+         )"
+    )
+    .fetch_all(pool)
+    .await?;
+
+    for row in welcome_gaps {
+        let user_id: Uuid = row.get("user_id");
+        award_airdrop_points(pool, user_id, 50, 0, "REFERRAL_WELCOME").await?;
+        awarded += 1;
+    }
+
+    let deposit_gaps = sqlx::query(
+        "SELECT w.user_id AS user_id,
+                COUNT(*)::bigint AS expected,
+                COALESCE((
+                    SELECT COUNT(*)::bigint FROM airdrop_point_logs l
+                    WHERE l.user_id = w.user_id AND l.activity_type = 'DEPOSIT_CONFIRMED'
+                ), 0) AS already
+         FROM deposits d
+         JOIN wallets w ON w.id = d.wallet_id
+         WHERE d.status = 'CREDITED'
+         GROUP BY w.user_id
+         HAVING COUNT(*) > COALESCE((
+                    SELECT COUNT(*)::bigint FROM airdrop_point_logs l
+                    WHERE l.user_id = w.user_id AND l.activity_type = 'DEPOSIT_CONFIRMED'
+                ), 0)"
+    )
+    .fetch_all(pool)
+    .await?;
+
+    for row in deposit_gaps {
+        let user_id: Uuid = row.get("user_id");
+        let missing = row.get::<i64, _>("expected") - row.get::<i64, _>("already");
+        for _ in 0..missing.max(0) {
+            award_airdrop_points(pool, user_id, 100, 0, "DEPOSIT_CONFIRMED").await?;
+            awarded += 1;
+        }
+    }
+
+    if let Some(season) = get_active_season(pool).await? {
+        let faucet_gaps = sqlx::query(
+            "SELECT fc.user_id AS user_id,
+                    COUNT(*)::bigint AS expected,
+                    COALESCE((
+                        SELECT COUNT(*)::bigint FROM airdrop_point_logs l
+                        WHERE l.user_id = fc.user_id
+                          AND l.season_id = $1
+                          AND l.activity_type = 'FAUCET_CLAIM'
+                    ), 0) AS already
+             FROM faucet_claims fc
+             WHERE fc.created_at >= $2
+             GROUP BY fc.user_id
+             HAVING COUNT(*) > COALESCE((
+                        SELECT COUNT(*)::bigint FROM airdrop_point_logs l
+                        WHERE l.user_id = fc.user_id
+                          AND l.season_id = $1
+                          AND l.activity_type = 'FAUCET_CLAIM'
+                    ), 0)",
+        )
+        .bind(season.id)
+        .bind(season.start_at)
+        .fetch_all(pool)
+        .await?;
+
+        for row in faucet_gaps {
+            let user_id: Uuid = row.get("user_id");
+            let missing = row.get::<i64, _>("expected") - row.get::<i64, _>("already");
+            for _ in 0..missing.max(0) {
+                award_airdrop_points(pool, user_id, 50, 0, "FAUCET_CLAIM").await?;
+                awarded += 1;
+            }
+        }
+    }
+
+    // Merchant invoices, merchant wallets and gateway payouts never award points.
+    if awarded > 0 {
+        tracing::info!(awarded, "airdrop missed-points backfill applied");
+    }
+    Ok(awarded)
 }
 
 fn calculate_tier(points: i64) -> (&'static str, f64) {
@@ -172,16 +320,24 @@ fn calculate_tier(points: i64) -> (&'static str, f64) {
 
 /// Fetches user's airdrop profile in the active season.
 pub async fn get_user_airdrop_profile(pool: &PgPool, user_id: Uuid) -> Result<UserAirdropProfile, sqlx::Error> {
-    let season = get_active_season(pool).await?.unwrap_or(AirdropSeasonInfo {
-        id: Uuid::nil(),
-        season_number: 1,
-        title: "Season 1: Genesis Growth Campaign".into(),
-        description: "Campanha oficial de airdrop.".into(),
-        reward_pool_usd: "100000.00".into(),
-        status: "ACTIVE".into(),
-        start_at: Utc::now(),
-        end_at: Utc::now() + chrono::Duration::days(90),
-    });
+    let Some(season) = get_active_season(pool).await? else {
+        return Ok(UserAirdropProfile {
+            season_id: Uuid::nil(),
+            season_number: 0,
+            season_title: "Nenhuma temporada ativa".into(),
+            base_points: 0,
+            bonus_points: 0,
+            total_points: 0,
+            tier: "BRONZE".into(),
+            multiplier: 1.0,
+            global_rank: 0,
+            total_participants: 0,
+            claimed: false,
+            projected_reward_usd: "0".into(),
+            days_remaining: 0,
+            season_active: false,
+        });
+    };
 
     let points_row = sqlx::query(
         "SELECT base_points, bonus_points, total_points, tier, multiplier, claimed, reward_amount_usd
@@ -206,22 +362,27 @@ pub async fn get_user_airdrop_profile(pool: &PgPool, user_id: Uuid) -> Result<Us
         None => (0, 0, 0, "BRONZE".to_string(), 1.0, false, "0.0000".to_string()),
     };
 
-    let global_rank: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) + 1 FROM airdrop_user_points WHERE season_id = $1 AND total_points > $2"
-    )
-    .bind(season.id)
-    .bind(total_pts)
-    .fetch_one(pool)
-    .await
-    .unwrap_or(1);
+    // 0 = unranked (no points yet). Avoids "#5 entre 4 participantes".
+    let global_rank: i64 = if total_pts <= 0 {
+        0
+    } else {
+        sqlx::query_scalar(
+            "SELECT COUNT(*) + 1 FROM airdrop_user_points WHERE season_id = $1 AND total_points > $2"
+        )
+        .bind(season.id)
+        .bind(total_pts)
+        .fetch_one(pool)
+        .await
+        .unwrap_or(1)
+    };
 
     let total_participants: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM airdrop_user_points WHERE season_id = $1"
+        "SELECT COUNT(*) FROM airdrop_user_points WHERE season_id = $1 AND total_points > 0"
     )
     .bind(season.id)
     .fetch_one(pool)
     .await
-    .unwrap_or(1);
+    .unwrap_or(0);
 
     let pool_tokens: f64 = 100_000_000.0;
     let total_season_points: i64 = sqlx::query_scalar(
@@ -250,10 +411,11 @@ pub async fn get_user_airdrop_profile(pool: &PgPool, user_id: Uuid) -> Result<Us
         tier,
         multiplier: mult,
         global_rank,
-        total_participants: total_participants.max(1),
+        total_participants: total_participants.max(0),
         claimed,
         projected_reward_usd: if claimed { reward_usd } else { projected_reward },
         days_remaining: days_rem,
+        season_active: true,
     })
 }
 
@@ -291,15 +453,20 @@ pub async fn get_airdrop_leaderboard(pool: &PgPool, limit: i64) -> Result<Vec<Le
     Ok(entries)
 }
 
-/// Lists chronological point audit log entries for a user.
+/// Lists chronological point audit log entries for a user in the ACTIVE season.
 pub async fn list_user_point_logs(pool: &PgPool, user_id: Uuid, limit: i64) -> Result<Vec<AirdropPointLog>, sqlx::Error> {
+    let Some(season) = get_active_season(pool).await? else {
+        return Ok(vec![]);
+    };
+
     let rows = sqlx::query(
         "SELECT id, user_id, season_id, activity_type, description, points, bonus_points, created_at
          FROM airdrop_point_logs
-         WHERE user_id = $1
-         ORDER BY created_at DESC LIMIT $2"
+         WHERE user_id = $1 AND season_id = $2
+         ORDER BY created_at DESC LIMIT $3"
     )
     .bind(user_id)
+    .bind(season.id)
     .bind(limit.clamp(1, 100))
     .fetch_all(pool)
     .await?;

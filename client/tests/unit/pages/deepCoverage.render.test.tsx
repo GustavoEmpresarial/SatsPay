@@ -584,12 +584,22 @@ describe('FaucetPage claim', () => {
     const claim = within(container)
       .getAllByRole('button')
       .find((b) => /reivindicar|claim/i.test(b.textContent || ''));
-    if (claim && !(claim as HTMLButtonElement).disabled) {
-      await user.click(claim);
-      await waitFor(() => expect(container.innerHTML).toMatch(/sucesso|success|claim|receb/i), {
-        timeout: 5000,
-      });
-    }
+    expect(claim, 'claim button must be rendered').toBeTruthy();
+    expect((claim as HTMLButtonElement).disabled, 'claim must be enabled after captcha + mount delay').toBe(false);
+    await user.click(claim!);
+
+    // Assert the success banner itself, not a word: the message is
+    // translated ("Received" / "Recebido"), so matching prose made this
+    // depend on the test locale — it rendered "Received: +0.00001 LTC." and
+    // the old regex only covered the Portuguese spelling.
+    await waitFor(
+      () => {
+        const banner = container.querySelector('.bg-emerald-50');
+        expect(banner, 'success banner must appear after a successful claim').toBeTruthy();
+        expect(banner!.textContent).toMatch(/\+\s*[\d.]+\s*LTC/);
+      },
+      { timeout: 5000 },
+    );
 
     unmount();
   });
@@ -645,38 +655,13 @@ describe('ApiKeysPage', () => {
 
 describe('LendPage + MerchantDeposits + Checkout + AdminMerchants', () => {
   it(
-    'lend supply submit and merchant deposit generator',
+    'lend maintenance landing and merchant deposit generator',
     async () => {
       const user = userEvent.setup();
       const lend = renderWithProviders(<LendPage />, { route: '/lend', loggedIn: true });
-      await waitFor(() => expect(lend.container.innerHTML).toMatch(/USDT|Fornecer|Supply/i), {
+      await waitFor(() => expect(lend.container.innerHTML).toMatch(/Manutenção|Empréstimos|Aave/i), {
         timeout: 5000,
       });
-
-      const supply = within(lend.container)
-        .queryAllByRole('button')
-        .find((b) => /fornecer|supply/i.test(b.textContent || ''));
-      if (supply) await user.click(supply);
-
-      const modalInput =
-        document.body.querySelector('[role="dialog"] input') ||
-        lend.container.querySelector('input[placeholder="0.00"]');
-      if (modalInput) {
-        await user.type(modalInput as HTMLElement, '10');
-        const pct = within(document.body as HTMLElement)
-          .queryAllByRole('button')
-          .find((b) => /^50%$/i.test((b.textContent || '').trim()));
-        if (pct) await user.click(pct);
-        const confirm = within(document.body as HTMLElement)
-          .queryAllByRole('button')
-          .find((b) => /fornecer|supply|tomar|pagar/i.test(b.textContent || ''));
-        if (confirm && !(confirm as HTMLButtonElement).disabled) await user.click(confirm);
-      }
-
-      const borrow = within(lend.container)
-        .queryAllByRole('button')
-        .find((b) => /^tomar$/i.test((b.textContent || '').trim()));
-      if (borrow) await user.click(borrow);
       lend.unmount();
 
       const merch = renderWithProviders(<MerchantDepositsPage />, {

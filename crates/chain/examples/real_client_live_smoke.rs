@@ -20,6 +20,7 @@ async fn main() {
     let config = RealClientConfig {
         bitcore_base_url: "https://api.bitcore.io".to_string(),
         evm_rpc_url: "https://polygon-bor-rpc.publicnode.com".to_string(),
+        bsc_rpc_url: "https://bsc-rpc.publicnode.com".to_string(),
         // A real, published BIP32 xpub — Bitcoin Wiki's BIP32 test vector 1
         // master xpub. Used here only to prove address derivation works;
         // production would use a wallet-specific xpub from real cold storage.
@@ -30,6 +31,10 @@ async fn main() {
         network: chain::ChainNetwork::Mainnet,
         sol_rpc_url: "http://62.171.138.114:8899".to_string(),
         dgb_insight_url: "https://digiexplorer.info/api".to_string(),
+        dgb_rpc_url: None,
+        zer_explorer_url: "https://zerochain.info/api".to_string(),
+        zer_explorer_api_key: None,
+        zer_rpc_url: None,
         deposit_mnemonic: None,
         hot_mnemonic: None,
     };

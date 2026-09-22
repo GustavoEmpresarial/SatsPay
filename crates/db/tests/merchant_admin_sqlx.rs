@@ -30,26 +30,26 @@ async fn merchant_admin_and_public_api(pool: PgPool) {
     };
 
     // Migration 0013 defaults new users to APPROVED (no apply gate).
-    assert_eq!(db::merchant::get_status(&pool, user_id).await.unwrap().status, "APPROVED");
+    assert_eq!(db::merchant::get_status(&pool, None, user_id).await.unwrap().status, "APPROVED");
     db::merchant::reject(&pool, user_id, admin_id, "policy")
         .await
         .unwrap();
-    assert_eq!(db::merchant::get_status(&pool, user_id).await.unwrap().status, "REJECTED");
+    assert_eq!(db::merchant::get_status(&pool, None, user_id).await.unwrap().status, "REJECTED");
 
-    let applied = db::merchant::apply(&pool, user_id, "Acme Faucet", "https://acme.example", "A faucet site")
+    let applied = db::merchant::apply(&pool, None, user_id, "Acme Faucet", "https://acme.example", "A faucet site")
         .await
         .unwrap();
     assert_eq!(applied.status, "PENDING");
     assert!(
-        db::merchant::apply(&pool, user_id, "Acme 2", "https://acme2.example", "d")
+        db::merchant::apply(&pool, None, user_id, "Acme 2", "https://acme2.example", "d")
             .await
             .is_err()
     );
 
     db::merchant::approve(&pool, user_id, admin_id).await.unwrap();
-    assert_eq!(db::merchant::get_status(&pool, user_id).await.unwrap().status, "APPROVED");
-    let _ = db::merchant::list_applications(&pool, None).await.unwrap();
-    let _ = db::merchant::list_applications(&pool, Some("APPROVED")).await.unwrap();
+    assert_eq!(db::merchant::get_status(&pool, None, user_id).await.unwrap().status, "APPROVED");
+    let _ = db::merchant::list_applications(&pool, None, None).await.unwrap();
+    let _ = db::merchant::list_applications(&pool, None, Some("APPROVED")).await.unwrap();
 
     let btc_wallet = common::insert_personal_wallet(&pool, user_id, Coin::Btc).await;
     common::credit_wallet(&pool, btc_wallet, 100_000_000, "seed").await;
@@ -65,13 +65,14 @@ async fn merchant_admin_and_public_api(pool: PgPool) {
         client.as_ref(),
         "127.0.0.1",
         None,
+        None,
     )
     .await
     .unwrap();
     assert_eq!(withdrawal.status, "PENDING");
     assert!(withdrawal.requires_approval);
 
-    let pending = db::admin::list_pending_withdrawals(&pool).await.unwrap();
+    let pending = db::admin::list_pending_withdrawals(&pool, None).await.unwrap();
     assert!(pending.iter().any(|w| w.id == withdrawal.id));
 
     db::admin::approve_withdrawal(&pool, withdrawal.id, admin_id, Some("127.0.0.1"))
@@ -91,7 +92,7 @@ async fn merchant_admin_and_public_api(pool: PgPool) {
     );
 
     // Stub chain refuses broadcast → FAILED + reverse (see withdrawal_sqlx).
-    db::withdrawals::process_broadcast(&pool, withdrawal.id, &registry)
+    db::withdrawals::process_broadcast(&pool, withdrawal.id, &registry, None)
         .await
         .unwrap();
     let final_status: String =
@@ -144,6 +145,7 @@ async fn merchant_admin_and_public_api(pool: PgPool) {
 
     let send_ref = db::public_api::send_to_user(
         &pool,
+        &secrets,
         user_id,
         issued.id,
         Coin::Btc,
@@ -156,6 +158,7 @@ async fn merchant_admin_and_public_api(pool: PgPool) {
     .unwrap();
     let send_ref2 = db::public_api::send_to_user(
         &pool,
+        &secrets,
         user_id,
         issued.id,
         Coin::Btc,

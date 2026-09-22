@@ -141,6 +141,7 @@ function explorerTx(coin: string, hash: string): string | null {
   if (c === 'BCH') return `https://blockchair.com/bitcoin-cash/transaction/${hash}`;
   if (c === 'SOL') return `https://solscan.io/tx/${hash}`;
   if (c === 'DGB') return `https://digiexplorer.info/tx/${hash}`;
+  if (c === 'ZER') return `https://zerochain.info/tx/${hash}`;
   return null;
 }
 
@@ -507,7 +508,7 @@ export function AdminOverviewPage() {
             <div>
               <h2 className="text-sm font-black text-ink">Fluxos financeiros</h2>
               <p className="text-[11px] text-ink-muted">
-                Valores em unidades nativas do ledger (sem USD). Faucet = custo HOUSE · Gateway = taxa ~0,5%.
+                Valores em unidades nativas do ledger (sem USD). Faucet = custo HOUSE · Gateway = taxa 0,25%.
               </p>
             </div>
             <div className="inline-flex rounded-xl border border-border bg-surface p-0.5">

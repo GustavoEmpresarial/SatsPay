@@ -29,6 +29,8 @@ hmac = "0.12"
 pbkdf2 = { version = "0.12", default-features = false, features = ["hmac"] }
 ed25519-dalek = { version = "2", features = ["std"] }
 base64 = "0.22"
+solana-sdk = { version = "2.1", default-features = false, features = ["full"] }
+bincode = "1"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

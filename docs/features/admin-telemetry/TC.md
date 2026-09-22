@@ -21,6 +21,7 @@
 | TC-admin-telemetry-13 | ui-tab | Aba/seção «10s» carrega e exibe empty/loading/data | [ ] |
 | TC-admin-telemetry-14 | ui-tab | Aba/seção «30s» carrega e exibe empty/loading/data | [ ] |
 | TC-admin-telemetry-15 | ui-tab | Aba/seção «Off» carrega e exibe empty/loading/data | [ ] |
+| TC-admin-telemetry-16 | ui-tab | Aba/seção «Recentes» carrega e exibe empty/loading/data | [ ] |
 
 ## Automatizado
 

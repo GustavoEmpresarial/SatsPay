@@ -15,7 +15,7 @@
 
 ## Keywords (busca)
 
-`api docs ApiDocsPage /docs  cURL Node.js Python PHP Go Rust public`
+`api docs ApiDocsPage /docs  loja-producao public`
 
 ## Rotas
 
@@ -23,12 +23,7 @@
 
 ## Abas / seções internas
 
-- cURL
-- Node.js
-- Python
-- PHP
-- Go
-- Rust
+- loja-producao
 
 ## APIs usadas (client → `/v1…`)
 
@@ -41,7 +36,7 @@
 
 ## Comportamento (bruto)
 
-Página React `ApiDocsPage`. Chama 0 endpoint(s) via `api()`. Abas/labels: cURL, Node.js, Python, PHP, Go, Rust.
+Página React `ApiDocsPage`. Chama 0 endpoint(s) via `api()`. Abas/labels: loja-producao. Página pública do contrato da API. Tem de bater com `crates/api-http/src/merchant_deposits.rs` e `crates/webhooks/src/lib.rs` — guardado por `client/tests/unit/contract/merchantGateway.contract.test.ts`. Host único em `API_BASE`; tabela de moedas vem de `client/src/shared/coins.ts`. `GET /v1/me/export` e `POST /v1/me/erase` são LGPD do usuário logado (Settings), não superfície HMAC — ficam no `http-api-reference.md`, não nesta página.
 
 ## Notas de overview legado
 
@@ -79,6 +74,7 @@ Preferir chaves em `client/src/i18n/locales/{pt,en}.json` quando a página for t
 - Admin: `AdminLayout` labels em pt-BR; ignore language switch do app.
 - Erros esperados de produto (faucet inventory, login 400) não devem floodar telemetria.
 - Saldos: nunca confiar em coluna `balance` mutável — usar ledger.
+- `POST /v1/public/send`: `toEmail` digitado ou `email` do userinfo. Falha com `{ "error", "code" }`: `TARGET_INELIGIBLE`, `SEND_TO_SELF` (não é saldo), `DAILY_LIMIT_REACHED`, `WALLET_NOT_FOUND`. Checkout da própria fatura: `CANNOT_PAY_OWN_INVOICE`. Nada debitado.
 
 ## Links relacionados
 

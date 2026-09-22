@@ -81,6 +81,24 @@ fn webhook_signing_secret_is_stable_per_merchant() {
 }
 
 #[test]
+fn pii_seal_binds_aad_and_legacy_plaintext_opens() {
+    let svc = SecretsService::from_hex(test_key()).unwrap();
+    let sealed = svc.seal_pii("invoice.callback", "m1:ord1", "https://shop.example/hook");
+    assert!(sealed.starts_with(crate::PII_PREFIX));
+    assert_eq!(svc.open_pii("invoice.callback", "m1:ord1", &sealed), "https://shop.example/hook");
+    assert_ne!(svc.open_pii("invoice.callback", "m2:ord1", &sealed), "https://shop.example/hook");
+    assert_eq!(svc.open_pii("invoice.callback", "x", "https://plain.example"), "https://plain.example");
+    assert_eq!(svc.email_index("A@B.com"), svc.email_index(" a@b.com "));
+    assert_ne!(svc.email_index("a@b.com"), svc.hmac_hex("a@b.com"));
+    assert!(crate::validate_api_scopes(&["deposits".into(), "balance".into()]).is_ok());
+    assert!(crate::validate_api_scopes(&["nfts".into()]).is_err());
+    let ip = svc.ip_fingerprint("203.0.113.9");
+    assert_ne!(ip, "203.0.113.9");
+    assert_eq!(ip, svc.ip_fingerprint("203.0.113.9"));
+    assert_ne!(ip, svc.ip_fingerprint("203.0.113.10"));
+}
+
+#[test]
 fn webhook_payload_verify_rejects_tamper() {
     let svc = SecretsService::from_hex(test_key()).unwrap();
     let merchant = "11111111-1111-1111-1111-111111111111";

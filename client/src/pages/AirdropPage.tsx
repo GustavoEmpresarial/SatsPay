@@ -16,6 +16,7 @@ interface AirdropProfile {
   claimed: boolean;
   projected_reward_usd: string;
   days_remaining: number;
+  season_active?: boolean;
 }
 
 interface LeaderboardEntry {
@@ -152,13 +153,24 @@ export function AirdropPage() {
   const prevTierMin = currentTierConfig.minPoints;
   const nextTierMin = nextTier ? nextTier.minPoints : userPoints;
   const pointsRemaining = nextTier ? Math.max(0, nextTier.minPoints - userPoints) : 0;
-  
+  const seasonActive = profile?.season_active !== false && (profile?.season_number ?? 0) > 0;
+
   const progressPct = nextTier
     ? Math.min(100, Math.max(0, ((userPoints - prevTierMin) / (nextTierMin - prevTierMin)) * 100))
     : 100;
 
   return (
     <div className="space-y-8 max-w-6xl mx-auto pb-16">
+      {profile && !seasonActive && (
+        <div
+          role="status"
+          className="rounded-2xl border border-amber-600/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-950"
+        >
+          <strong className="font-semibold">Temporada inativa.</strong>{' '}
+          SatsPoints não estão sendo creditados até existir uma season com status ACTIVE. Claims no faucet
+          e swaps ainda creditam o ledger normalmente.
+        </div>
+      )}
       {/* HERO BANNER */}
       <div className="relative overflow-hidden rounded-3xl border border-amber-500/30 bg-gradient-to-br from-amber-500/20 via-paper to-paper p-6 sm:p-10 shadow-sm">
         <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6 relative z-10">
@@ -210,10 +222,14 @@ export function AirdropPage() {
         <div className="rounded-2xl border border-border bg-paper p-5 shadow-xs space-y-2">
           <span className="text-xs font-bold text-ink-muted">Posição no Ranking Global</span>
           <div className="text-2xl font-black text-purple-600 font-mono">
-            #{profile?.global_rank ?? 1}
+            {(profile?.total_points ?? 0) > 0 && (profile?.global_rank ?? 0) > 0
+              ? `#${profile!.global_rank}`
+              : '—'}
           </div>
           <p className="text-[11px] text-ink-muted">
-            Entre {profile?.total_participants ?? 1} participantes ativos
+            {(profile?.total_points ?? 0) > 0
+              ? `Entre ${profile?.total_participants ?? 0} participantes ativos`
+              : 'Faça faucet, swap ou indique amigos para entrar no ranking'}
           </p>
         </div>
       </div>
@@ -536,85 +552,21 @@ export function AirdropPage() {
           </Link>
 
           <Link
-            to="/wallets"
+            to="/deposit"
             className="rounded-2xl border border-border bg-surface p-4 space-y-2 hover:border-amber-500/40 hover:bg-paper transition-all group"
           >
             <div className="flex items-center justify-between">
-              <i className="bi bi-wallet2 text-blue-600 text-lg" />
+              <i className="bi bi-box-arrow-in-down text-blue-600 text-lg" />
               <span className="rounded-md bg-blue-500/10 text-blue-700 px-2 py-0.5 text-[10px] font-black">
-                +10 pts / $10
+                +100 pts/depósito
               </span>
             </div>
             <div className="text-xs font-bold text-ink group-hover:text-blue-600 transition-colors">
-              Manter Saldo em Carteira
+              Confirmar Depósito On-Chain
             </div>
-            <p className="text-[11px] text-ink-muted">Pontos diários de fidelidade por saldo.</p>
+            <p className="text-[11px] text-ink-muted">Cada depósito creditado gera +100 SatsPoints.</p>
           </Link>
         </div>
-      </div>
-
-      {/* POINTS AUDIT TRAIL / ACTIVITY LOG */}
-      <div className="rounded-3xl border border-border bg-paper shadow-xs overflow-hidden">
-        <div className="border-b border-border bg-surface/60 px-6 py-4 flex items-center justify-between">
-          <h2 className="text-sm font-black text-ink uppercase tracking-wider flex items-center gap-2">
-            <i className="bi bi-clock-history text-purple-600" />
-            <span>Extrato & Rastreamento Detalhado de Pontos ($SATS)</span>
-          </h2>
-          <span className="text-[11px] text-ink-muted font-mono">Auditoria em Tempo Real</span>
-        </div>
-
-        {isLogsLoading ? (
-          <div className="py-12 text-center text-ink-muted text-xs animate-pulse">
-            Carregando extrato de atividades...
-          </div>
-        ) : pointLogs.length === 0 ? (
-          <div className="py-12 text-center space-y-2">
-            <p className="text-sm font-bold text-ink">Nenhum evento individual detalhado nesta temporada</p>
-            <p className="text-xs text-ink-muted max-w-md mx-auto">
-              Seus próximos claims no faucet (+50), conversões swap (+100) e novos amigos indicados (+50) serão listados aqui linha por linha com data e hora.
-            </p>
-          </div>
-        ) : (
-          <div className="overflow-x-auto [scrollbar-width:none]">
-            <table className="w-full text-left text-xs">
-              <thead className="border-b border-border bg-surface/50 text-[10px] uppercase tracking-wider text-ink-muted font-bold">
-                <tr>
-                  <th className="p-4">Data / Hora</th>
-                  <th className="p-4">Ação</th>
-                  <th className="p-4">Descrição da Atividade</th>
-                  <th className="p-4 text-right">Pontos</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border">
-                {pointLogs.map((log) => (
-                  <tr key={log.id} className="hover:bg-surface/30">
-                    <td className="p-4 font-mono text-[11px] text-ink-muted whitespace-nowrap">
-                      {new Date(log.created_at).toLocaleString('pt-BR', {
-                        day: '2-digit',
-                        month: '2-digit',
-                        year: 'numeric',
-                        hour: '2-digit',
-                        minute: '2-digit',
-                        second: '2-digit',
-                      })}
-                    </td>
-                    <td className="p-4 whitespace-nowrap">
-                      <span className="rounded-md bg-purple-500/10 text-purple-700 px-2 py-0.5 text-[10px] font-black uppercase">
-                        {log.activity_type}
-                      </span>
-                    </td>
-                    <td className="p-4 font-medium text-ink">
-                      {log.description}
-                    </td>
-                    <td className="p-4 text-right font-mono font-black text-amber-600 text-sm whitespace-nowrap">
-                      +{log.points.toLocaleString()} pts
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
       </div>
 
       {/* LEADERBOARD TABLE */}
@@ -673,6 +625,70 @@ export function AirdropPage() {
                     </tr>
                   );
                 })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* POINTS AUDIT TRAIL / ACTIVITY LOG */}
+      <div className="rounded-3xl border border-border bg-paper shadow-xs overflow-hidden">
+        <div className="border-b border-border bg-surface/60 px-6 py-4 flex items-center justify-between">
+          <h2 className="text-sm font-black text-ink uppercase tracking-wider flex items-center gap-2">
+            <i className="bi bi-clock-history text-purple-600" />
+            <span>Extrato & Rastreamento Detalhado de Pontos ($SATS)</span>
+          </h2>
+          <span className="text-[11px] text-ink-muted font-mono">Últimas 10</span>
+        </div>
+
+        {isLogsLoading ? (
+          <div className="py-12 text-center text-ink-muted text-xs animate-pulse">
+            Carregando extrato de atividades...
+          </div>
+        ) : pointLogs.length === 0 ? (
+          <div className="py-12 text-center space-y-2">
+            <p className="text-sm font-bold text-ink">Nenhum evento individual detalhado nesta temporada</p>
+            <p className="text-xs text-ink-muted max-w-md mx-auto">
+              Seus próximos claims no faucet (+50), conversões swap (+100) e novos amigos indicados (+50) serão listados aqui linha por linha com data e hora.
+            </p>
+          </div>
+        ) : (
+          <div className="overflow-x-auto [scrollbar-width:none]">
+            <table className="w-full text-left text-xs">
+              <thead className="border-b border-border bg-surface/50 text-[10px] uppercase tracking-wider text-ink-muted font-bold">
+                <tr>
+                  <th className="p-4">Data / Hora</th>
+                  <th className="p-4">Ação</th>
+                  <th className="p-4">Descrição da Atividade</th>
+                  <th className="p-4 text-right">Pontos</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {pointLogs.slice(0, 10).map((log) => (
+                  <tr key={log.id} className="hover:bg-surface/30">
+                    <td className="p-4 font-mono text-[11px] text-ink-muted whitespace-nowrap">
+                      {new Date(log.created_at).toLocaleString('pt-BR', {
+                        day: '2-digit',
+                        month: '2-digit',
+                        year: 'numeric',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                        second: '2-digit',
+                      })}
+                    </td>
+                    <td className="p-4 whitespace-nowrap">
+                      <span className="rounded-md bg-purple-500/10 text-purple-700 px-2 py-0.5 text-[10px] font-black uppercase">
+                        {log.activity_type}
+                      </span>
+                    </td>
+                    <td className="p-4 font-medium text-ink">
+                      {log.description}
+                    </td>
+                    <td className="p-4 text-right font-mono font-black text-amber-600 text-sm whitespace-nowrap">
+                      +{log.points.toLocaleString()} pts
+                    </td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>

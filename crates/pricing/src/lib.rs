@@ -63,6 +63,8 @@ impl BinanceProvider {
             Coin::Sol => Some("SOLUSDT"),
             Coin::Usdc => Some("USDCUSDT"),
             Coin::Usdt => None,
+            Coin::Zer => None,
+            Coin::Pepe => Some("PEPEUSDT"),
         }
     }
 }
@@ -206,6 +208,8 @@ impl PriceProvider for KrakenProvider {
                 Coin::Sol => &["SOLUSD"],
                 Coin::Usdt => &["USDTZUSD", "USDTUSD"],
                 Coin::Usdc => &["USDCUSD"],
+                Coin::Zer => &[],
+                Coin::Pepe => &["PEPEUSD"],
             };
 
             for &key in possible_keys {
@@ -259,6 +263,8 @@ impl OkxProvider {
             Coin::Sol => Some("SOL-USDT"),
             Coin::Usdc => Some("USDC-USDT"),
             Coin::Usdt => None,
+            Coin::Zer => None,
+            Coin::Pepe => Some("PEPE-USDT"),
         }
     }
 }
@@ -356,6 +362,8 @@ impl CoinGeckoClient {
             Coin::Sol => "solana",
             Coin::Usdt => "tether",
             Coin::Usdc => "usd-coin",
+            Coin::Zer => "zero",
+            Coin::Pepe => "pepe",
         }
     }
 
@@ -417,6 +425,58 @@ impl PriceProvider for CoinGeckoClient {
     }
 }
 
+/// Fallback spot for ZER when CEX books are empty (`zerochain.info/api/price`).
+pub struct ZerochainPriceProvider {
+    http: reqwest::Client,
+    base_url: String,
+}
+
+impl ZerochainPriceProvider {
+    pub fn new(base_url: Option<String>, timeout: Duration) -> Self {
+        let http = reqwest::Client::builder()
+            .timeout(timeout)
+            .user_agent("SatsPay-PricingOracle/1.0")
+            .build()
+            .unwrap_or_default();
+        Self {
+            http,
+            base_url: base_url.unwrap_or_else(|| "https://zerochain.info/api".to_string()),
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl PriceProvider for ZerochainPriceProvider {
+    fn name(&self) -> &'static str {
+        "zerochain.info"
+    }
+
+    async fn fetch_prices(&self, coins: &[Coin]) -> Result<HashMap<Coin, f64>, String> {
+        if !coins.contains(&Coin::Zer) {
+            return Ok(HashMap::new());
+        }
+        let url = format!("{}/price", self.base_url.trim_end_matches('/'));
+        let resp = self
+            .http
+            .get(&url)
+            .send()
+            .await
+            .map_err(|e| format!("request failed: {e}"))?;
+        if !resp.status().is_success() {
+            return Err(format!("http status {}", resp.status()));
+        }
+        let body: serde_json::Value = resp.json().await.map_err(|e| format!("parse error: {e}"))?;
+        let usd = body
+            .get("usd")
+            .or_else(|| body.get("USD"))
+            .or_else(|| body.get("price"))
+            .and_then(|v| v.as_f64().or_else(|| v.as_str().and_then(|s| s.parse().ok())))
+            .filter(|p| *p > 0.0)
+            .ok_or_else(|| "zerochain price missing usd".to_string())?;
+        Ok(HashMap::from([(Coin::Zer, usd)]))
+    }
+}
+
 /// Multi-Provider Oracle Aggregator
 pub struct MultiProviderOracle {
     providers: Vec<Box<dyn PriceProvider>>,
@@ -430,6 +490,7 @@ impl Default for MultiProviderOracle {
             Box::new(KrakenProvider::new(None, timeout)),
             Box::new(OkxProvider::new(None, timeout)),
             Box::new(CoinGeckoClient::new("https://api.coingecko.com/api/v3", timeout)),
+            Box::new(ZerochainPriceProvider::new(None, timeout)),
         ])
     }
 }
@@ -511,7 +572,7 @@ pub(crate) fn median_f64(sorted: &[f64]) -> Option<f64> {
 
 #[cfg(test)]
 mod tests {
-    use super::{median_f64, BinanceProvider, CoinGeckoClient, KrakenProvider, MultiProviderOracle, OkxProvider, PriceProvider};
+    use super::{median_f64, BinanceProvider, CoinGeckoClient, KrakenProvider, MultiProviderOracle, OkxProvider, PriceProvider, ZerochainPriceProvider};
     use shared::Coin;
     use std::collections::HashMap;
     use std::time::Duration;
@@ -579,6 +640,14 @@ mod tests {
         let _ = KrakenProvider::new(None, t);
         let _ = OkxProvider::new(None, t);
         let _ = CoinGeckoClient::new("https://example.test", t);
+        let _ = ZerochainPriceProvider::new(None, t);
         let _ = MultiProviderOracle::default();
+    }
+
+    #[test]
+    fn coingecko_id_maps_zer_to_zero() {
+        assert_eq!(CoinGeckoClient::coingecko_id(Coin::Zer), "zero");
+        assert_eq!(CoinGeckoClient::coingecko_id(Coin::Pepe), "pepe");
+        assert_eq!(CoinGeckoClient::coingecko_id(Coin::Dgb), "digibyte");
     }
 }

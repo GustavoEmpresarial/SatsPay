@@ -38,19 +38,13 @@ const SCOPES_CONFIG: Record<
   },
   balance: {
     label: 'Consulta de Saldos',
-    desc: 'Consultar saldos disponíveis das carteiras comerciais',
+    desc: 'GET /v1/public/balance — saldo da conta dona da chave',
     icon: 'bi-wallet2',
-    color: 'indigo',
-  },
-  history: {
-    label: 'Histórico & Extratos',
-    desc: 'Listar transações, depósitos e registros de liquidação',
-    icon: 'bi-clock-history',
     color: 'slate',
   },
 };
 
-const ALL_SCOPES = ['deposits', 'send', 'balance', 'history'] as const;
+const ALL_SCOPES = ['deposits', 'send', 'balance'] as const;
 
 /** Parse a free-text field (commas / spaces / newlines) into a clean list. */
 function parseIps(raw: string): string[] {
@@ -63,7 +57,7 @@ function parseIps(raw: string): string[] {
 export function ApiKeysPage() {
   const { i18n } = useTranslation();
   const [label, setLabel] = useState('');
-  const [scopes, setScopes] = useState<string[]>(['deposits', 'send', 'balance']);
+  const [scopes, setScopes] = useState<string[]>(['deposits', 'send']);
   const [allowedIps, setAllowedIps] = useState('');
   const [expiresInDays, setExpiresInDays] = useState('');
   const [requireSignature, setRequireSignature] = useState(false);
@@ -154,6 +148,10 @@ export function ApiKeysPage() {
             </h1>
             <p className="text-xs text-ink-muted mt-1 max-w-2xl">
               Gerencie credenciais para o Gateway de Cobranças, payouts automáticos e consultas de saldo.
+            </p>
+            <p className="mt-2 text-xs text-ink rounded-xl border border-bitcoin/25 bg-bitcoin/5 px-3 py-2 max-w-2xl">
+              O cliente paga o valor integral. A taxa de 0,25% é descontada do que você recebe
+              (<span className="font-mono">feeAmount + netAmount = amount</span>).
             </p>
           </div>
 

@@ -411,7 +411,7 @@ export function AdminMerchantsPage() {
                   <div>
                     <h2 className="text-sm font-black text-ink">Dinheiro em movimento</h2>
                     <p className="text-[11px] text-ink-muted">
-                      Gateway = receita (~0,5%) · Faucet = custo HOUSE. Detalhe completo na Visão geral → Economia.
+                      Gateway = receita (0,25%) · Faucet = custo HOUSE. Detalhe completo na Visão geral → Economia.
                     </p>
                   </div>
                   <Link

@@ -3,13 +3,21 @@ import {
   COINS,
   DEPOSIT_WITHDRAW_PAUSED_COINS,
   defaultDepositWithdrawCoin,
+  depositWithdrawActiveCoins,
+  depositWithdrawPausedCoinList,
   isDepositWithdrawPaused,
   isSwapL2Coin,
 } from '../../../src/shared/coins.js';
 
 describe('deposit/withdraw pause coverage', () => {
-  it('pauses exactly BTC LTC DOGE DGB and keeps them in COINS', () => {
-    expect([...DEPOSIT_WITHDRAW_PAUSED_COINS].sort()).toEqual(['BTC', 'DGB', 'DOGE', 'LTC']);
+  it('pauses BTC LTC DOGE BCH DGB and keeps them in COINS', () => {
+    expect([...DEPOSIT_WITHDRAW_PAUSED_COINS].sort()).toEqual([
+      'BCH',
+      'BTC',
+      'DGB',
+      'DOGE',
+      'LTC',
+    ]);
     for (const c of DEPOSIT_WITHDRAW_PAUSED_COINS) {
       expect(COINS.includes(c)).toBe(true);
       expect(isDepositWithdrawPaused(c)).toBe(true);
@@ -17,10 +25,20 @@ describe('deposit/withdraw pause coverage', () => {
     }
   });
 
-  it('leaves L2 / BCH / SOL active for deposit-withdraw', () => {
-    for (const c of ['POL', 'USDT', 'USDC', 'BCH', 'SOL'] as const) {
+  it('leaves L2 / SOL / ZER active for deposit-withdraw', () => {
+    for (const c of ['POL', 'USDT', 'USDC', 'SOL', 'ZER'] as const) {
       expect(isDepositWithdrawPaused(c)).toBe(false);
     }
+  });
+
+  it('active picker list excludes paused coins', () => {
+    const active = depositWithdrawActiveCoins();
+    const paused = depositWithdrawPausedCoinList();
+    expect(active.every((c) => !isDepositWithdrawPaused(c))).toBe(true);
+    expect(paused.every((c) => isDepositWithdrawPaused(c))).toBe(true);
+    expect(active.length + paused.length).toBe(COINS.length);
+    expect(active).toEqual(expect.arrayContaining(['POL', 'SOL', 'USDT', 'USDC', 'ZER']));
+    expect(paused).toEqual(expect.arrayContaining(['BTC', 'BCH', 'DGB']));
   });
 
   it('defaultDepositWithdrawCoin skips paused preference', () => {

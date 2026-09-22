@@ -1,11 +1,12 @@
 //! Worker entrypoint — paridade com `legacy/apps/api/src/worker.ts`.
-//! Roda jobs internos (deposit_watcher, withdrawal_reconciler) e o
+//! Roda jobs internos (deposit_watcher, invoice_watcher, withdrawal_reconciler) e o
 //! outbox_relay que publica eventos de domínio no Kafka.
 //!
 //! TODO(fase 5+): balance_reconciliation, lend_accrual, worker_heartbeat.
 
 mod deposit_watcher;
 mod dex_swap_runner;
+mod invoice_watcher;
 mod withdrawal_reconciler;
 
 use chain::ChainRegistry;
@@ -13,6 +14,8 @@ use events::EventProducer;
 use std::sync::Arc;
 use std::time::Duration;
 use swapkit::SwapKitClient;
+use relay::RelayClient;
+use changenow::ChangeNowClient;
 
 fn required_env_secs(name: &str) -> Duration {
     let secs: u64 = std::env::var(name).unwrap_or_else(|_| panic!("{name} must be set")).parse().unwrap_or_else(|_| panic!("{name} must be a positive integer number of seconds"));
@@ -35,12 +38,32 @@ async fn main() {
     db::house::ensure_house_inventory(&pool).await.expect("failed to ensure house inventory");
     db::lend::ensure_lend_reserves(&pool).await.expect("failed to ensure lend reserves");
 
+    let encryption_key = std::env::var("ENCRYPTION_KEY").expect("ENCRYPTION_KEY must be set (64 hex chars)");
+    let secrets = Arc::new(
+        crypto::SecretsService::from_hex(&encryption_key).expect("ENCRYPTION_KEY must be 64 hex chars"),
+    );
+    if let Some(m) = crypto::bootstrap_hot_mnemonic(&secrets).expect("hot mnemonic bootstrap failed") {
+        std::env::set_var("HOT_MNEMONIC", m);
+    }
+
     let registry = std::sync::Arc::new(ChainRegistry::from_env(pool.clone()).expect("failed to build chain registry"));
     let swapkit = Arc::new(SwapKitClient::from_env());
+    let relay = Arc::new(RelayClient::from_env());
+    let changenow = Arc::new(ChangeNowClient::from_env());
     let worker_id = std::env::var("HOSTNAME").unwrap_or_else(|_| format!("worker-{}", uuid::Uuid::new_v4()));
 
     let kafka_bootstrap = std::env::var("KAFKA_BOOTSTRAP_SERVERS").ok();
     let outbox_batch_size: i64 = std::env::var("OUTBOX_RELAY_BATCH_SIZE").expect("OUTBOX_RELAY_BATCH_SIZE must be set").parse().expect("OUTBOX_RELAY_BATCH_SIZE must be a positive integer");
+
+    match db::privacy::run_boot_privacy_jobs(&pool, &secrets).await {
+        Ok(r) => tracing::info!(?r, "pii backfill complete"),
+        Err(e) => tracing::error!(error = %e, "pii backfill failed"),
+    }
+
+    match db::airdrop::backfill_missed_airdrop_points(&pool).await {
+        Ok(n) => tracing::info!(awarded = n, "airdrop missed-points backfill complete"),
+        Err(e) => tracing::error!(error = %e, "airdrop missed-points backfill failed"),
+    }
 
     tracing::info!(worker_id, "worker started");
 
@@ -55,10 +78,32 @@ async fn main() {
         }
     });
 
+    // Merchant gateway: confirm on-chain invoice payments, sweep, and retry
+    // webhooks. Optional interval with a default so an existing deployment
+    // does not fail to boot on a missing variable.
+    let invoice_interval = Duration::from_secs(
+        std::env::var("INVOICE_WATCHER_INTERVAL_SECS")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .filter(|s| *s > 0)
+            .unwrap_or(20),
+    );
+    let invoice_pool = pool.clone();
+    let invoice_registry = registry.clone();
+    let invoice_secrets = secrets.clone();
+    let invoice_task = tokio::spawn(async move {
+        let mut interval = tokio::time::interval(invoice_interval);
+        loop {
+            interval.tick().await;
+            invoice_watcher::run_once(&invoice_pool, &invoice_registry, &invoice_secrets).await;
+        }
+    });
+
     let broadcast_interval_dur = required_env_secs("WITHDRAWAL_BROADCAST_INTERVAL_SECS");
     let requeue_interval_dur = required_env_secs("WITHDRAWAL_REQUEUE_INTERVAL_SECS");
     let withdrawal_pool = pool.clone();
     let withdrawal_registry = registry.clone();
+    let withdrawal_secrets = secrets.clone();
     let withdrawal_worker_id = worker_id.clone();
     let withdrawal_task = tokio::spawn(async move {
         let mut broadcast_interval = tokio::time::interval(broadcast_interval_dur);
@@ -66,7 +111,7 @@ async fn main() {
         loop {
             tokio::select! {
                 _ = broadcast_interval.tick() => {
-                    withdrawal_reconciler::drain_broadcast_queue(&withdrawal_pool, &withdrawal_registry, &withdrawal_worker_id).await;
+                    withdrawal_reconciler::drain_broadcast_queue(&withdrawal_pool, &withdrawal_registry, &withdrawal_secrets, &withdrawal_worker_id).await;
                 }
                 _ = requeue_interval.tick() => {
                     withdrawal_reconciler::requeue_eligible(&withdrawal_pool).await;
@@ -78,6 +123,8 @@ async fn main() {
     let dex_pool = pool.clone();
     let dex_registry = registry.clone();
     let dex_swapkit = swapkit.clone();
+    let dex_relay = relay.clone();
+    let dex_changenow = changenow.clone();
     let dex_worker_id = worker_id.clone();
     let dex_interval = Duration::from_secs(
         std::env::var("DEX_SWAP_INTERVAL_SECS")
@@ -89,8 +136,16 @@ async fn main() {
         let mut interval = tokio::time::interval(dex_interval);
         loop {
             interval.tick().await;
-            dex_swap_runner::drain_broadcast_queue(&dex_pool, &dex_registry, &dex_swapkit, &dex_worker_id).await;
-            dex_swap_runner::track_inflight(&dex_pool, &dex_swapkit).await;
+            dex_swap_runner::drain_broadcast_queue(
+                &dex_pool,
+                &dex_registry,
+                &dex_swapkit,
+                &dex_relay,
+                &dex_changenow,
+                &dex_worker_id,
+            )
+            .await;
+            dex_swap_runner::track_inflight(&dex_pool, &dex_swapkit, &dex_relay, &dex_changenow).await;
         }
     });
 
@@ -186,9 +241,31 @@ async fn main() {
         }
     });
 
+    let retain_pool = pool.clone();
+    let retain_task = tokio::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_secs(24 * 60 * 60));
+        loop {
+            interval.tick().await;
+            match db::privacy::retain_expired_pii(&retain_pool).await {
+                Ok(r) => tracing::info!(?r, "pii retention tick"),
+                Err(e) => tracing::error!(error = %e, "pii retention failed"),
+            }
+        }
+    });
+
     if outbox_task.is_none() {
         tracing::warn!("KAFKA_BOOTSTRAP_SERVERS not set — outbox_relay disabled, events will accumulate unpublished");
     }
 
-    let _ = tokio::join!(deposit_task, withdrawal_task, dex_task, rewards_task, price_task, aave_task, metrics_task);
+    let _ = tokio::join!(
+        deposit_task,
+        invoice_task,
+        withdrawal_task,
+        dex_task,
+        rewards_task,
+        price_task,
+        aave_task,
+        metrics_task,
+        retain_task
+    );
 }

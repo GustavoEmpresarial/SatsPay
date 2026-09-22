@@ -11,11 +11,15 @@ path = "src/main.rs"
 
 [dependencies]
 db.workspace = true
+crypto = { path = "../crypto" }
+webhooks.workspace = true
 events.workspace = true
 queue.workspace = true
 chain = { path = "../chain" }
 pricing.workspace = true
 swapkit = { path = "../swapkit" }
+relay = { path = "../relay" }
+changenow = { path = "../changenow" }
 shared.workspace = true
 chrono.workspace = true
 sqlx.workspace = true

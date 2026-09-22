@@ -35,8 +35,8 @@ export function DeveloperBalances() {
     enabled: Boolean(user),
   });
   const devQ = useQuery({
-    queryKey: ['wallets', 'DEVELOPER'],
-    queryFn: () => api<WalletsResp>('/wallet?kind=DEVELOPER'),
+    queryKey: ['wallets', 'MERCHANT'],
+    queryFn: () => api<WalletsResp>('/wallet?kind=MERCHANT'),
     enabled: Boolean(user),
   });
   const pricingQ = useQuery({
@@ -172,7 +172,7 @@ export function DeveloperBalances() {
             onClose={() => setModal(null)}
             onDone={() => {
               qc.invalidateQueries({ queryKey: ['wallets', 'PERSONAL'] });
-              qc.invalidateQueries({ queryKey: ['wallets', 'DEVELOPER'] });
+              qc.invalidateQueries({ queryKey: ['wallets', 'MERCHANT'] });
               qc.invalidateQueries({ queryKey: ['wallets'] });
               setModal(null);
             }}

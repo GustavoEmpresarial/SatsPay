@@ -36,7 +36,9 @@
 
 ## Comportamento (bruto)
 
-Página React `AdminLoginPage`. Chama 1 endpoint(s) via `api()`. UI admin sempre pt-BR.
+Página React `AdminLoginPage`. Chama 1 endpoint(s) via `api()`. UI admin sempre pt-BR. Turnstile `admin_login` no 1º e no 2º passo (OTP); token reset após `codeSent`. Backend exige captcha em todo POST.
+
+`SMTP_ENABLED=false` → OTP não chega. Caminho que funciona: `/login` com conta em `ADMIN_EMAILS`, depois `/admin/*`. Doc travado no gerador.
 
 ## Notas de overview legado
 

@@ -72,6 +72,10 @@ impl ChainRegistry {
 
         let bitcore_base_url = std::env::var("BITCORE_API_BASE_URL").unwrap_or_else(|_| "https://api.bitcore.io".to_string());
         let evm_rpc_url = std::env::var("EVM_RPC_URL").unwrap_or_else(|_| "https://polygon-bor-rpc.publicnode.com".to_string());
+        let bsc_rpc_url = std::env::var("BSC_RPC_URL")
+            .ok()
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or_else(|| "https://bsc-rpc.publicnode.com".to_string());
         let deposit_xpub = std::env::var("CHAIN_DEPOSIT_XPUB").unwrap_or_else(|_| "xpub661MyMwAqRbcFtXgS5sYJABqqG9YLmC4Q1Rdap9gSE8NqtwybGhePY2gZ29ESFehEdMTxnPTgVCrgbeG7K6AhEnREakCAZDJBgLnGL9ZSuL".to_string());
         let hot_wallet_wif = std::env::var("HOT_WALLET_WIF")
             .ok()
@@ -92,6 +96,7 @@ impl ChainRegistry {
             RealClientConfig {
                 bitcore_base_url,
                 evm_rpc_url,
+                bsc_rpc_url,
                 deposit_xpub,
                 hot_wallet_wif,
                 evm_deposit_lookback_blocks,
@@ -99,6 +104,10 @@ impl ChainRegistry {
                 network,
                 sol_rpc_url: std::env::var("SOL_RPC_URL").unwrap_or_else(|_| crate::sol_client::DEFAULT_SOL_RPC.to_string()),
                 dgb_insight_url: std::env::var("DGB_INSIGHT_API").unwrap_or_else(|_| "https://digiexplorer.info/api".to_string()),
+                dgb_rpc_url: std::env::var("DGB_RPC_URL").ok().filter(|s| !s.trim().is_empty()),
+                zer_explorer_url: std::env::var("ZER_EXPLORER_API").unwrap_or_else(|_| "https://zerochain.info/api".to_string()),
+                zer_explorer_api_key: std::env::var("ZER_EXPLORER_API_KEY").ok().filter(|s| !s.trim().is_empty()),
+                zer_rpc_url: std::env::var("ZER_RPC_URL").ok().filter(|s| !s.trim().is_empty()),
                 deposit_mnemonic: std::env::var("DEPOSIT_MNEMONIC").ok().filter(|s| !s.trim().is_empty()),
                 hot_mnemonic: std::env::var("HOT_MNEMONIC").ok().filter(|s| !s.trim().is_empty()),
             },

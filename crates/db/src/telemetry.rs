@@ -127,7 +127,18 @@ pub fn normalize_text(s: &str) -> String {
 }
 
 /// Redact secrets before persistence / admin display / webhook alerts.
+///
+/// Line structure is preserved. It used to collapse the whole message with
+/// `split_whitespace`, which erased newlines — and since `normalize_text`
+/// groups by the *first line*, every multi-line error (i.e. anything with a
+/// stack trace) was fingerprinted on its entire flattened body. One incident
+/// then fragmented into a separate group per distinct second line, and the
+/// stored message lost its line breaks for whoever read the dashboard.
 pub fn redact_secrets(s: &str) -> String {
+    s.split('\n').map(redact_line).collect::<Vec<_>>().join("\n")
+}
+
+fn redact_line(s: &str) -> String {
     let mut out = s.to_string();
     if let Some(idx) = out.find("Bearer ") {
         let start = idx + "Bearer ".len();
@@ -320,9 +331,9 @@ pub async fn record_error(pool: &PgPool, payload: NewErrorPayload) -> Result<Rec
     .bind(&payload.method)
     .bind(payload.status_code)
     .bind(payload.user_id)
-    .bind(&payload.ip_address)
+    .bind(payload.ip_address.as_deref().map(|ip| crate::privacy::store_ip(None, ip)))
     .bind(&payload.request_payload)
-    .bind(&payload.user_agent)
+    .bind(payload.user_agent.as_deref().map(|ua| ua.chars().take(80).collect::<String>()))
     .fetch_one(pool)
     .await?;
 
@@ -811,5 +822,36 @@ mod fingerprint_tests {
             compute_fingerprint(&p1),
             compute_fingerprint(&p2)
         );
+    }
+}
+
+#[cfg(test)]
+mod redaction_line_tests {
+    use super::*;
+
+    /// Grouping keys off the first line, so redaction must not flatten the
+    /// message — otherwise two reports of one incident that differ only in a
+    /// later line land in different groups.
+    #[test]
+    fn redaction_preserves_line_structure() {
+        let out = redact_secrets("boom line\nat wallet.rs:87\nmore");
+        assert_eq!(out, "boom line\nat wallet.rs:87\nmore");
+        assert_eq!(out.lines().count(), 3);
+    }
+
+    #[test]
+    fn same_first_line_groups_regardless_of_later_lines() {
+        let a = normalize_text(&redact_secrets("boom line\nstack"));
+        let b = normalize_text(&redact_secrets("boom line\nother"));
+        assert_eq!(a, b, "grouping must ignore everything after the first line");
+    }
+
+    #[test]
+    fn secrets_are_still_redacted_on_every_line() {
+        let raw = "first line\nBearer tokensecret\n0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+        let out = redact_secrets(raw);
+        assert!(!out.contains("tokensecret"), "{out}");
+        assert!(out.contains("[REDACTED_HEX]"), "{out}");
+        assert_eq!(out.lines().count(), 3, "{out}");
     }
 }

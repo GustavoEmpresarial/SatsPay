@@ -6,7 +6,7 @@ Página **Privacy** (`PrivacyPage.tsx`).
 
 - Auth gate: **public**
 - Rotas: `/privacy`
-- Nota: Legal
+- Nota: Legal LGPD — export/erase em Configurações (`/v1/me/export`, `/v1/me/erase`)
 
 ## Comportamento esperado
 

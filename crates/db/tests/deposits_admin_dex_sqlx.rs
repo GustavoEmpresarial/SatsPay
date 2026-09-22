@@ -85,7 +85,7 @@ async fn admin_stats_funds_and_lists(pool: PgPool) {
     db::admin::suspend_merchant(&pool, user, admin).await.unwrap();
     db::admin::approve_merchant(&pool, user, admin).await.unwrap();
 
-    let stats = db::admin::get_dashboard_stats(&pool).await.unwrap();
+    let stats = db::admin::get_dashboard_stats(&pool, None).await.unwrap();
     assert!(stats.total_users >= 1);
 
     db::admin::fund_house(&pool, Coin::Ltc, 1_000_000, admin)
@@ -95,11 +95,11 @@ async fn admin_stats_funds_and_lists(pool: PgPool) {
         .await
         .unwrap();
 
-    let _ = db::admin::list_pending_withdrawals(&pool).await.unwrap();
-    let _ = db::admin::list_all_withdrawals(&pool, None, 20).await.unwrap();
-    let merchants = db::admin::list_all_merchants(&pool).await.unwrap();
+    let _ = db::admin::list_pending_withdrawals(&pool, None).await.unwrap();
+    let _ = db::admin::list_all_withdrawals(&pool, None, 20, None).await.unwrap();
+    let merchants = db::admin::list_all_merchants(&pool, None).await.unwrap();
     assert!(merchants.iter().any(|m| m.email.contains("adm-user")));
-    let mstats = db::admin::get_merchant_platform_stats(&pool).await.unwrap();
+    let mstats = db::admin::get_merchant_platform_stats(&pool, None).await.unwrap();
     assert!(mstats.accounts_total >= 1);
     assert!(mstats.conversion_pct >= 0.0);
     let econ = db::admin::get_platform_economics(&pool).await.unwrap();
@@ -169,7 +169,7 @@ async fn admin_stats_funds_and_lists(pool: PgPool) {
         "BTC should hard-block when network > earned"
     );
 
-    let _ = db::admin::list_all_faucet_sites(&pool).await.unwrap();
+    let _ = db::admin::list_all_faucet_sites(&pool, None).await.unwrap();
 
     // create_site inserts APPROVED (legacy auto-approve); cover suspend + re-approve.
     let site = db::faucetlist::create_site(
@@ -340,6 +340,7 @@ async fn merchant_invoice_pay_confirm_webhook(pool: PgPool) {
             coin: Coin::Btc,
             amount: BigDecimal::from(1_000_000u64),
             deposit_address: "bc1qinvoice".into(),
+            hd_index: Some(7),
             callback_url: "https://shop.example/cb".into(),
             success_url: None,
             cancel_url: None,
@@ -347,6 +348,10 @@ async fn merchant_invoice_pay_confirm_webhook(pool: PgPool) {
             customer_name: Some("Cust".into()),
             description: Some("order".into()),
             expiry_minutes: Some(60),
+            accepted_coins: vec![],
+            price_usd_scaled: None,
+            price_decimals: None,
+            quote_price_scaled: None,
         },
     )
     .await
@@ -382,6 +387,7 @@ async fn merchant_invoice_pay_confirm_webhook(pool: PgPool) {
             coin: Coin::Btc,
             amount: BigDecimal::from(500_000u64),
             deposit_address: "bc1qin2".into(),
+            hd_index: None,
             callback_url: "https://shop.example/cb".into(),
             success_url: None,
             cancel_url: None,
@@ -389,6 +395,10 @@ async fn merchant_invoice_pay_confirm_webhook(pool: PgPool) {
             customer_name: None,
             description: None,
             expiry_minutes: Some(30),
+            accepted_coins: vec![],
+            price_usd_scaled: None,
+            price_decimals: None,
+            quote_price_scaled: None,
         },
     )
     .await

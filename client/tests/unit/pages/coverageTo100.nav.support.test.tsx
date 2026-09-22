@@ -234,13 +234,16 @@ describe('SupportPage — ticket flows', () => {
       route: '/support',
       loggedIn: true,
     });
-    await waitFor(() => expect(container.textContent).toMatch(/Depósito|chamado|ticket/i), {
-      timeout: 8000,
-    });
-    const ticketBtn = within(container)
-      .queryAllByRole('button')
-      .find((b) => /Depósito/i.test(b.textContent || ''));
-    if (ticketBtn) await user.click(ticketBtn);
+    // Wait for the ticket *button*, not for any text: the static heading
+    // already matches /ticket/i (i18n key `support.myTickets`), so waiting on
+    // page text passed before the list query resolved — the button was then
+    // missing, the click was silently skipped, and the thread never opened.
+    const findTicketBtn = () =>
+      within(container)
+        .queryAllByRole('button')
+        .find((b) => /Depósito/i.test(b.textContent || ''));
+    await waitFor(() => expect(findTicketBtn()).toBeTruthy(), { timeout: 8000 });
+    await user.click(findTicketBtn()!);
     await waitFor(() => expect(container.textContent).toMatch(/recebemos|Equipe|staff/i), {
       timeout: 5000,
     });

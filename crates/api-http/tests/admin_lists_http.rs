@@ -53,6 +53,7 @@ async fn admin_lists_treasury_merchants_audit(pool: PgPool) {
         "/v1/admin/treasury-wallets",
         "/v1/admin/pending-withdrawals",
         "/v1/admin/withdrawals",
+        "/v1/admin/users",
         "/v1/admin/merchants",
         "/v1/admin/merchants/stats",
         "/v1/admin/economics",
@@ -64,6 +65,17 @@ async fn admin_lists_treasury_merchants_audit(pool: PgPool) {
         let (st, body) = get(api_http::app_without_metrics(state.clone()), path, &admin_token).await;
         assert_eq!(st, axum::http::StatusCode::OK, "{path} -> {body}");
     }
+
+    let (st, body) = get(
+        api_http::app_without_metrics(state.clone()),
+        "/v1/admin/users?limit=50",
+        &admin_token,
+    )
+    .await;
+    assert_eq!(st, axum::http::StatusCode::OK, "users={body}");
+    let users = body["users"].as_array().expect("users array");
+    assert!(!users.is_empty(), "expected at least one user in admin list");
+    assert!(users.iter().any(|u| u.get("email").is_some() && u.get("role").is_some()));
 
     let (st, body) = get(
         api_http::app_without_metrics(state.clone()),

@@ -1,7 +1,7 @@
 /**
  * @vitest-environment jsdom
  */
-import { beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderWithProviders } from '../../helpers/renderWithProviders.js';
@@ -53,7 +53,24 @@ vi.mock('../../../src/lib/api.js', async () => {
   };
 });
 
-vi.mock('../../../src/components/Turnstile.js', () => ({ Turnstile: () => null }));
+vi.mock('../../../src/components/Turnstile.js', () => {
+  const { forwardRef, useImperativeHandle } = require('react') as typeof import('react');
+  return {
+    Turnstile: forwardRef(function MockTurnstile(
+      { onVerify, onReset }: { onVerify?: (t: string) => void; onReset?: () => void },
+      ref: { reset: () => void } | null,
+    ) {
+      useImperativeHandle(ref, () => ({
+        reset: () => onReset?.(),
+      }));
+      return (
+        <button type="button" data-testid="turnstile" onClick={() => onVerify?.('tok')}>
+          captcha
+        </button>
+      );
+    }),
+  };
+});
 vi.mock('../../../src/components/ModernCaptcha.js', () => ({
   ModernCaptcha: ({ onVerify }: { onVerify: (t: string) => void }) => (
     <button type="button" onClick={() => onVerify('tok')}>
@@ -62,6 +79,7 @@ vi.mock('../../../src/components/ModernCaptcha.js', () => ({
   ),
 }));
 
+import { api } from '../../../src/lib/api.js';
 import { LoginPage } from '../../../src/pages/LoginPage.js';
 import { RegisterPage } from '../../../src/pages/RegisterPage.js';
 import { AdminLoginPage } from '../../../src/pages/AdminLoginPage.js';
@@ -127,6 +145,69 @@ describe('auth form submits', () => {
       .find((b) => /entrar|login|admin/i.test(b.textContent || ''));
     if (submit) await user.click(submit);
     await waitFor(() => expect(useAdminStore.getState().admin).toBeTruthy(), { timeout: 5000 });
+    unmount();
+  }, 12000);
+
+  afterEach(() => {
+    vi.mocked(api).mockClear();
+    useAdminStore.getState().logout();
+  });
+
+  it('LoginPage keeps Turnstile after codeSent and sends a fresh token', async () => {
+    const user = userEvent.setup();
+    vi.mocked(api).mockImplementationOnce(async () => ({ codeSent: true, message: 'code sent' }));
+
+    const { container, unmount } = renderWithProviders(<LoginPage />, {
+      route: '/login',
+      loggedIn: false,
+    });
+    await waitFor(() => expect(container.querySelector('form')).toBeTruthy(), { timeout: 4000 });
+    await user.type(container.querySelector('input[type="email"]') as HTMLElement, 'test@example.com');
+    await user.type(container.querySelector('input[type="password"]') as HTMLElement, 'secret123');
+    await user.click(within(container).getByTestId('turnstile'));
+    await user.click(within(container).getByRole('button', { name: /entrar|sign in/i }));
+
+    await waitFor(() => expect(container.querySelector('#login-code')).toBeTruthy(), { timeout: 4000 });
+    expect(within(container).getByTestId('turnstile')).toBeTruthy();
+
+    await user.type(container.querySelector('#login-code') as HTMLElement, '123456');
+    await user.click(within(container).getByTestId('turnstile'));
+    await user.click(within(container).getByRole('button', { name: /verify|verificar/i }));
+
+    await waitFor(() => expect(vi.mocked(api).mock.calls.length).toBe(2), { timeout: 4000 });
+    const second = vi.mocked(api).mock.calls[1]?.[1] as { json?: { captchaToken?: string; emailCode?: string } };
+    expect(second.json?.captchaToken).toBe('tok');
+    expect(second.json?.emailCode).toBe('123456');
+    unmount();
+  }, 12000);
+
+  it('AdminLoginPage keeps Turnstile after codeSent and sends a fresh token', async () => {
+    const user = userEvent.setup();
+    vi.mocked(api).mockImplementationOnce(async () => ({ codeSent: true }));
+
+    const { container, unmount } = renderWithProviders(<AdminLoginPage />, {
+      route: '/admin/login',
+      loggedIn: false,
+    });
+    await waitFor(() => expect(container.querySelector('form')).toBeTruthy(), { timeout: 4000 });
+    await user.type(container.querySelector('input[type="email"]') as HTMLElement, 'admin@example.com');
+    await user.type(container.querySelector('input[type="password"]') as HTMLElement, 'adminpass');
+    await user.click(within(container).getByTestId('turnstile'));
+    await user.click(within(container).getByRole('button', { name: /entrar no admin|autenticando/i }));
+
+    await waitFor(() => expect(container.querySelector('input[inputmode="numeric"]')).toBeTruthy(), {
+      timeout: 4000,
+    });
+    expect(within(container).getByTestId('turnstile')).toBeTruthy();
+
+    await user.type(container.querySelector('input[inputmode="numeric"]') as HTMLElement, '654321');
+    await user.click(within(container).getByTestId('turnstile'));
+    await user.click(within(container).getByRole('button', { name: /entrar no admin|autenticando/i }));
+
+    await waitFor(() => expect(vi.mocked(api).mock.calls.length).toBe(2), { timeout: 4000 });
+    const second = vi.mocked(api).mock.calls[1]?.[1] as { json?: { captchaToken?: string; emailCode?: string } };
+    expect(second.json?.captchaToken).toBe('tok');
+    expect(second.json?.emailCode).toBe('654321');
     unmount();
   }, 12000);
 });

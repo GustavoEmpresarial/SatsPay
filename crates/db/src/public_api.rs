@@ -79,7 +79,7 @@ pub struct ApiKeySummary {
     pub last_used_at: Option<DateTime<Utc>>,
 }
 
-pub async fn list_api_keys_by_user(pool: &PgPool, user_id: Uuid) -> Result<Vec<ApiKeySummary>, PublicApiError> {
+pub async fn list_api_keys_by_user(pool: &PgPool, secrets: Option<&SecretsService>, user_id: Uuid) -> Result<Vec<ApiKeySummary>, PublicApiError> {
     let rows = sqlx::query(
         "SELECT id, label, key_prefix, scopes, allowed_ips, expires_at, require_signature, created_at, disabled_at, last_used_at \
          FROM api_keys WHERE user_id = $1 ORDER BY created_at DESC",
@@ -90,9 +90,11 @@ pub async fn list_api_keys_by_user(pool: &PgPool, user_id: Uuid) -> Result<Vec<A
 
     let keys = rows
         .into_iter()
-        .map(|r| ApiKeySummary {
-            id: r.get("id"),
-            label: r.get("label"),
+        .map(|r| {
+            let id: Uuid = r.get("id");
+            ApiKeySummary {
+            id,
+            label: crate::privacy::open_opt(secrets, crate::privacy::KIND_KEY_LABEL, &id.to_string(), &r.get::<String, _>("label")),
             key_prefix: r.get("key_prefix"),
             scopes: r.get("scopes"),
             allowed_ips: r.get("allowed_ips"),
@@ -101,6 +103,7 @@ pub async fn list_api_keys_by_user(pool: &PgPool, user_id: Uuid) -> Result<Vec<A
             created_at: r.get("created_at"),
             disabled_at: r.get("disabled_at"),
             last_used_at: r.get("last_used_at"),
+        }
         })
         .collect();
 
@@ -125,6 +128,7 @@ pub async fn issue_api_key(pool: &PgPool, secrets: &SecretsService, user_id: Uui
     let id = Uuid::new_v4();
     let key_enc = secrets.encrypt_with_aad(&raw, api_key_aad(id).as_bytes());
     let expires_at = expires_in_days.map(|d| Utc::now() + chrono::Duration::days(d));
+    let label = secrets.seal_pii(crate::privacy::KIND_KEY_LABEL, &id.to_string(), label);
 
     sqlx::query(
         "INSERT INTO api_keys (id, user_id, label, key_hash, key_prefix, key_enc, scopes, allowed_ips, expires_at, require_signature) \
@@ -132,7 +136,7 @@ pub async fn issue_api_key(pool: &PgPool, secrets: &SecretsService, user_id: Uui
     )
     .bind(id)
     .bind(user_id)
-    .bind(label)
+    .bind(&label)
     .bind(&key_hash)
     .bind(&key_prefix)
     .bind(&key_enc)
@@ -181,6 +185,48 @@ fn row_to_record(row: sqlx::postgres::PgRow) -> ApiKeyRecord {
     }
 }
 
+/// Exact IP, IPv4/IPv6 CIDR (`203.0.113.0/24`), `*`, or IPv4-mapped IPv6.
+fn ip_matches_allowlist(entry: &str, source_ip: &str) -> bool {
+    let entry = entry.trim();
+    let source_ip = source_ip.trim();
+    if entry == "*" || entry == source_ip {
+        return true;
+    }
+    let Ok(src) = source_ip.parse::<std::net::IpAddr>() else {
+        return false;
+    };
+    let Some((net_s, prefix_s)) = entry.split_once('/') else {
+        return canonicalize_ip(entry).is_some_and(|listed| listed == canonicalize_ip_addr(src));
+    };
+    let Ok(prefix) = prefix_s.parse::<u8>() else {
+        return false;
+    };
+    match (net_s.parse::<std::net::IpAddr>(), canonicalize_ip_addr(src)) {
+        (Ok(std::net::IpAddr::V4(net)), std::net::IpAddr::V4(src)) if prefix <= 32 => {
+            let shift = 32 - prefix;
+            let mask = if shift == 32 { 0 } else { u32::MAX << shift };
+            (u32::from(net) & mask) == (u32::from(src) & mask)
+        }
+        (Ok(std::net::IpAddr::V6(net)), std::net::IpAddr::V6(src)) if prefix <= 128 => {
+            let shift = 128 - prefix;
+            let mask = if shift == 128 { 0 } else { u128::MAX << shift };
+            (u128::from(net) & mask) == (u128::from(src) & mask)
+        }
+        _ => false,
+    }
+}
+
+fn canonicalize_ip(s: &str) -> Option<std::net::IpAddr> {
+    s.parse::<std::net::IpAddr>().ok().map(canonicalize_ip_addr)
+}
+
+fn canonicalize_ip_addr(ip: std::net::IpAddr) -> std::net::IpAddr {
+    match ip {
+        std::net::IpAddr::V6(v6) => v6.to_ipv4_mapped().map(std::net::IpAddr::V4).unwrap_or(std::net::IpAddr::V6(v6)),
+        v4 => v4,
+    }
+}
+
 /// Shared usability gate — disabled/expired/IP-restricted — applied by both
 /// auth paths (`x-api-key` and HMAC-signed).
 fn check_usable(record: &ApiKeyRecord, source_ip: &str) -> Result<(), PublicApiError> {
@@ -192,7 +238,7 @@ fn check_usable(record: &ApiKeyRecord, source_ip: &str) -> Result<(), PublicApiE
             return Err(PublicApiError::KeyExpired);
         }
     }
-    if !record.allowed_ips.is_empty() && !record.allowed_ips.iter().any(|ip| ip == source_ip) {
+    if !record.allowed_ips.is_empty() && !record.allowed_ips.iter().any(|entry| ip_matches_allowlist(entry, source_ip)) {
         return Err(PublicApiError::IpNotAllowed);
     }
     Ok(())
@@ -296,8 +342,10 @@ pub fn require_scope(record: &ApiKeyRecord, scope: &str) -> Result<(), PublicApi
 /// to the specific API key (finer than per-user, and a guessed key from
 /// another credential can never turn a legit send into a no-op).
 #[allow(clippy::too_many_arguments)]
-pub async fn send_to_user(pool: &PgPool, from_user_id: Uuid, api_key_id: Uuid, coin: Coin, to_email: &str, amount: BigDecimal, idempotency_key: &str, daily_send_limit: i32) -> Result<String, PublicApiError> {
-    let recipient_id: Option<Uuid> = sqlx::query_scalar("SELECT id FROM users WHERE email = $1").bind(to_email).fetch_optional(pool).await?;
+pub async fn send_to_user(pool: &PgPool, secrets: &SecretsService, from_user_id: Uuid, api_key_id: Uuid, coin: Coin, to_email: &str, amount: BigDecimal, idempotency_key: &str, daily_send_limit: i32) -> Result<String, PublicApiError> {
+    let recipient_id = crate::privacy::find_user_id_by_email(pool, secrets, to_email)
+        .await
+        .map_err(|e| PublicApiError::Db(sqlx::Error::Protocol(e.to_string())))?;
     let recipient_id = recipient_id.ok_or(PublicApiError::IneligibleTarget)?;
     if recipient_id == from_user_id {
         return Err(PublicApiError::SendToSelf);
@@ -307,7 +355,29 @@ pub async fn send_to_user(pool: &PgPool, from_user_id: Uuid, api_key_id: Uuid, c
 
     let mut tx = pool.begin().await?;
 
-    let from_wallet: Option<Uuid> = sqlx::query_scalar("SELECT id FROM wallets WHERE user_id = $1 AND coin = $2::coin AND kind = 'DEVELOPER'").bind(from_user_id).bind(coin.as_str()).fetch_optional(&mut *tx).await?;
+    // Gateway deposits land on MERCHANT. DEVELOPER is the legacy API pot.
+    // Spend the wallet that can cover `amount`, preferring MERCHANT.
+    let candidates: Vec<(Uuid, String, BigDecimal)> = sqlx::query(
+        "SELECT w.id, w.kind::text AS kind, COALESCE(SUM(l.amount), 0) AS bal \
+         FROM wallets w \
+         LEFT JOIN ledger_entries l ON l.wallet_id = w.id \
+         WHERE w.user_id = $1 AND w.coin = $2::coin AND w.kind IN ('MERCHANT', 'DEVELOPER') \
+         GROUP BY w.id, w.kind",
+    )
+    .bind(from_user_id)
+    .bind(coin.as_str())
+    .fetch_all(&mut *tx)
+    .await?
+    .into_iter()
+    .map(|r| (r.get("id"), r.get::<String, _>("kind"), r.get("bal")))
+    .collect();
+    let pick = |kind: &str, require_cover: bool| {
+        candidates.iter().find(|(_, k, bal)| k == kind && (!require_cover || bal >= &amount)).map(|(id, _, _)| *id)
+    };
+    let from_wallet = pick("MERCHANT", true)
+        .or_else(|| pick("DEVELOPER", true))
+        .or_else(|| pick("MERCHANT", false))
+        .or_else(|| pick("DEVELOPER", false));
     let to_wallet: Option<Uuid> = sqlx::query_scalar("SELECT id FROM wallets WHERE user_id = $1 AND coin = $2::coin AND kind = 'PERSONAL'").bind(recipient_id).bind(coin.as_str()).fetch_optional(&mut *tx).await?;
     let (Some(from_wallet), Some(to_wallet)) = (from_wallet, to_wallet) else { return Err(PublicApiError::WalletNotFound) };
 
@@ -356,13 +426,42 @@ pub async fn send_to_user(pool: &PgPool, from_user_id: Uuid, api_key_id: Uuid, c
 
 pub async fn get_balance_for_api_key(pool: &PgPool, user_id: Uuid) -> Result<Vec<(Coin, BigDecimal)>, PublicApiError> {
     let rows = sqlx::query(
-        "SELECT w.coin::text as coin, COALESCE(SUM(l.amount), 0) as total FROM wallets w \
-         LEFT JOIN ledger_entries l ON l.wallet_id = w.id WHERE w.user_id = $1 AND w.kind = 'DEVELOPER' GROUP BY w.coin",
+        "SELECT w.coin::text as coin, w.kind::text as kind, COALESCE(SUM(l.amount), 0) as total FROM wallets w \
+         LEFT JOIN ledger_entries l ON l.wallet_id = w.id \
+         WHERE w.user_id = $1 AND w.kind IN ('MERCHANT', 'DEVELOPER') \
+         GROUP BY w.coin, w.kind",
     )
     .bind(user_id)
     .fetch_all(pool)
     .await?;
-    Ok(rows.into_iter().filter_map(|r| { let c: String = r.get("coin"); c.parse::<Coin>().ok().map(|coin| (coin, r.get("total"))) }).collect())
+    let mut merchant: std::collections::HashMap<Coin, BigDecimal> = std::collections::HashMap::new();
+    let mut developer: std::collections::HashMap<Coin, BigDecimal> = std::collections::HashMap::new();
+    for r in rows {
+        let coin: String = r.get("coin");
+        let Ok(coin) = coin.parse::<Coin>() else { continue };
+        let total: BigDecimal = r.get("total");
+        if r.get::<String, _>("kind") == "MERCHANT" {
+            merchant.insert(coin, total);
+        } else {
+            developer.insert(coin, total);
+        }
+    }
+    let mut coins: Vec<Coin> = merchant.keys().copied().chain(developer.keys().copied()).collect();
+    coins.sort_by_key(|c| c.as_str().to_string());
+    coins.dedup();
+    let zero = BigDecimal::from(0);
+    Ok(coins
+        .into_iter()
+        .map(|coin| {
+            let m = merchant.get(&coin);
+            let total = if m.is_some_and(|v| v > &zero) {
+                m.cloned().unwrap_or(zero.clone())
+            } else {
+                developer.get(&coin).cloned().or_else(|| m.cloned()).unwrap_or(zero.clone())
+            };
+            (coin, total)
+        })
+        .collect())
 }
 
 #[cfg(test)]
@@ -392,6 +491,15 @@ mod tests {
         ));
         assert!(check_usable(&sample_key(vec!["1.2.3.4".into()], false, false), "1.2.3.4").is_ok());
         assert!(check_usable(&sample_key(vec![], false, false), "9.9.9.9").is_ok());
+        assert!(check_usable(&sample_key(vec!["10.0.0.0/8".into()], false, false), "10.9.8.7").is_ok());
+        assert!(matches!(
+            check_usable(&sample_key(vec!["10.0.0.0/8".into()], false, false), "11.0.0.1"),
+            Err(PublicApiError::IpNotAllowed)
+        ));
+        assert!(check_usable(&sample_key(vec!["*".into()], false, false), "198.51.100.9").is_ok());
+        assert!(check_usable(&sample_key(vec!["1.2.3.4".into()], false, false), "::ffff:1.2.3.4").is_ok());
+        assert!(ip_matches_allowlist("2001:db8::/32", "2001:db8:1::1"));
+        assert!(!ip_matches_allowlist("2001:db8::/32", "2001:db9::1"));
     }
 
     #[test]

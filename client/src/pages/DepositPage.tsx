@@ -7,7 +7,7 @@ import { api } from '../lib/api.js';
 import { useAuthStore } from '../stores/auth.js';
 import { coinLogo } from '../lib/coinAssets.js';
 import { AddressQr } from '../components/AddressQr.js';
-import { COIN_CONFIG, COINS, defaultDepositWithdrawCoin, formatAmount, isCoin, isDepositWithdrawPaused, type Coin } from '@/shared';
+import { COIN_CONFIG, COINS, defaultDepositWithdrawCoin, depositWithdrawActiveCoins, depositWithdrawPausedCoinList, formatAmount, isCoin, isDepositWithdrawPaused, type Coin } from '@/shared';
 
 interface AddressResp {
   address: string;
@@ -36,6 +36,12 @@ const NETWORK_NAMES: Record<Coin, { network: string; estTime: string; note: stri
   SOL: { network: 'Solana Mainnet (SPL)', estTime: '~1 - 2 min', note: 'Envie apenas Solana (SOL) para este endereço.' },
   USDT: { network: 'Polygon Network (USDT)', estTime: '~1 - 3 min', note: 'Envie USDT via rede Polygon (ERC-20/Polygon) para este endereço.' },
   USDC: { network: 'Polygon Network (USDC)', estTime: '~1 - 3 min', note: 'Envie USDC via rede Polygon (ERC-20/Polygon) para este endereço.' },
+  ZER: { network: 'Zero (t1 transparente)', estTime: '~5 - 15 min', note: 'Envie apenas Zero (ZER) no endereço t1 transparente. Endereços z (shielded) não são aceitos.' },
+  PEPE: {
+    network: 'BNB Smart Chain (BEP-20)',
+    estTime: '~1 - 3 min',
+    note: 'Envie apenas PEPE na BNB Smart Chain (BEP-20). Não envie o PEPE da Ethereum. Contrato: 0x25d887Ce7a35172C62FeBFD67a1856F20FaEbB00.',
+  },
 };
 
 function getExplorerTxUrl(coin: string, txHash: string): string {
@@ -54,6 +60,10 @@ function getExplorerTxUrl(coin: string, txHash: string): string {
       return `https://polygonscan.com/tx/${txHash}`;
     case 'DGB':
       return `https://digiexplorer.info/tx/${txHash}`;
+    case 'ZER':
+      return `https://zerochain.info/tx/${txHash}`;
+    case 'PEPE':
+      return `https://bscscan.com/tx/${txHash}`;
     case 'SOL':
       return `https://solscan.io/tx/${txHash}`;
     default:
@@ -80,16 +90,26 @@ export function DepositPage() {
 
   useEffect(() => {
     const urlCoin = searchParams.get('coin')?.toUpperCase();
-    if (urlCoin && isCoin(urlCoin) && urlCoin !== coin) {
-      setCoin(urlCoin);
+    const next = defaultDepositWithdrawCoin(urlCoin);
+    if (next !== coin) {
+      setCoin(next);
+    }
+    if (urlCoin && isCoin(urlCoin) && isDepositWithdrawPaused(urlCoin) && next !== urlCoin) {
+      setSearchParams((prev) => {
+        const p = new URLSearchParams(prev);
+        p.set('coin', next);
+        return p;
+      }, { replace: true });
     }
     const urlTab = searchParams.get('tab');
     if (urlTab === 'history' || urlTab === 'deposit') {
       setActiveTab(urlTab);
     }
-  }, [searchParams, coin]);
+  }, [searchParams, coin, setSearchParams]);
 
   const depositPaused = isDepositWithdrawPaused(coin);
+  const selectableCoins = useMemo(() => depositWithdrawActiveCoins(), []);
+  const pausedCoins = useMemo(() => depositWithdrawPausedCoinList(), []);
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
@@ -293,16 +313,15 @@ export function DepositPage() {
                         animate={{ opacity: 1, y: 0, scale: 1 }}
                         exit={{ opacity: 0, y: 8, scale: 0.98 }}
                         transition={{ duration: 0.15 }}
-                        className="absolute left-0 right-0 top-full z-50 mt-2 max-h-80 overflow-y-auto rounded-2xl border border-border bg-paper p-2 shadow-2xl space-y-1"
+                        className="absolute left-0 right-0 top-full z-50 mt-2 max-h-[28rem] overflow-y-auto rounded-2xl border border-border bg-paper p-2 shadow-2xl space-y-1"
                       >
                         <div className="px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-ink-muted">
-                          Selecione um Ativo para Gerar Endereço
+                          {t('deposit.pickerTitle')}
                         </div>
-                        {COINS.map((c) => {
+                        {selectableCoins.map((c) => {
                           const isSelected = c === coin;
                           const cCfg = COIN_CONFIG[c];
                           const cNet = NETWORK_NAMES[c];
-                          const paused = isDepositWithdrawPaused(c);
                           return (
                             <button
                               key={c}
@@ -320,26 +339,19 @@ export function DepositPage() {
                               className={`flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-left transition-all ${
                                 isSelected
                                   ? 'bg-bitcoin/10 text-bitcoin-dark font-bold'
-                                  : paused
-                                    ? 'opacity-75 hover:bg-surface text-ink'
-                                    : 'hover:bg-surface text-ink'
+                                  : 'hover:bg-surface text-ink'
                               }`}
                             >
                               <div className="flex items-center gap-3 min-w-0">
                                 <img
                                   src={coinLogo(c)}
                                   alt={c}
-                                  className={`h-8 w-8 rounded-full shrink-0 shadow-xs ${paused ? 'grayscale' : ''}`}
+                                  className="h-8 w-8 rounded-full shrink-0 shadow-xs"
                                 />
                                 <div className="truncate">
                                   <div className="flex items-center gap-2">
                                     <span className="text-sm font-semibold">{cCfg.name}</span>
                                     <span className="font-mono text-xs text-ink-muted">({c})</span>
-                                    {paused && (
-                                      <span className="rounded-md border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-black uppercase tracking-wide text-amber-800">
-                                        {t('deposit.pausedBadge')}
-                                      </span>
-                                    )}
                                   </div>
                                   <div className="text-[11px] text-ink-muted truncate">{cNet.network}</div>
                                 </div>
@@ -353,6 +365,45 @@ export function DepositPage() {
                             </button>
                           );
                         })}
+                        {pausedCoins.length > 0 && (
+                          <div className="border-t border-border/50 pt-1 space-y-1">
+                            <div className="px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-ink-muted">
+                              {t('deposit.pausedSection')}
+                            </div>
+                            {pausedCoins.map((c) => {
+                              const cCfg = COIN_CONFIG[c];
+                              const cNet = NETWORK_NAMES[c];
+                              return (
+                                <button
+                                  key={c}
+                                  type="button"
+                                  disabled
+                                  aria-disabled="true"
+                                  className="flex w-full cursor-not-allowed items-center justify-between rounded-xl px-3 py-2.5 text-left opacity-60"
+                                >
+                                  <div className="flex items-center gap-3 min-w-0">
+                                    <img
+                                      src={coinLogo(c)}
+                                      alt=""
+                                      className="h-8 w-8 rounded-full shrink-0 grayscale"
+                                    />
+                                    <div className="truncate">
+                                      <div className="flex items-center gap-2">
+                                        <span className="text-sm font-semibold text-ink-muted">{cCfg.name}</span>
+                                        <span className="font-mono text-xs text-ink-muted">({c})</span>
+                                      </div>
+                                      <div className="text-[11px] text-ink-muted truncate">{cNet.network}</div>
+                                    </div>
+                                  </div>
+                                  <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-amber-500/25 bg-amber-500/10 px-2 py-0.5 text-[10px] font-semibold text-amber-800">
+                                    <i className="bi bi-pause-circle" />
+                                    {t('deposit.pausedBadge')}
+                                  </span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
                       </motion.div>
                     )}
                   </AnimatePresence>

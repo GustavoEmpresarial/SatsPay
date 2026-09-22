@@ -1,6 +1,5 @@
-//! Swap routes — custodial DEX via SwapKit.
-//! Temporary policy: **L2 only** (POL / USDT / USDC on Polygon). HOUSE liquidity is off
-//! unless `SWAP_HOUSE_ENABLED=true` (not used in production — no inventory capital).
+//! Swap routes — custodial DEX (SwapKit), Relay bridge, and ChangeNOW L1.
+//! HOUSE liquidity is off unless `SWAP_HOUSE_ENABLED=true`.
 
 use crate::client_ip::ClientIp;
 use crate::middleware::AuthUser;
@@ -10,11 +9,13 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
+use changenow::ChangeNowEstimate;
 use domain::auth::AuthRepo;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use shared::{format_amount, is_swap_l2_pair, Coin};
-use swapkit::{parse_human_to_ledger, route_priority, SwapKitError};
+use shared::{format_amount, is_swap_pair, Coin};
+use relay::{RelayClient, RelayQuote};
+use swapkit::{parse_human_to_ledger, route_priority, SwapKitClient, SwapKitError};
 use uuid::Uuid;
 
 fn house_enabled() -> bool {
@@ -23,16 +24,16 @@ fn house_enabled() -> bool {
         .unwrap_or(false)
 }
 
-fn reject_non_l2(from: Coin, to: Coin) -> Option<Response> {
-    if is_swap_l2_pair(from, to) {
+fn reject_unsupported_pair(from: Coin, to: Coin) -> Option<Response> {
+    if is_swap_pair(from, to) {
         return None;
     }
     Some(
         (
             StatusCode::BAD_REQUEST,
             Json(json!({
-                "error": "swap temporarily limited to Polygon L2 pairs (POL, USDT, USDC)",
-                "code": "SWAP_L2_ONLY",
+                "error": "swap limited to L1 (BTC, LTC, DOGE, BCH, DGB) via ChangeNOW and Polygon L2 (POL, USDT, USDC) + SOL",
+                "code": "SWAP_PAIR_UNSUPPORTED",
             })),
         )
             .into_response(),
@@ -142,7 +143,7 @@ async fn order_status<R: AuthRepo>(State(state): State<AppState<R>>, user: AuthU
         Ok(Some(s)) if s.user_id == user.id => Json(s).into_response(),
         Ok(Some(_)) => (StatusCode::FORBIDDEN, Json(json!({ "error": "forbidden" }))).into_response(),
         Ok(None) => (StatusCode::NOT_FOUND, Json(json!({ "error": "not found" }))).into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e.to_string() }))).into_response(),
+        Err(e) => crate::http_error::internal_error(&e),
     }
 }
 
@@ -152,7 +153,7 @@ async fn telemetry<R: AuthRepo>(State(state): State<AppState<R>>, user: AuthUser
     }
     match db::dex_swap::telemetry_snapshot(&state.pool).await {
         Ok(t) => Json(t).into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e.to_string() }))).into_response(),
+        Err(e) => crate::http_error::internal_error(&e),
     }
 }
 
@@ -166,7 +167,7 @@ async fn prices<R: AuthRepo>(State(state): State<AppState<R>>) -> Response {
             }
             Json(json!({ "priceDecimals": decimals, "prices": map })).into_response()
         }
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e.to_string() }))).into_response(),
+        Err(e) => crate::http_error::internal_error(&e),
     }
 }
 
@@ -380,6 +381,168 @@ fn map_dex_route(client: &swapkit::SwapKitClient, from: Coin, to: Coin, from_amo
     })
 }
 
+fn map_relay_route(
+    client: &SwapKitClient,
+    from: Coin,
+    to: Coin,
+    from_amount: u128,
+    quote: &RelayQuote,
+) -> QuoteRouteResp {
+    let bps = client.platform_fee_bps(&["RELAY".into()], from, to);
+    let platform_fee_amount = from_amount.saturating_mul(bps as u128) / 10_000;
+    let expected = quote.expected_out_ledger;
+    let mut tags = vec!["RELAY".to_string()];
+    if quote.is_bridge {
+        tags.push("BRIDGE".into());
+    }
+    QuoteRouteResp {
+        route_id: quote.route_id.clone(),
+        provider: "RELAY".into(),
+        providers: vec!["RELAY".into()],
+        tags,
+        you_pay: AmountCoin {
+            amount: from_amount.to_string(),
+            amount_human: format_amount(from_amount, from),
+            coin: from.as_str().into(),
+        },
+        you_receive: AmountCoin {
+            amount: expected.to_string(),
+            amount_human: format_amount(expected, to),
+            coin: to.as_str().into(),
+        },
+        min_receive: AmountCoin {
+            amount: expected.to_string(),
+            amount_human: format_amount(expected, to),
+            coin: to.as_str().into(),
+        },
+        fees: QuoteFees {
+            network: quote
+                .network_fees
+                .iter()
+                .map(|f| NetworkFeeItem {
+                    fee_type: f.fee_type.clone(),
+                    amount: f.amount.clone(),
+                    asset: f.asset.clone(),
+                })
+                .collect(),
+            platform: PlatformFee {
+                bps,
+                amount: platform_fee_amount.to_string(),
+                amount_human: format_amount(platform_fee_amount, from),
+                asset: from.as_str().into(),
+                label: "Taxa SatsPay".into(),
+            },
+            total_platform_bps: bps,
+        },
+        eta_seconds: Some(EtaSeconds {
+            inbound: Some(0),
+            swap: Some(if quote.is_bridge { 60 } else { 30 }),
+            outbound: Some(if quote.is_bridge { 30 } else { 0 }),
+            total: Some(if quote.is_bridge { 90 } else { 30 }),
+        }),
+        tx_hint: Some(quote.tx_hint.into()),
+        source: "relay".into(),
+    }
+}
+
+fn map_changenow_route(
+    client: &SwapKitClient,
+    from: Coin,
+    to: Coin,
+    from_amount: u128,
+    estimate: &ChangeNowEstimate,
+) -> Option<QuoteRouteResp> {
+    let bps = client.platform_fee_bps(&["CHANGENOW".into()], from, to);
+    let platform_fee_amount = from_amount.saturating_mul(bps as u128) / 10_000;
+    // Single SatsPay cut on destination (CN already embeds deposit/spread).
+    let cn_out = estimate.to_amount_ledger;
+    let expected = cn_out
+        .saturating_sub(cn_out.saturating_mul(bps as u128) / 10_000)
+        .max(1);
+
+    // Fixed ChangeNOW deposit fees destroy dust swaps (e.g. 0.0006 SOL fee on 0.0014 SOL).
+    // Refuse the route when deposit fee alone exceeds 15% of input.
+    if let Some(fee_h) = estimate.deposit_fee_human.as_deref() {
+        if let Some(fee_l) = changenow::human_to_ledger(fee_h, from) {
+            if from_amount > 0 && fee_l.saturating_mul(100) / from_amount > 15 {
+                tracing::info!(
+                    %from_amount,
+                    fee = fee_l,
+                    from = %from.as_str(),
+                    to = %to.as_str(),
+                    "changenow route skipped: deposit fee >15% of input"
+                );
+                return None;
+            }
+        }
+    }
+
+    let mut network = Vec::new();
+    if let Some(fee) = &estimate.deposit_fee_human {
+        network.push(NetworkFeeItem {
+            fee_type: "deposit".into(),
+            amount: fee.clone(),
+            asset: from.as_str().into(),
+        });
+    }
+    Some(QuoteRouteResp {
+        route_id: format!(
+            "changenow:{}:{}:{}",
+            from.as_str(),
+            to.as_str(),
+            from_amount
+        ),
+        provider: "CHANGENOW".into(),
+        providers: vec!["CHANGENOW".into()],
+        tags: vec!["CHANGENOW".into(), "L1".into()],
+        you_pay: AmountCoin {
+            amount: from_amount.to_string(),
+            amount_human: format_amount(from_amount, from),
+            coin: from.as_str().into(),
+        },
+        you_receive: AmountCoin {
+            amount: expected.to_string(),
+            amount_human: format_amount(expected, to),
+            coin: to.as_str().into(),
+        },
+        min_receive: AmountCoin {
+            amount: expected.to_string(),
+            amount_human: format_amount(expected, to),
+            coin: to.as_str().into(),
+        },
+        fees: QuoteFees {
+            network,
+            platform: PlatformFee {
+                bps,
+                amount: platform_fee_amount.to_string(),
+                amount_human: format_amount(platform_fee_amount, from),
+                asset: from.as_str().into(),
+                label: "Taxa SatsPay".into(),
+            },
+            total_platform_bps: bps,
+        },
+        eta_seconds: Some(EtaSeconds {
+            inbound: Some(600),
+            swap: Some(300),
+            outbound: Some(600),
+            total: Some(1_800),
+        }),
+        tx_hint: Some("simpleTransfer".into()),
+        source: "changenow".into(),
+    })
+}
+
+fn merge_provider_errors(existing: Option<Value>, provider: &str, message: String) -> Value {
+    match existing {
+        Some(Value::Array(mut arr)) => {
+            arr.push(json!({ "provider": provider, "message": message }));
+            Value::Array(arr)
+        }
+        Some(other) => json!([other, { "provider": provider, "message": message }]),
+        None => json!([{ "provider": provider, "message": message }]),
+    }
+}
+
 async fn build_quotes<R: AuthRepo>(state: &AppState<R>, from_coin: Coin, to_coin: Coin, from_amount: u128) -> Result<QuoteListResp, String> {
     if from_coin == to_coin {
         return Err("fromCoin and toCoin must differ".into());
@@ -387,8 +550,11 @@ async fn build_quotes<R: AuthRepo>(state: &AppState<R>, from_coin: Coin, to_coin
     if from_amount == 0 {
         return Err("fromAmount must be > 0".into());
     }
-    if !is_swap_l2_pair(from_coin, to_coin) {
-        return Err("swap temporarily limited to Polygon L2 pairs (POL, USDT, USDC)".into());
+    if !is_swap_pair(from_coin, to_coin) {
+        return Err(
+            "swap limited to L1 (BTC, LTC, DOGE, BCH, DGB) via ChangeNOW and Polygon L2 (POL, USDT, USDC) + SOL"
+                .into(),
+        );
     }
 
     let mut routes: Vec<QuoteRouteResp> = Vec::new();
@@ -397,7 +563,13 @@ async fn build_quotes<R: AuthRepo>(state: &AppState<R>, from_coin: Coin, to_coin
     let src = resolve_hot_address(from_coin, state.hot_mnemonic.as_deref()).ok();
     let dst = resolve_hot_address(to_coin, state.hot_mnemonic.as_deref()).ok();
 
-    if swapkit::asset_id(from_coin).is_some() && swapkit::asset_id(to_coin).is_some() && state.swapkit.is_configured() {
+    // SwapKit: Polygon same-chain only (do not mix SOL bridge into SwapKit).
+    if relay::is_polygon_l2(from_coin)
+        && relay::is_polygon_l2(to_coin)
+        && swapkit::asset_id(from_coin).is_some()
+        && swapkit::asset_id(to_coin).is_some()
+        && state.swapkit.is_configured()
+    {
         match state
             .swapkit
             .quote(from_coin, to_coin, from_amount, src.as_deref(), dst.as_deref())
@@ -421,6 +593,57 @@ async fn build_quotes<R: AuthRepo>(state: &AppState<R>, from_coin: Coin, to_coin
         }
     }
 
+    if RelayClient::supports_pair(from_coin, to_coin) && state.relay.is_configured() {
+        if let (Some(src), Some(dst)) = (src.as_deref(), dst.as_deref()) {
+            match state.relay.quote(from_coin, to_coin, from_amount, src, dst).await {
+                Ok(q) => routes.push(map_relay_route(&state.swapkit, from_coin, to_coin, from_amount, &q)),
+                Err(e) => {
+                    tracing::warn!(error = %e, "relay quote failed");
+                    provider_errors = Some(merge_provider_errors(
+                        provider_errors,
+                        "RELAY",
+                        e.to_string(),
+                    ));
+                }
+            }
+        } else {
+            provider_errors = Some(merge_provider_errors(
+                provider_errors,
+                "RELAY",
+                "hot wallet address unavailable for relay quote".into(),
+            ));
+        }
+    }
+
+    // ChangeNOW: any mapped pair (L1↔L1, L1↔L2/SOL, and L2 fallback).
+    if changenow::supports_pair(from_coin, to_coin) && state.changenow.is_configured() {
+        match state.changenow.estimate(from_coin, to_coin, from_amount).await {
+            Ok(est) => {
+                if let Some(route) =
+                    map_changenow_route(&state.swapkit, from_coin, to_coin, from_amount, &est)
+                {
+                    routes.push(route);
+                } else {
+                    provider_errors = Some(merge_provider_errors(
+                        provider_errors,
+                        "CHANGENOW",
+                        "valor pequeno demais: taxa fixa de depósito do ChangeNOW >15% do envio".into(),
+                    ));
+                }
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "changenow estimate failed");
+                provider_errors = Some(merge_provider_errors(
+                    provider_errors,
+                    "CHANGENOW",
+                    e.to_string(),
+                ));
+            }
+        }
+    }
+
+    routes.sort_by_key(|r| route_priority(r.tx_hint.as_deref()));
+
     // HOUSE only when explicitly enabled (default off — no liquidity capital).
     if house_enabled() {
         match db::swap::quote(&state.pool, from_coin, to_coin, from_amount, state.settings.price_max_stale).await {
@@ -435,8 +658,14 @@ async fn build_quotes<R: AuthRepo>(state: &AppState<R>, from_coin: Coin, to_coin
     }
 
     if routes.is_empty() {
-        if !state.swapkit.is_configured() {
-            return Err("DEX not configured (set SWAPKIT_ENABLED + SWAPKIT_API_KEY)".into());
+        if !state.swapkit.is_configured()
+            && !state.relay.is_configured()
+            && !state.changenow.is_configured()
+        {
+            return Err(
+                "DEX not configured (set SWAPKIT_ENABLED, RELAY_ENABLED, and/or CHANGENOW_ENABLED)"
+                    .into(),
+            );
         }
         return Err("no routes available".into());
     }
@@ -511,7 +740,7 @@ async fn execute<R: AuthRepo>(
     ) else {
         return (StatusCode::BAD_REQUEST, Json(json!({ "error": "invalid request" }))).into_response();
     };
-    if let Some(resp) = reject_non_l2(from_coin, to_coin) {
+    if let Some(resp) = reject_unsupported_pair(from_coin, to_coin) {
         return resp;
     }
     let min_to_amount = match body.min_to_amount.as_ref().map(|s| s.parse::<u128>()) {
@@ -539,6 +768,44 @@ async fn execute<R: AuthRepo>(
                 .into_response();
         }
         return execute_house(&state, user, ip, from_coin, to_coin, from_amount, min_to_amount, &body.idempotency_key).await;
+    }
+
+    let is_relay = source == "relay"
+        || provider.eq_ignore_ascii_case("RELAY")
+        || body.route_id.as_deref().map(|r| r.starts_with("relay:")).unwrap_or(false);
+    if is_relay {
+        return execute_relay(
+            &state,
+            user,
+            ip,
+            from_coin,
+            to_coin,
+            from_amount,
+            min_to_amount,
+            &body,
+        )
+        .await;
+    }
+
+    let is_changenow = source == "changenow"
+        || provider.eq_ignore_ascii_case("CHANGENOW")
+        || body
+            .route_id
+            .as_deref()
+            .map(|r| r.starts_with("changenow:"))
+            .unwrap_or(false);
+    if is_changenow {
+        return execute_changenow(
+            &state,
+            user,
+            ip,
+            from_coin,
+            to_coin,
+            from_amount,
+            min_to_amount,
+            &body,
+        )
+        .await;
     }
 
     if !state.swapkit.is_configured() {
@@ -626,64 +893,23 @@ async fn execute<R: AuthRepo>(
 
     match db::dex_swap::lock_and_create(&state.pool, input).await {
         Ok((row, created)) => {
-            if created {
-                let _ = db::dex_swap::mark_broadcasting(
-                    &state.pool,
-                    row.id,
-                    if deposit.is_empty() { destination_address.as_str() } else { &deposit },
-                    swap_resp.memo_str(),
-                    &swap_payload,
-                )
-                .await;
-
-                if let Err(e) = queue::enqueue(&state.pool, "dex_swap_broadcast", &json!({ "dexSwapId": row.id })).await {
-                    tracing::error!(swap_id = %row.id, error = %e, "failed to enqueue dex_swap_broadcast");
-                }
-
-                let pool = state.pool.clone();
-                let uid = user.id;
-                let c_str = from_coin.as_str().to_string();
-                let fee_dec = bigdecimal::BigDecimal::from(platform_fee_amount);
-                let comm_amt = &fee_dec / bigdecimal::BigDecimal::from(10);
-                tokio::spawn(async move {
-                    let _ = db::airdrop::award_airdrop_points(&pool, uid, 100, 0, "SWAP_EXECUTE").await;
-                    let _ = db::referral::record_referral_commission(
-                        &pool,
-                        uid,
-                        "SWAP_FEE",
-                        &c_str,
-                        comm_amt,
-                        bigdecimal::BigDecimal::from(0),
-                    )
-                    .await;
-                });
-
-                db::audit::record_log_spawned(
-                    state.pool.clone(),
-                    Some(user.id),
-                    "DEX_SWAP_LOCK".into(),
-                    "DexSwap".into(),
-                    Some(row.id),
-                    Some(ip),
-                    Some(json!({
-                        "fromCoin": from_coin.as_str(),
-                        "toCoin": to_coin.as_str(),
-                        "provider": primary,
-                        "routeId": route_id,
-                    })),
-                );
-            }
-
-            Json(ExecuteResponse {
-                id: row.id.to_string(),
-                from_amount: row.from_amount,
-                to_amount: row.expected_to_amount,
-                fee_amount: row.platform_fee_amount,
-                status: row.status,
-                provider: row.provider,
-                source: "swapkit".into(),
-            })
-            .into_response()
+            finalize_dex_lock(
+                &state,
+                user,
+                ip,
+                from_coin,
+                &route_id,
+                &primary,
+                row,
+                created,
+                &deposit,
+                &destination_address,
+                swap_resp.memo_str(),
+                &swap_payload,
+                platform_fee_amount,
+                "swapkit",
+            )
+            .await
         }
         Err(e) => {
             db::audit::record_log_spawned(
@@ -692,8 +918,382 @@ async fn execute<R: AuthRepo>(
                 "DEX_SWAP_FAILED".into(),
                 "DexSwap".into(),
                 None,
-                Some(ip),
+                Some(state.secrets.ip_fingerprint(&ip)),
                 Some(json!({ "reason": e.to_string() })),
+            );
+            (StatusCode::BAD_REQUEST, Json(json!({ "error": e.to_string() }))).into_response()
+        }
+    }
+}
+
+async fn finalize_dex_lock<R: AuthRepo>(
+    state: &AppState<R>,
+    user: AuthUser,
+    ip: String,
+    from_coin: Coin,
+    route_id: &str,
+    primary: &str,
+    row: db::dex_swap::DexSwapRow,
+    created: bool,
+    deposit: &str,
+    destination_address: &str,
+    memo: Option<&str>,
+    swap_payload: &Value,
+    platform_fee_amount: u128,
+    source_label: &str,
+) -> Response {
+    if created {
+        let _ = db::dex_swap::mark_broadcasting(
+            &state.pool,
+            row.id,
+            if deposit.is_empty() {
+                destination_address
+            } else {
+                deposit
+            },
+            memo,
+            swap_payload,
+        )
+        .await;
+
+        if let Err(e) = queue::enqueue(&state.pool, "dex_swap_broadcast", &json!({ "dexSwapId": row.id })).await {
+            tracing::error!(swap_id = %row.id, error = %e, "failed to enqueue dex_swap_broadcast");
+        }
+
+        let pool = state.pool.clone();
+        let uid = user.id;
+        let c_str = from_coin.as_str().to_string();
+        let fee_dec = bigdecimal::BigDecimal::from(platform_fee_amount);
+        let comm_amt = &fee_dec / bigdecimal::BigDecimal::from(10);
+        let amount_usd = db::pricing::usd_from_ledger_amount(&state.pool, from_coin, &comm_amt).await;
+        match db::airdrop::award_airdrop_points(&pool, uid, 100, 0, "SWAP_EXECUTE").await {
+            Ok(db::airdrop::AwardResult::Awarded) => {}
+            Ok(db::airdrop::AwardResult::NoActiveSeason) => {
+                tracing::info!(user_id = %uid, "swap: airdrop season inactive, points not awarded");
+            }
+            Err(e) => {
+                tracing::warn!(user_id = %uid, error = %e, "airdrop SWAP_EXECUTE award failed");
+            }
+        }
+        if let Err(e) = db::referral::record_referral_commission(
+            &pool,
+            uid,
+            "SWAP_FEE",
+            &c_str,
+            comm_amt,
+            amount_usd,
+        )
+        .await
+        {
+            tracing::warn!(user_id = %uid, error = %e, "referral commission on swap failed");
+        }
+
+        db::audit::record_log_spawned(
+            state.pool.clone(),
+            Some(user.id),
+            "DEX_SWAP_LOCK".into(),
+            "DexSwap".into(),
+            Some(row.id),
+            Some(state.secrets.ip_fingerprint(&ip)),
+            Some(json!({
+                "fromCoin": from_coin.as_str(),
+                "provider": primary,
+                "routeId": route_id,
+                "source": source_label,
+            })),
+        );
+    }
+
+    Json(ExecuteResponse {
+        id: row.id.to_string(),
+        from_amount: row.from_amount,
+        to_amount: row.expected_to_amount,
+        fee_amount: row.platform_fee_amount,
+        status: row.status,
+        provider: row.provider,
+        source: source_label.to_string(),
+    })
+    .into_response()
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn execute_relay<R: AuthRepo>(
+    state: &AppState<R>,
+    user: AuthUser,
+    ip: String,
+    from_coin: Coin,
+    to_coin: Coin,
+    from_amount: u128,
+    min_to_amount: Option<u128>,
+    body: &ExecuteRequest,
+) -> Response {
+    if !state.relay.is_configured() {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(json!({ "error": "Relay not configured (set RELAY_ENABLED=true)" })),
+        )
+            .into_response();
+    }
+
+    let _route_id = match &body.route_id {
+        Some(r) if !r.is_empty() => r.clone(),
+        _ => return (StatusCode::BAD_REQUEST, Json(json!({ "error": "routeId required for Relay swap" }))).into_response(),
+    };
+
+    let source_address = match resolve_hot_address(from_coin, state.hot_mnemonic.as_deref()) {
+        Ok(a) => a,
+        Err(e) => return (StatusCode::SERVICE_UNAVAILABLE, Json(json!({ "error": e }))).into_response(),
+    };
+    let destination_address = match resolve_hot_address(to_coin, state.hot_mnemonic.as_deref()) {
+        Ok(a) => a,
+        Err(e) => return (StatusCode::SERVICE_UNAVAILABLE, Json(json!({ "error": e }))).into_response(),
+    };
+
+    let relay_quote = match state
+        .relay
+        .quote(from_coin, to_coin, from_amount, &source_address, &destination_address)
+        .await
+    {
+        Ok(q) => q,
+        Err(e) => {
+            return (StatusCode::BAD_REQUEST, Json(json!({ "error": format!("relay: {e}") }))).into_response()
+        }
+    };
+    // Fresh quote always gets a new requestId — keep client's routeId only as selection
+    // marker; persist the live quote's route_id / requestId for the worker.
+    let live_route_id = relay_quote.route_id.clone();
+
+    let expected_to = relay_quote.expected_out_ledger;
+    if let Some(min) = min_to_amount {
+        if expected_to < min {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({ "error": "relay output below minToAmount", "code": "SLIPPAGE" })),
+            )
+                .into_response();
+        }
+    }
+
+    let bps = body
+        .platform_fee_bps
+        .unwrap_or_else(|| state.swapkit.platform_fee_bps(&["RELAY".into()], from_coin, to_coin));
+    let platform_fee_amount = from_amount.saturating_mul(bps as u128) / 10_000;
+    let swap_payload = relay_quote.to_swap_payload();
+    let providers = vec!["RELAY".to_string()];
+    let fees_json = json!([]);
+    let tx_hint = relay_quote.tx_hint;
+    let eta = if relay_quote.is_bridge { Some(90) } else { Some(30) };
+
+    let input = db::dex_swap::LockDexSwapInput {
+        user_id: user.id,
+        from_coin,
+        to_coin,
+        from_amount,
+        expected_to_amount: expected_to,
+        min_to_amount,
+        provider: "RELAY",
+        providers: &providers,
+        route_id: Some(&live_route_id),
+        quote_id: relay_quote.request_id.as_deref(),
+        platform_fee_bps: bps,
+        platform_fee_amount,
+        fees_json,
+        eta_seconds: eta,
+        tx_hint: Some(tx_hint),
+        destination_address: Some(&destination_address),
+        source_address: Some(&source_address),
+        swap_payload: Some(swap_payload.clone()),
+        idempotency_key: &body.idempotency_key,
+    };
+
+    match db::dex_swap::lock_and_create(&state.pool, input).await {
+        Ok((row, created)) => {
+            finalize_dex_lock(
+                state,
+                user,
+                ip,
+                from_coin,
+                &live_route_id,
+                "RELAY",
+                row,
+                created,
+                "",
+                &destination_address,
+                None,
+                &swap_payload,
+                platform_fee_amount,
+                "relay",
+            )
+            .await
+        }
+        Err(e) => {
+            db::audit::record_log_spawned(
+                state.pool.clone(),
+                Some(user.id),
+                "DEX_SWAP_FAILED".into(),
+                "DexSwap".into(),
+                None,
+                Some(state.secrets.ip_fingerprint(&ip)),
+                Some(json!({ "reason": e.to_string(), "source": "relay" })),
+            );
+            (StatusCode::BAD_REQUEST, Json(json!({ "error": e.to_string() }))).into_response()
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn execute_changenow<R: AuthRepo>(
+    state: &AppState<R>,
+    user: AuthUser,
+    ip: String,
+    from_coin: Coin,
+    to_coin: Coin,
+    from_amount: u128,
+    min_to_amount: Option<u128>,
+    body: &ExecuteRequest,
+) -> Response {
+    if !state.changenow.is_configured() {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(json!({ "error": "ChangeNOW not configured (set CHANGENOW_ENABLED + CHANGENOW_API_KEY)" })),
+        )
+            .into_response();
+    }
+    if !changenow::supports_pair(from_coin, to_coin) {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "pair not supported on ChangeNOW" })),
+        )
+            .into_response();
+    }
+
+    let source_address = match resolve_hot_address(from_coin, state.hot_mnemonic.as_deref()) {
+        Ok(a) => a,
+        Err(e) => return (StatusCode::SERVICE_UNAVAILABLE, Json(json!({ "error": e }))).into_response(),
+    };
+    let destination_address = match resolve_hot_address(to_coin, state.hot_mnemonic.as_deref()) {
+        Ok(a) => a,
+        Err(e) => return (StatusCode::SERVICE_UNAVAILABLE, Json(json!({ "error": e }))).into_response(),
+    };
+
+    let exchange = match state
+        .changenow
+        .create_exchange(
+            from_coin,
+            to_coin,
+            from_amount,
+            &destination_address,
+            &source_address,
+        )
+        .await
+    {
+        Ok(e) => e,
+        Err(e) => {
+            return (StatusCode::BAD_REQUEST, Json(json!({ "error": format!("changenow: {e}") })))
+                .into_response()
+        }
+    };
+
+    let bps = body
+        .platform_fee_bps
+        .unwrap_or_else(|| state.swapkit.platform_fee_bps(&["CHANGENOW".into()], from_coin, to_coin));
+    let platform_fee_amount = from_amount.saturating_mul(bps as u128) / 10_000;
+
+    let mut expected_to = if exchange.to_amount_ledger > 0 {
+        exchange.to_amount_ledger
+    } else {
+        body.expected_to_amount
+            .as_ref()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0)
+    };
+    let cut = expected_to.saturating_mul(bps as u128) / 10_000;
+    expected_to = expected_to.saturating_sub(cut);
+    if expected_to == 0 {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "changenow estimated output too small" })),
+        )
+            .into_response();
+    }
+    if let Some(min) = min_to_amount {
+        if expected_to < min {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({ "error": "changenow output below minToAmount", "code": "SLIPPAGE" })),
+            )
+                .into_response();
+        }
+    }
+
+    if exchange.payin_extra_id.is_some() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({
+                "error": "changenow requires memo/extraId for this pair — not supported yet",
+                "code": "CHANGENOW_MEMO_UNSUPPORTED",
+            })),
+        )
+            .into_response();
+    }
+
+    let live_route_id = exchange.route_id();
+    let deposit = exchange.payin_address.clone();
+    let swap_payload = exchange.to_swap_payload();
+    let providers = vec!["CHANGENOW".to_string()];
+    let fees_json = json!([]);
+
+    let input = db::dex_swap::LockDexSwapInput {
+        user_id: user.id,
+        from_coin,
+        to_coin,
+        from_amount,
+        expected_to_amount: expected_to,
+        min_to_amount,
+        provider: "CHANGENOW",
+        providers: &providers,
+        route_id: Some(&live_route_id),
+        quote_id: Some(exchange.id.as_str()),
+        platform_fee_bps: bps,
+        platform_fee_amount,
+        fees_json,
+        eta_seconds: Some(1_800),
+        tx_hint: Some("simpleTransfer"),
+        destination_address: Some(&destination_address),
+        source_address: Some(&source_address),
+        swap_payload: Some(swap_payload.clone()),
+        idempotency_key: &body.idempotency_key,
+    };
+
+    match db::dex_swap::lock_and_create(&state.pool, input).await {
+        Ok((row, created)) => {
+            finalize_dex_lock(
+                state,
+                user,
+                ip,
+                from_coin,
+                &live_route_id,
+                "CHANGENOW",
+                row,
+                created,
+                &deposit,
+                &destination_address,
+                None,
+                &swap_payload,
+                platform_fee_amount,
+                "changenow",
+            )
+            .await
+        }
+        Err(e) => {
+            db::audit::record_log_spawned(
+                state.pool.clone(),
+                Some(user.id),
+                "DEX_SWAP_FAILED".into(),
+                "DexSwap".into(),
+                None,
+                Some(state.secrets.ip_fingerprint(&ip)),
+                Some(json!({ "reason": e.to_string(), "source": "changenow" })),
             );
             (StatusCode::BAD_REQUEST, Json(json!({ "error": e.to_string() }))).into_response()
         }
@@ -729,25 +1329,35 @@ async fn execute_house<R: AuthRepo>(
             let c_str = from_coin.as_str().to_string();
             let fee_dec = bigdecimal::BigDecimal::from(swap.fee_amount);
             let comm_amt = &fee_dec / bigdecimal::BigDecimal::from(10);
-            tokio::spawn(async move {
-                let _ = db::airdrop::award_airdrop_points(&pool, uid, 100, 0, "SWAP_EXECUTE").await;
-                let _ = db::referral::record_referral_commission(
-                    &pool,
-                    uid,
-                    "SWAP_FEE",
-                    &c_str,
-                    comm_amt,
-                    bigdecimal::BigDecimal::from(0),
-                )
-                .await;
-            });
+            let amount_usd = db::pricing::usd_from_ledger_amount(&state.pool, from_coin, &comm_amt).await;
+            match db::airdrop::award_airdrop_points(&pool, uid, 100, 0, "SWAP_EXECUTE").await {
+                Ok(db::airdrop::AwardResult::Awarded) => {}
+                Ok(db::airdrop::AwardResult::NoActiveSeason) => {
+                    tracing::info!(user_id = %uid, "house swap: airdrop season inactive, points not awarded");
+                }
+                Err(e) => {
+                    tracing::warn!(user_id = %uid, error = %e, "airdrop SWAP_EXECUTE award failed");
+                }
+            }
+            if let Err(e) = db::referral::record_referral_commission(
+                &pool,
+                uid,
+                "SWAP_FEE",
+                &c_str,
+                comm_amt,
+                amount_usd,
+            )
+            .await
+            {
+                tracing::warn!(user_id = %uid, error = %e, "referral commission on swap failed");
+            }
             db::audit::record_log_spawned(
                 state.pool.clone(),
                 Some(user.id),
                 "SWAP_EXECUTE".into(),
                 "Swap".into(),
                 Some(swap.id),
-                Some(ip),
+                Some(state.secrets.ip_fingerprint(&ip)),
                 Some(json!({
                     "fromCoin": from_coin.as_str(),
                     "toCoin": to_coin.as_str(),

@@ -1,7 +1,7 @@
 # FEATURE — Faucet
 
 > Doc bruta para busca por IA/humanos. Atualizar quando a feature mudar.
-> Gerado/atualizado por `scripts/generate_feature_docs.py`.
+> Truth = código (não o gerador sozinho).
 
 ## Identidade
 
@@ -15,7 +15,7 @@
 
 ## Keywords (busca)
 
-`faucet FaucetPage /faucet /faucet/claim/:id  user`
+`faucet FaucetPage /faucet /faucet/claim/:coin FAUCET_CLAIM HOUSE Turnstile user`
 
 ## Rotas
 
@@ -27,56 +27,45 @@
 
 ## APIs usadas (client → `/v1…`)
 
-- `/faucet/claim/:id` (prefixo `/v1` no servidor)
+- `POST /v1/faucet/claim` (body `{ coin, captchaToken }`)
+- `POST /v1/faucet/claim/:coin` (path coin + captchaToken)
+- Aliases legados intencionais: `/faucet/claim`, `/faucet/claim/:coin` (sem `/v1`)
 
 ## Arquivos-chave
 
 - `client/src/pages/FaucetPage.tsx`
+- `crates/api-http/src/faucet.rs`
+- `crates/db/src/faucet.rs`
 - `docs/pages/faucet/`
 
 ## Comportamento (bruto)
 
-Página React `FaucetPage`. Chama 1 endpoint(s) via `api()`. Turnstile action `faucet_claim`; inventário HOUSE; cooldown.
+1. Turnstile action `faucet_claim`; cooldown 11h (660 min) **por user+coin** em `faucet_claims` (tabela no Postgres). O fingerprint de IP é gravado na linha só para auditoria — **não** bloqueia outra conta na mesma rede.
+2. Claim debita HOUSE e credita ledger `type=FAUCET` com **`faucet_reward = 1` sat** (unidade mínima) — produto travado; não aumentar.
+3. Na mesma transação do crédito: `award_airdrop_points_tx(…, FAUCET_CLAIM, +50)` se season `ACTIVE`. Sem temporada, o claim credita a carteira e devolve `seasonActive: false`. Resposta inclui `pointsAwarded` / `seasonActive`. Claims da temporada sem log são reparados no boot do worker (`backfill_missed_airdrop_points`).
+4. Referral: `record_referral_commission` com `amount_usd` = price × commission amount (ranking/log). **Não** credita ledger do referrer nesta fase.
+5. UI mostra amount na moeda (nunca fingir `$0.00` se houve crédito — ver Dashboard/Analytics dust).
+6. Relógio de 11h: `GET /v1/faucet/status` lê `faucet_claims` **por user**. A página espera o status do servidor; sem `localStorage`.
 
-## Notas de overview legado
+## Security notes
 
-# Faucet — Overview
-
-## Papel
-
-Página **Faucet** (`FaucetPage.tsx`).
-
-- Auth gate: **user**
-- Rotas: `/faucet`
-- Nota: Cooldown 11h + Turnstile
-
-## Comportamento esperado
-
-1. Usuário navega para a rota.
-2. Layout adequado renderiza (`MarketingLayout` / `AppLayout` / `AdminLayout` / standalone).
-3. Dados carregam via React Query / fetch quando aplicável.
-4. Erros de API passam por `formatApiError` / telemetria quando aplicável.
-
-## i18n
-
-Preferir chaves em `client/src/i18n/locales/{pt,en}.json` quando a página for traduzida.
-
-## Segurança
-
-- Respeitar gate `user` (RequireAuth / RequireAdmin / público).
-- Não persistir segredos em localStorage.
-- Validar inputs antes de POST.
-
+- Double-claim / race: advisory lock + cooldown em `db::faucet::claim` (HTTP test `faucet_claim_double_race_one_wins`).
+- Captcha obrigatório no body; produção verifica Turnstile (dev: `disabled_in_dev`).
+- HOUSE: sem crédito sem debit; floor inventory.
+- Sem secrets em audit logs de claim (só coin/amount).
+- Rate limit / fee-margin pause podem bloquear claim (`FEE_MARGIN_NEGATIVE`).
 
 ## Bugs / armadilhas conhecidas
 
+- Relógio da UI antigo (`bitcosats_faucet_v2_*` no `localStorage`) não era recarregado do servidor e podia ficar preso na chave `guest`. Fonte agora é `GET /faucet/status`.
+- 1 sat → USD hero arredonda a `$0.00` se UI não usar `formatPortfolioUsd` / `formatUsdValue`.
+- Docs antigos diziam `/claim/:id` — rota real é `:coin`.
 - Não short-circuit hooks (`useA() || useB()`) — React #311.
-- Admin: `AdminLayout` labels em pt-BR; ignore language switch do app.
-- Erros esperados de produto (faucet inventory, login 400) não devem floodar telemetria.
-- Saldos: nunca confiar em coluna `balance` mutável — usar ledger.
+- Saldos: nunca confiar em coluna `balance` mutável — usar ledger SUM.
 
 ## Links relacionados
 
 - Mapa geral: [`docs/README.md`](../../README.md)
 - Índice features: [`../README.md`](../README.md)
 - Testes: [`TC.md`](TC.md)
+- Airdrop points: [`../airdrop/FEATURE.md`](../airdrop/FEATURE.md)

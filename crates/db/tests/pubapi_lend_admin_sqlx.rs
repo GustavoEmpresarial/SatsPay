@@ -167,6 +167,7 @@ async fn admin_reject_withdrawal(pool: PgPool) {
         client.as_ref(),
         "127.0.0.1",
         None,
+        None,
     )
     .await
     .unwrap();
@@ -188,7 +189,7 @@ async fn admin_reject_withdrawal(pool: PgPool) {
     assert_eq!(status, "CANCELED");
     assert!(common::wallet_balance(&pool, w).await >= BigDecimal::from(9_000_000u64));
 
-    let _ = db::admin::list_all_withdrawals(&pool, Some("CANCELED"), 20)
+    let _ = db::admin::list_all_withdrawals(&pool, Some("CANCELED"), 20, None)
         .await
         .unwrap();
     let _ = db::audit::list_recent_logs(&pool, 10).await.unwrap();

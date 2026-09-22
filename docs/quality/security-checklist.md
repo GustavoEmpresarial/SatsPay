@@ -1,5 +1,7 @@
 # Checklist de Segurança para Projetos de Software
 
+Catálogo genérico (OWASP/CWE) — **não** é o contrato do SatsPay. O contrato está em [`docs/security/threat-model-and-gaps.md`](../security/threat-model-and-gaps.md) e no addendum [`docs/security/audit-2026-09-01.md`](../security/audit-2026-09-01.md). Não implementar os ~200 itens; usar só classes que batem (auth, IDOR, injection via `bind`, secrets, rate-limit).
+
 Lista ampla de vulnerabilidades organizadas por categoria, baseada principalmente nas classes de problemas normalmente tratadas em OWASP, CWE e segurança de aplicações.
 
 ## 🔐 1. Autenticação

@@ -99,15 +99,23 @@ pub async fn list_wallets(pool: &PgPool, user_id: Uuid, kind: &str) -> Result<Ve
         .collect())
 }
 
-/// Moves funds between the same user's PERSONAL and DEVELOPER wallets for one
-/// coin. `to_developer = true` debits PERSONAL, credits DEVELOPER (and
-/// vice-versa).
+/// Moves funds between the same user's PERSONAL and MERCHANT wallets for one
+/// coin. Gateway invoices credit MERCHANT. `to_developer = true` debits
+/// PERSONAL and credits MERCHANT (the merchant caixa), and vice-versa.
 pub async fn transfer_between_kinds(pool: &PgPool, user_id: Uuid, coin: &str, amount: BigDecimal, to_developer: bool) -> Result<(), WalletError> {
     use bigdecimal::Zero;
     if amount.is_zero() || amount.sign() == bigdecimal::num_bigint::Sign::Minus {
         return Err(WalletError::InvalidAmount);
     }
-    let (from_kind, to_kind) = if to_developer { ("PERSONAL", "DEVELOPER") } else { ("DEVELOPER", "PERSONAL") };
+    let (from_kind, to_kind) = if to_developer { ("PERSONAL", "MERCHANT") } else { ("MERCHANT", "PERSONAL") };
+    sqlx::query(
+        "INSERT INTO wallets (user_id, coin, kind) VALUES ($1, $2::coin, 'MERCHANT') \
+         ON CONFLICT (user_id, coin, kind) DO NOTHING",
+    )
+    .bind(user_id)
+    .bind(coin)
+    .execute(pool)
+    .await?;
 
     let mut tx = pool.begin().await?;
 

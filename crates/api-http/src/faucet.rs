@@ -22,6 +22,7 @@ pub const FAUCET_TURNSTILE_ACTION: &str = "faucet_claim";
 
 pub fn routes<R: AuthRepo + 'static>() -> Router<AppState<R>> {
     Router::new()
+        .route("/v1/faucet/status", get(status::<R>))
         .route("/v1/faucet/claim", post(claim_body::<R>))
         .route("/v1/faucet/claim/:coin", post(claim::<R>))
         .route("/v1/faucetlist", get(list_approved::<R>).post(create_site::<R>))
@@ -29,6 +30,7 @@ pub fn routes<R: AuthRepo + 'static>() -> Router<AppState<R>> {
         .route("/v1/faucetlist/click/:id", post(register_click::<R>))
         .route("/v1/faucetlist/:id", delete(delete_site::<R>))
         // Aliases without /v1
+        .route("/faucet/status", get(status::<R>))
         .route("/faucet/claim", post(claim_body::<R>))
         .route("/faucet/claim/:coin", post(claim::<R>))
         .route("/faucetlist", get(list_approved::<R>).post(create_site::<R>))
@@ -50,6 +52,48 @@ struct ClaimResponse {
     coin: String,
     #[serde(rename = "nextClaimAt")]
     next_claim_at: String,
+    /// True when FAUCET_CLAIM points were written for an ACTIVE season.
+    #[serde(rename = "pointsAwarded")]
+    points_awarded: bool,
+    /// Mirrors airdrop season presence at claim time.
+    #[serde(rename = "seasonActive")]
+    season_active: bool,
+}
+
+#[derive(Serialize)]
+struct StatusResponse {
+    #[serde(rename = "cooldownMinutes")]
+    cooldown_minutes: i64,
+    coins: Vec<CoinStatus>,
+}
+
+#[derive(Serialize)]
+struct CoinStatus {
+    coin: String,
+    #[serde(rename = "nextClaimAt")]
+    next_claim_at: Option<String>,
+}
+
+async fn status<R: AuthRepo>(
+    State(state): State<AppState<R>>,
+    user: AuthUser,
+    ClientIp(remote_ip): ClientIp,
+) -> Response {
+    let ip_fp = state.secrets.ip_fingerprint(&remote_ip);
+    match db::faucet::cooldowns(&state.pool, user.id, &ip_fp, state.settings.faucet_cooldown_minutes).await {
+        Ok(rows) => Json(StatusResponse {
+            cooldown_minutes: state.settings.faucet_cooldown_minutes,
+            coins: rows
+                .into_iter()
+                .map(|row| CoinStatus {
+                    coin: row.coin,
+                    next_claim_at: row.next_claim_at.map(|t| t.to_rfc3339()),
+                })
+                .collect(),
+        })
+        .into_response(),
+        Err(e) => crate::http_error::internal_error(&e),
+    }
 }
 
 async fn claim_body<R: AuthRepo>(
@@ -95,7 +139,7 @@ async fn execute_claim<R: AuthRepo>(
     match captcha_ok {
         Ok(true) => {}
         Ok(false) => return (StatusCode::BAD_REQUEST, Json(json!({ "error": "captcha verification failed" }))).into_response(),
-        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e.to_string() }))).into_response(),
+        Err(e) => return crate::http_error::internal_error(&e),
     }
 
     match db::treasury_health::fee_margin_blocks_coin(&state.pool, coin).await {
@@ -128,18 +172,28 @@ async fn execute_claim<R: AuthRepo>(
         }
     }
 
-    match db::faucet::claim(&state.pool, user.id, coin, &remote_ip, state.settings.faucet_cooldown_minutes).await {
+    let ip_fp = state.secrets.ip_fingerprint(&remote_ip);
+    match db::faucet::claim(&state.pool, user.id, coin, &ip_fp, state.settings.faucet_cooldown_minutes).await {
         Ok(result) => {
-            let pool = state.pool.clone();
             let uid = user.id;
             let c_str = result.coin.as_str().to_string();
-            let amt = result.amount.clone();
-            let comm_amt = &amt / bigdecimal::BigDecimal::from(10); // 10% commission
-            
-            tokio::spawn(async move {
-                let _ = db::airdrop::award_airdrop_points(&pool, uid, 50, 0, "FAUCET_CLAIM").await;
-                let _ = db::referral::record_referral_commission(&pool, uid, "FAUCET_CLAIM", &c_str, comm_amt, bigdecimal::BigDecimal::from(0)).await;
-            });
+            let comm_amt = bigdecimal::BigDecimal::from(result.amount) / bigdecimal::BigDecimal::from(10);
+            let amount_usd = db::pricing::usd_from_ledger_amount(&state.pool, result.coin, &comm_amt).await;
+            let points_awarded = result.points_awarded;
+            let season_active = result.season_active;
+
+            if let Err(e) = db::referral::record_referral_commission(
+                &state.pool,
+                uid,
+                "FAUCET_CLAIM",
+                &c_str,
+                comm_amt,
+                amount_usd,
+            )
+            .await
+            {
+                tracing::warn!(user_id = %uid, error = %e, "referral commission on faucet failed");
+            }
 
             db::audit::record_log_spawned(
                 state.pool.clone(),
@@ -147,13 +201,15 @@ async fn execute_claim<R: AuthRepo>(
                 "FAUCET_CLAIM".into(),
                 "Faucet".into(),
                 None,
-                Some(remote_ip),
+                Some(ip_fp.clone()),
                 Some(json!({ "coin": result.coin.as_str(), "amount": result.amount.to_string() })),
             );
             Json(ClaimResponse {
                 amount: result.amount.to_string(),
                 coin: result.coin.as_str().to_string(),
                 next_claim_at: result.next_claim_at.to_rfc3339(),
+                points_awarded,
+                season_active,
             })
             .into_response()
         }
@@ -164,7 +220,7 @@ async fn execute_claim<R: AuthRepo>(
                 "FAUCET_CLAIM_FAILED".into(),
                 "Faucet".into(),
                 None,
-                Some(remote_ip),
+                Some(ip_fp),
                 Some(json!({ "coin": coin.as_str(), "reason": e.to_string() })),
             );
             match e {
@@ -197,7 +253,7 @@ async fn execute_claim<R: AuthRepo>(
 async fn list_approved<R: AuthRepo>(State(state): State<AppState<R>>) -> Response {
     match db::faucetlist::list_approved(&state.pool).await {
         Ok(sites) => Json(json!({ "sites": sites })).into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e.to_string() }))).into_response(),
+        Err(e) => crate::http_error::internal_error(&e),
     }
 }
 
@@ -211,7 +267,7 @@ async fn register_click<R: AuthRepo>(State(state): State<AppState<R>>, Path(id):
 async fn list_mine<R: AuthRepo>(State(state): State<AppState<R>>, user: AuthUser) -> Response {
     match db::faucetlist::list_mine(&state.pool, user.id).await {
         Ok(sites) => Json(json!({ "sites": sites })).into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e.to_string() }))).into_response(),
+        Err(e) => crate::http_error::internal_error(&e),
     }
 }
 
@@ -233,7 +289,7 @@ async fn create_site<R: AuthRepo>(State(state): State<AppState<R>>, user: AuthUs
     let coin_strs: Vec<&str> = body.coins.iter().map(String::as_str).collect();
     match db::faucetlist::create_site(&state.pool, user.id, &body.name, &body.url, &body.description, &coin_strs, body.reward_info.as_deref()).await {
         Ok(id) => (StatusCode::CREATED, Json(json!({ "id": id, "status": "PENDING" }))).into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e.to_string() }))).into_response(),
+        Err(e) => crate::http_error::internal_error(&e),
     }
 }
 

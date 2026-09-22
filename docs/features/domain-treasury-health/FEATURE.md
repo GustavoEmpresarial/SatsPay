@@ -1,31 +1,60 @@
-# FEATURE — Tesouraria & saúde financeira (domínio)
+# FEATURE — Tesouraria & saúde financeira (admin)
 
-## Keywords
+> Doc bruta para busca por IA/humanos. Atualizar quando a feature mudar.
+> Gerado/atualizado por `scripts/generate_feature_docs.py`.
 
-`treasury-health hot custody solvency fee_margin network_fee_events price_cache break-even runway buffer FEE_MARGIN_HARD_BLOCK`
+## Identidade
 
-## Endpoints
+| Campo | Valor |
+|-------|-------|
+| Slug | `domain-treasury-health` |
+| Título | Tesouraria & saúde financeira (admin) |
+| Componente | `—` |
+| Auth | **mixed** — pública ou autenticada conforme contexto |
+| UI pt-BR | Admin sempre pt-BR hardcoded; app usuário usa i18n |
 
-- `GET /v1/admin/treasury-wallets` — hot + deposit wallets on-chain vs ledger  
-- `GET /v1/admin/treasury-health` — 9 painéis agregados  
-- `GET /v1/admin/economics` — janelas all_time / last_24h + fee_margin_by_coin  
+## Keywords (busca)
 
-## Persistência de custo de rede
+`treasury-health solvency hot custody fee margin P&L break-even runway buffer FEE_MARGIN_HARD_BLOCK`
 
-- Tabela via migration `0024_network_fee_events.sql`  
-- Grava em: broadcast saque, sweep depósito, DEX deposit  
-- `crates/db/src/network_fees.rs`  
+## Rotas
 
-## Hard block
+- (sem rota SPA — domínio backend)
 
-Env `FEE_MARGIN_HARD_BLOCK` (default ON): bloqueia faucet/saque se margem taxas−rede negativa → código `FEE_MARGIN_NEGATIVE`. Se a consulta falhar com o hard block ON → **503** `FEE_MARGIN_CHECK_UNAVAILABLE` (fail-closed). Hard block OFF (`false`/`0`/`off`/`no`) continua permitindo o gasto quando a query falha.
+## Abas / seções internas
 
-## UI
+- (página sem abas internas)
 
-[`../admin-stake/FEATURE.md`](../admin-stake/FEATURE.md)
+## APIs usadas (client → `/v1…`)
 
-## Arquivos
+- `GET /v1/admin/treasury-wallets` (prefixo `/v1` no servidor)
+- `GET /v1/admin/treasury-health` (prefixo `/v1` no servidor)
+- `GET /v1/admin/economics` (prefixo `/v1` no servidor)
 
-- `crates/db/src/treasury_health.rs`  
-- `crates/api-http/src/admin.rs`  
-- `crates/chain/src/dgb_client.rs` (fallback Cryptoid)  
+## Arquivos-chave
+
+- `crates/db/src/treasury_health.rs`
+- `crates/db/src/network_fees.rs`
+- `client/src/pages/AdminStakePage.tsx`
+- `docs/pages/admin-stake/`
+
+## Comportamento (bruto)
+
+9 painéis: P&L USD, break-even, runway HOUSE, passivos, sweeps, buffer hot, trava margem, série 7d, DGB OK.
+
+## Notas de overview legado
+
+_sem overview em docs/pages_
+
+## Bugs / armadilhas conhecidas
+
+- Não short-circuit hooks (`useA() || useB()`) — React #311.
+- Admin: `AdminLayout` labels em pt-BR; ignore language switch do app.
+- Erros esperados de produto (faucet inventory, login 400) não devem floodar telemetria.
+- Saldos: nunca confiar em coluna `balance` mutável — usar ledger.
+
+## Links relacionados
+
+- Mapa geral: [`docs/README.md`](../../README.md)
+- Índice features: [`../README.md`](../README.md)
+- Testes: [`TC.md`](TC.md)

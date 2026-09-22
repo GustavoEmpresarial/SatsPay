@@ -29,6 +29,7 @@ import { FaucetListPage } from './pages/FaucetListPage.js';
 import { MerchantSitesPage } from './pages/MerchantSitesPage.js';
 import { AdminLoginPage } from './pages/AdminLoginPage.js';
 import { AdminOverviewPage } from './pages/AdminOverviewPage.js';
+import { AdminUsersPage } from './pages/AdminUsersPage.js';
 import { AdminWithdrawalsPage } from './pages/AdminWithdrawalsPage.js';
 import { AdminMerchantsPage } from './pages/AdminMerchantsPage.js';
 import { AdminFaucetSitesPage } from './pages/AdminFaucetSitesPage.js';
@@ -227,7 +228,7 @@ export function App() {
           <Route path="/sitemap" element={<SitemapPage />} />
           <Route path="/status" element={<StatusPage />} />
           <Route path="/llm" element={<LlmPage />} />
-          <Route path="/demo" element={<Navigate to="/deposit" replace />} />
+          <Route path="/demo" element={<Navigate to="/pay/demo" replace />} />
           <Route
             path="/api"
             element={
@@ -248,6 +249,7 @@ export function App() {
           }
         >
           <Route index element={<AdminOverviewPage />} />
+          <Route path="users" element={<AdminUsersPage />} />
           <Route path="telemetry" element={<AdminTelemetryPage />} />
           <Route path="withdrawals" element={<AdminWithdrawalsPage />} />
           <Route path="merchants" element={<AdminMerchantsPage />} />
@@ -290,7 +292,7 @@ export function App() {
           <Route path="/developer-wallets" element={<DeveloperWalletsPage />} />
           <Route path="/referrals" element={<ReferralPage />} />
           <Route path="/airdrop" element={<AirdropPage />} />
-          <Route path="/merchant/demo" element={<Navigate to="/deposit" replace />} />
+          <Route path="/merchant/demo" element={<Navigate to="/pay/demo" replace />} />
         </Route>
 
         <Route path="/r/:code" element={<ReferralRedirect />} />

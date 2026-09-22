@@ -118,7 +118,8 @@
     "apiDocs": "API Docs",
     "live": "Live",
     "support": "Support",
-    "comingSoon": "Coming soon"
+    "comingSoon": "Coming soon",
+    "maintenance": "Maintenance"
   },
   "lend": {
     "title": "Lending",
@@ -154,21 +155,37 @@
   },
   "swap": {
     "title": "Swap",
-    "subtitle": "Polygon DEX (POL, USDT, USDC) via SwapKit — no internal liquidity.",
+    "bridgeTitle": "Bridge",
+    "tabSwap": "Swap",
+    "tabBridge": "Bridge",
+    "subtitle": "Trade BTC, LTC, DOGE, BCH, DGB, SOL, and Polygon assets (POL, USDT, USDC). Each coin shows its SatsPay network in the picker.",
+    "subtitleSwap": "Same-network trade. On SatsPay: POL, USDT, and USDC on Polygon (DEX / 1inch).",
+    "subtitleBridge": "Cross-network: Solana ↔ Polygon (Relay) or native L1 ↔ another coin (ChangeNOW).",
+    "swapHint": "Polygon only: POL ↔ USDT ↔ USDC. To change networks, use the Bridge tab.",
+    "bridgeHint": "Source and destination on different networks. E.g. SOL (Solana) → USDT (Polygon), or BTC → POL.",
     "from": "You pay",
     "to": "You receive",
     "flip": "Flip pair",
     "rate": "Exchange rate",
-    "fee": "Protocol fee (0.25%)",
+    "fee": "SatsPay fee (0.25%)",
     "receive": "You receive (net)",
-    "confirm": "Confirm swap",
-    "confirming": "Executing swap…",
+    "confirm": "Swap",
+    "confirmBridge": "Bridge",
+    "confirming": "Processing…",
     "success": "Swap completed.",
+    "pending": "Submitted. Track status in history.",
     "insufficient": "Insufficient balance for this amount.",
     "history": "Swap history",
+    "historyBridge": "Bridge history",
     "empty": "No swaps yet.",
-    "poweredBy": "SwapKit DEX · SatsPay fee 0.25% (affiliate)",
-    "trustLine": "Custodial · DEX route (SwapKit) · Transparent fee"
+    "emptyBridge": "No bridges yet.",
+    "poweredBy": "1inch + Relay + ChangeNOW · SatsPay fee 0.25%",
+    "trustLine": "SatsPay balance · 0.25% fee — our edge",
+    "trustLineSwap": "Polygon swap · SatsPay fee 0.25%",
+    "trustLineBridge": "Cross-network bridge · SatsPay fee 0.25%",
+    "pickCoin": "Select cryptocurrency",
+    "networkLegend": "On SatsPay, USDT/USDC/POL are Polygon. SOL is Solana. L1 coins use their native chain. PEPE is BNB Smart Chain (deposit/withdraw; swap soon).",
+    "networkOn": "SatsPay network: {{network}}"
   },
   "stake": {
     "title": "Staking",
@@ -203,7 +220,7 @@
   },
   "developer": {
     "balances": "Merchant & API balances",
-    "balancesHint": "These balances power your API and payments. They stay isolated from your personal wallet.",
+    "balancesHint": "Invoice net credits land in this caixa. To withdraw, open Withdraw and choose Caixa, or move the funds to personal.",
     "topUp": "Top up",
     "withdrawToPersonal": "Move to personal",
     "personalBalance": "Personal Balance",
@@ -241,7 +258,7 @@
     },
     "balance": {
       "desc": "Fetch balances for all coins associated with the API key owner.",
-      "scope": "Required scope: balance"
+      "scope": "No balance scope is required; any valid API key can read the account balance."
     },
     "errors": {
       "text": "Errors follow a consistent shape: { error: { code, message, details? } }. Common codes include UNAUTHORIZED, VALIDATION_ERROR, RATE_LIMITED, INSUFFICIENT_BALANCE, NOT_FOUND."
@@ -250,7 +267,7 @@
       "text": "Public API is rate-limited to 60 requests per minute per API key. Auth endpoints (/auth/login, /auth/register) are limited to 10 requests per 15 minutes per IP."
     },
     "keys": {
-      "text": "Manage your keys in Settings. You can create keys with specific scopes (send, balance, history, *) and disable them at any time. Keys are stored hashed — the raw value is shown only once, when generated.",
+      "text": "Manage your keys in Settings. You can create keys with specific scopes (deposits, send, history, *) and disable them at any time. The balance endpoint does not check a scope. Keys are stored hashed — the raw value is shown only once, when generated.",
       "manage": "Manage keys in Settings"
     },
     "copy": "Copy",
@@ -370,7 +387,7 @@
       "items": [
         {
           "q": "Does SatsPay charge any fees?",
-          "a": "Signup is free. On-chain withdrawals only pay the network fee."
+          "a": "Signup and the personal wallet are free: on-chain withdrawals only pay the network fee. On the merchant payment gateway the fee is 0.25% per invoice, deducted from what the merchant receives — the customer pays the full amount."
         },
         {
           "q": "How long does a deposit take?",
@@ -526,7 +543,12 @@
       "FAUCET": "Faucet claim",
       "TRANSFER_IN": "Received",
       "TRANSFER_OUT": "Sent",
-      "ADJUSTMENT": "Adjustment"
+      "ADJUSTMENT": "Adjustment",
+      "MERCHANT_CHECKOUT": "Checkout payment",
+      "MERCHANT_DEPOSIT": "Merchant deposit",
+      "SWAP": "Swap",
+      "DEX_SWAP_OUT": "Swap",
+      "DEX_SWAP_REFUND": "Swap refund"
     }
   },
   "faucet": {
@@ -552,7 +574,10 @@
     "addressFor": "{{coin}} address",
     "pausedBadge": "Paused",
     "pausedTitle": "{{coin}} deposits temporarily paused",
-    "pausedHint": "The coin stays listed. New addresses and credits on this network are disabled for now."
+    "pausedHint": "New addresses and credits on this network are disabled for now. Pick another coin in the selector.",
+    "pickerTitle": "Select an asset to generate an address",
+    "pausedSection": "Temporarily paused",
+    "pausedNetworks": "Temporarily paused: {{list}}"
   },
   "withdraw": {
     "title": "Withdraw",
@@ -568,7 +593,10 @@
     "success": "Withdrawal queued for processing.",
     "pausedBadge": "Paused",
     "pausedTitle": "{{coin}} withdrawals temporarily paused",
-    "pausedHint": "The coin stays listed. Withdrawals on this network are disabled for now."
+    "pausedHint": "Withdrawals on this network are disabled for now. Pick another coin in the selector.",
+    "pickerTitle": "Choose a coin to withdraw",
+    "pausedSection": "Temporarily paused",
+    "pausedNetworks": "Temporarily paused: {{list}}"
   },
   "settings": {
     "title": "Settings",
@@ -617,6 +645,19 @@
         "usernameLength": "Username must be between 3 and 24 characters",
         "usernameFormat": "Must start with a letter; only letters, numbers and underscore"
       }
+    },
+    "privacy": {
+      "title": "Privacy (LGPD)",
+      "lead": "You can download a copy of your data or close the account. Financial ledger rows are kept under a legal duty (LGPD art. 16).",
+      "export": "Download my data",
+      "exporting": "Preparing…",
+      "erase": "Close and anonymize account",
+      "erasing": "Closing…",
+      "confirmEmail": "Confirm your email",
+      "confirmPhrase": "Type APAGAR to confirm",
+      "erased": "Account closed. You will be signed out.",
+      "exportOk": "File downloaded.",
+      "error": "Could not complete the request."
     }
   },
   "footer": {
@@ -647,7 +688,7 @@
   },
   "pages": {
     "coins": {
-      "subtitle": "Deposit, withdraw, and faucet across all 9 supported cryptocurrencies."
+      "subtitle": "Deposit, withdraw, and faucet across all 10 supported cryptocurrencies."
     },
     "faq": {
       "subtitle": "Quick answers about fees, deposits, 2FA and the public API."
@@ -769,44 +810,48 @@
   "legal": {
     "privacy": {
       "title": "Privacy Policy",
-      "updated": "Last updated: August 30, 2026",
+      "updated": "Last updated: September 16, 2026",
       "sections": [
         {
-          "title": "1. Who we are",
+          "title": "1. Controller and DPO (LGPD)",
           "body": [
-            "SatsPay operates a multi-coin micropayments wallet and developer API. This policy explains what data we process when you use bitcosats.com and related services.",
-            "Contact for privacy requests: privacy@bitcosats.com."
+            "SatsPay is the controller of personal data processed on this service (multi-coin wallet, faucet and merchant gateway).",
+            "Data-subject requests (access, correction, export, erasure): Settings → Privacy or privacy@satspay.pro. Response window: 15 days (LGPD arts. 18–19)."
           ]
         },
         {
-          "title": "2. Data we collect",
+          "title": "2. Legal bases and data",
           "body": [
-            "Account data: email address, hashed password, optional 2FA settings, and account mode preferences.",
-            "Wallet activity: deposits, withdrawals, internal transfers, staking/lending/swap events, and API usage tied to your keys.",
-            "Technical data: IP address, browser type, and identifiers needed for security, rate limiting, and fraud prevention.",
-            "We do not sell your personal data."
+            "Contract (art. 7, V): email, username, Argon2 password hash, 2FA, API keys, invoices and webhooks.",
+            "Legal duty / rights defense (art. 7, II and VI): ledger entries. Those amounts are not deleted when the account is closed.",
+            "Fraud and security (art. 7, IX): IP (may be stored as HMAC), user-agent, captcha, login audit.",
+            "Store-customer fields (email, name, callback) are encrypted at rest (AES-256-GCM) and never shown on the public checkout.",
+            "We do not sell personal data."
           ]
         },
         {
-          "title": "3. How we use data",
+          "title": "3. Use and sharing",
           "body": [
-            "To provide wallets, faucets, merchant tools and API access.",
-            "To authenticate sessions, detect abuse and comply with applicable law.",
-            "To send service notices (security alerts, password resets, and product changes)."
+            "To run wallets, faucet, swap, gateway and authentication.",
+            "Necessary processors: Cloudflare Turnstile (captcha), SMTP (email codes), blockchain nodes (public transactions).",
+            "On-chain addresses and tx hashes are public by nature of the network."
           ]
         },
         {
-          "title": "4. Retention & security",
+          "title": "4. Retention and security",
           "body": [
-            "We retain account and ledger records for as long as needed to operate the service and meet legal obligations.",
-            "Access credentials are hashed; API secrets are shown once at creation. Large treasury movements may require additional operational controls."
+            "Active account: for the life of the contract. After closure: profile anonymized; ledger and invoice amounts remain.",
+            "OTPs, captcha tokens and telemetry are short-lived and discarded.",
+            "In transit: TLS on the domain. At rest: AES-256-GCM with AAD, searchable email HMAC, hashed API keys."
           ]
         },
         {
           "title": "5. Your rights",
           "body": [
-            "Depending on your jurisdiction, you may request access, correction, export or deletion of personal data, subject to security and legal retention requirements.",
-            "Email privacy@bitcosats.com with the subject line \"Privacy request\"."
+            "Access and portability: GET /v1/me/export (signed-in session) or the button in Settings.",
+            "Erasure/anonymization: POST /v1/me/erase with confirmation (email + the word APAGAR). Sessions and keys are revoked.",
+            "Correction: username in Settings. Email correction: privacy@satspay.pro.",
+            "Withdrawal of consent and sharing info: same channel. Relevant incidents will be notified under art. 48."
           ]
         },
         {
@@ -980,6 +1025,82 @@
       "identityBody": "Access your SatsPay username and user ID.",
       "emailTitle": "Email address",
       "emailBody": "View your registered email ({{email}})."
+    }
+  },
+  "checkout": {
+    "loading": "Loading secure checkout...",
+    "badge": "Secure checkout",
+    "theStore": "the store",
+    "order": "Order",
+    "expires": "Expires in",
+    "payTitle": "Payment",
+    "total": "Amount due",
+    "notFound": {
+      "title": "Charge not found",
+      "body": "This payment link does not exist or has expired. Return to the original site and try again.",
+      "home": "Go to SatsPay"
+    },
+    "demo": {
+      "title": "Demonstration",
+      "body": "This is a sample invoice so you can see the checkout. The address is not real, no payment is processed and no webhook is fired."
+    },
+    "balance": {
+      "title": "Pay with SatsPay balance",
+      "instant": "Instant credit, no blockchain wait.",
+      "badge": "1 click",
+      "need": "Required: {{amount}} {{coin}} in your personal wallet.",
+      "pick": "Tap a coin from your balance — no QR, no wait.",
+      "payCoin": "Pay {{amount}} {{coin}}",
+      "enough": "Covered",
+      "shortCoin": "Too low",
+      "payNow": "Pay now · instant",
+      "processing": "Processing payment...",
+      "signIn": "Sign in to pay with balance",
+      "showcase": "Preview only — nothing is charged on this demo. On a real checkout, one tap settles it.",
+      "short": "Not enough balance in this coin. Use crypto below or deposit first.",
+      "error": "Insufficient balance or processing error. Use the address below.",
+      "ownInvoice": "This charge belongs to your own merchant account. Checkout will not move money from your personal wallet into it. Nothing was debited. Use a different SatsPay account, or the in-account wallet transfer."
+    },
+    "crypto": {
+      "choose": "Choose a coin",
+      "chooseHint": "Next you pay from SatsPay balance or send the QR.",
+      "or": "or send the QR",
+      "onchain": "on-chain",
+      "confirms": "{{count}} confirmations",
+      "quoteLocked": "The quote locks when you choose and holds until the invoice expires.",
+      "switchError": "Could not switch coins right now. Try again.",
+      "switch": "Pay with another coin",
+      "estQuote": "(estimated quote)",
+      "qrAlt": "Payment QR code",
+      "scan": "Scan with your wallet or exchange",
+      "address": "Destination address",
+      "officialNet": "official network",
+      "copy": "Copy",
+      "copied": "Copied",
+      "waiting": "Waiting for the blockchain transfer..."
+    },
+    "success": {
+      "title": "Payment complete",
+      "body": "Your payment of {{amount}} {{coin}} to {{store}} was confirmed.",
+      "paid": "Amount paid",
+      "method": "Method",
+      "methodBalance": "SatsPay balance",
+      "methodOnchain": "On-chain",
+      "tx": "Tx hash",
+      "backStore": "Back to {{store}} ({{seconds}}s)",
+      "done": "Done"
+    },
+    "expired": {
+      "title": "Time expired",
+      "body": "This charge has expired. Ask for a new link on the original site.",
+      "back": "Back to {{store}}"
+    },
+    "cancelled": {
+      "title": "Charge cancelled",
+      "body": "This charge was cancelled. Ask for a new link on the original site."
+    },
+    "footer": {
+      "secure": "Processed securely by"
     }
   }
 }

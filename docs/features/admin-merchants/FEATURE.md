@@ -1,62 +1,85 @@
-# FEATURE — Admin Merchants (Comerciantes)
+# FEATURE — Admin Merchants
 
-> Doc bruta para IA. Pasta: `docs/features/admin-merchants/`.
+> Doc bruta para busca por IA/humanos. Atualizar quando a feature mudar.
+> Gerado/atualizado por `scripts/generate_feature_docs.py`.
 
 ## Identidade
 
 | Campo | Valor |
 |-------|-------|
-| Rota | `/admin/merchants` |
-| Componente | `AdminMerchantsPage.tsx` |
-| Auth | RequireAdmin |
-| UI | **100% pt-BR** |
+| Slug | `admin-merchants` |
+| Título | Admin Merchants |
+| Componente | `AdminMerchantsPage` |
+| Auth | **admin** — RequireAdmin — role ADMIN ou sessão admin store |
+| UI pt-BR | Admin sempre pt-BR hardcoded; app usuário usa i18n |
 
-## Keywords
+## Keywords (busca)
 
-`admin merchants comerciantes gateway estatísticas funil invoices webhook api_keys approve suspend top merchants series_14d`
+`admin merchants AdminMerchantsPage /admin/merchants /admin/economics /admin/merchants /admin/merchants/:id/approve /admin/merchants/:id/suspend /admin/merchants/stats Visão geral Estatísticas Comerciantes admin`
 
-## Abas (3)
+## Rotas
 
-1. **Visão geral** — receita gateway vs custo faucet (`/admin/economics`), KPIs de contas, atalho para Estatísticas  
-2. **Estatísticas** — painel completo só de gateway merchant (período 24h/7d/30d/histórico)  
-3. **Comerciantes** — lista, filtros, aprovar/suspender  
+- `/admin/merchants`
 
-### Aba Estatísticas (detalhe)
+## Abas / seções internas
 
-- KPIs: criadas / pagas / pendentes / expiradas + conversão do período  
-- Ativos 30d, novos 7d/30d, webhook success %, tempo médio até pagar  
-- Funil de barras + série 14 dias (criadas × pagas × expiradas)  
-- WindowCards 24h / 7d / 30d / histórico  
-- Volume por moeda (30d ou histórico) + Top 10 comerciantes  
-- Tabela últimas 20 faturas (status + webhook)  
+- Visão geral
+- Estatísticas
+- Comerciantes
+
+## APIs usadas (client → `/v1…`)
+
+- `/admin/economics` (prefixo `/v1` no servidor)
+- `/admin/merchants` (prefixo `/v1` no servidor)
+- `/admin/merchants/:id/approve` (prefixo `/v1` no servidor)
+- `/admin/merchants/:id/suspend` (prefixo `/v1` no servidor)
+- `/admin/merchants/stats` (prefixo `/v1` no servidor)
+
+## Arquivos-chave
+
+- `client/src/pages/AdminMerchantsPage.tsx`
+- `docs/pages/admin-merchants/`
+
+## Comportamento (bruto)
+
+Página React `AdminMerchantsPage`. Chama 5 endpoint(s) via `api()`. Abas/labels: Visão geral, Estatísticas, Comerciantes. 3 abas: Visão geral · Estatísticas (funil, série 14d, volume, top, faturas recentes) · Comerciantes (moderação). UI admin sempre pt-BR.
+
+## Notas de overview legado
+
+# Admin Merchants — Overview
+
+## Papel
+
+Página **Admin Merchants** (`AdminMerchantsPage.tsx`).
+
+- Auth: **admin** (`RequireAdmin`)
+- Rota: `/admin/merchants`
+- UI: pt-BR
+
+## Abas
+
+| Aba | Função |
+|-----|--------|
+| Visão geral | Economia gateway/faucet + KPIs contas + CTA estatísticas |
+| Estatísticas | Funil, série 14d, volumes, top 10, faturas recentes, períodos |
+| Comerciantes | Lista + aprovar/suspender |
+
+Doc densa AI: [`../../features/admin-merchants/FEATURE.md`](../../features/admin-merchants/FEATURE.md)
 
 ## APIs
 
-- `GET /v1/admin/merchants` — lista contas  
-- `GET /v1/admin/merchants/stats` — `MerchantPlatformStats` (janelas, série, recent, top)  
-- `GET /v1/admin/economics` — receita gateway / faucet (aba visão geral)  
-- `POST /v1/admin/merchants/:id/approve`  
-- `POST /v1/admin/merchants/:id/suspend`  
+Ver `routes-and-api.md` e FEATURE.md (inclui `/admin/merchants/stats` expandido).
 
-## Backend
 
-- Stats: `crates/db/src/admin.rs` → `get_merchant_platform_stats`  
-- Tabela: `merchant_deposit_invoices` (migration 0010)  
-- Domínio: [`../domain-gateway-merchant/FEATURE.md`](../domain-gateway-merchant/FEATURE.md)  
+## Bugs / armadilhas conhecidas
 
-## Campos novos em `/merchants/stats` (2026-09)
+- Não short-circuit hooks (`useA() || useB()`) — React #311.
+- Admin: `AdminLayout` labels em pt-BR; ignore language switch do app.
+- Erros esperados de produto (faucet inventory, login 400) não devem floodar telemetria.
+- Saldos: nunca confiar em coluna `balance` mutável — usar ledger.
 
-`invoices_7d`, `invoices_30d`, `conversion_24h_pct`, `conversion_7d_pct`, `merchants_active_30d`, `merchants_new_7d/30d`, `webhook_success_pct`, `avg_confirm_minutes`, `volume_by_coin_30d`, `series_14d`, `recent_invoices`, `top_merchants` (limit 10)
+## Links relacionados
 
-## Arquivos
-
-- `client/src/pages/AdminMerchantsPage.tsx`  
-- `client/tests/helpers/apiMock.ts` (mock stats completo)  
-- `client/tests/unit/pages/admin-merchants/`  
-- `docs/pages/admin-merchants/`  
-
-## Armadilhas
-
-- Volume cross-coin não soma em USD nesta aba (unidades nativas).  
-- `volume_by_coin_30d` usado para janelas curtas; histórico usa `volume_by_coin`.  
-- Moderação muda `merchant_status` no `users`.  
+- Mapa geral: [`docs/README.md`](../../README.md)
+- Índice features: [`../README.md`](../README.md)
+- Testes: [`TC.md`](TC.md)

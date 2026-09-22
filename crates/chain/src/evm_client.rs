@@ -27,7 +27,15 @@ pub struct EvmClient {
 
 impl EvmClient {
     pub fn new(rpc_url: &str) -> Self {
-        Self { http: reqwest::Client::new(), rpc_url: rpc_url.to_string() }
+        let http = reqwest::Client::builder()
+            .user_agent("SatsPay-Evm/1.0")
+            .timeout(std::time::Duration::from_secs(20))
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new());
+        Self {
+            http,
+            rpc_url: rpc_url.to_string(),
+        }
     }
 
     async fn call(&self, method: &str, params: Value) -> Result<Value, EvmError> {
@@ -41,7 +49,22 @@ impl EvmClient {
 
     fn parse_hex_u128(v: &Value) -> Result<u128, EvmError> {
         let s = v.as_str().ok_or_else(|| EvmError::UnexpectedShape(v.to_string()))?;
-        u128::from_str_radix(s.trim_start_matches("0x"), 16).map_err(|e| EvmError::UnexpectedShape(e.to_string()))
+        let hex = s.trim_start_matches("0x").trim_start_matches("0X");
+        // ABI-encoded uint256 is 32 bytes (64 hex chars). Keep the low 128 bits.
+        let hex = if hex.len() > 32 {
+            &hex[hex.len() - 32..]
+        } else {
+            hex
+        };
+        if hex.is_empty() {
+            return Ok(0);
+        }
+        u128::from_str_radix(hex, 16).map_err(|e| EvmError::UnexpectedShape(e.to_string()))
+    }
+
+    #[cfg(test)]
+    pub(crate) fn parse_hex_u128_for_test(v: &Value) -> Result<u128, EvmError> {
+        Self::parse_hex_u128(v)
     }
 
     fn parse_hex_u64(v: &Value) -> Result<u64, EvmError> {
@@ -120,9 +143,31 @@ impl EvmClient {
     }
 
     pub async fn estimate_gas_data(&self, from: &str, to: &str, data: &str) -> Result<u64, EvmError> {
-        let tx = json!({ "from": from, "to": to, "data": data, "value": "0x0" });
+        self.estimate_gas_call(from, to, data, 0).await
+    }
+
+    /// `eth_estimateGas` for a contract call that may also send native `value_wei`.
+    pub async fn estimate_gas_call(&self, from: &str, to: &str, data: &str, value_wei: u128) -> Result<u64, EvmError> {
+        let tx = json!({
+            "from": from,
+            "to": to,
+            "data": data,
+            "value": format!("0x{value_wei:x}"),
+        });
         let result = self.call("eth_estimateGas", json!([tx])).await?;
         Self::parse_hex_u64(&result)
+    }
+
+    /// Dry-run the call (`eth_call`). Ok(()) means it would not revert.
+    pub async fn simulate_call(&self, from: &str, to: &str, data: &str, value_wei: u128) -> Result<(), EvmError> {
+        let tx = json!({
+            "from": from,
+            "to": to,
+            "data": data,
+            "value": format!("0x{value_wei:x}"),
+        });
+        let _ = self.call("eth_call", json!([tx, "latest"])).await?;
+        Ok(())
     }
 
     /// `eth_getTransactionReceipt` → `Some(true)` success, `Some(false)` reverted, `None` not mined yet.
@@ -154,6 +199,21 @@ impl EvmClient {
         let mut data = vec![0x70, 0xa0, 0x82, 0x31];
         data.extend_from_slice(&[0u8; 12]);
         data.extend_from_slice(&holder_bytes);
+        let result = self
+            .call("eth_call", json!([{ "to": token, "data": format!("0x{}", hex::encode(data)) }, "latest"]))
+            .await?;
+        Self::parse_hex_u128(&result)
+    }
+
+    /// `allowance(owner, spender)` — low 128 bits (enough for our swap sizes).
+    pub async fn erc20_allowance(&self, token: &str, owner: &str, spender: &str) -> Result<u128, EvmError> {
+        let owner_b = crate::evm_sign::parse_address(owner).map_err(|e| EvmError::UnexpectedShape(e.to_string()))?;
+        let spender_b = crate::evm_sign::parse_address(spender).map_err(|e| EvmError::UnexpectedShape(e.to_string()))?;
+        let mut data = vec![0xdd, 0x62, 0xed, 0x3e];
+        data.extend_from_slice(&[0u8; 12]);
+        data.extend_from_slice(&owner_b);
+        data.extend_from_slice(&[0u8; 12]);
+        data.extend_from_slice(&spender_b);
         let result = self
             .call("eth_call", json!([{ "to": token, "data": format!("0x{}", hex::encode(data)) }, "latest"]))
             .await?;
@@ -215,5 +275,25 @@ pub fn erc20_transfer_data(to: [u8; 20], amount: u128) -> Vec<u8> {
     let mut amt = [0u8; 32];
     amt[16..].copy_from_slice(&amount.to_be_bytes());
     data.extend_from_slice(&amt);
+    data
+}
+
+/// `approve(spender, amount)` calldata.
+pub fn erc20_approve_data(spender: [u8; 20], amount: u128) -> Vec<u8> {
+    let mut data = vec![0x09, 0x5e, 0xa7, 0xb3];
+    data.extend_from_slice(&[0u8; 12]);
+    data.extend_from_slice(&spender);
+    let mut amt = [0u8; 32];
+    amt[16..].copy_from_slice(&amount.to_be_bytes());
+    data.extend_from_slice(&amt);
+    data
+}
+
+/// `approve(spender, type(uint256).max)`.
+pub fn erc20_approve_max_data(spender: [u8; 20]) -> Vec<u8> {
+    let mut data = vec![0x09, 0x5e, 0xa7, 0xb3];
+    data.extend_from_slice(&[0u8; 12]);
+    data.extend_from_slice(&spender);
+    data.extend_from_slice(&[0xff; 32]);
     data
 }

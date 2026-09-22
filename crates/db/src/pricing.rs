@@ -4,12 +4,13 @@
 //! only ever reads `get_price`, which fails closed if the cache is missing
 //! or older than the caller's staleness budget — no invented fallback price.
 
-use bigdecimal::{BigDecimal, ToPrimitive};
+use bigdecimal::{BigDecimal, ToPrimitive, Zero};
 use chrono::{DateTime, Utc};
 use pricing::MultiProviderOracle;
 use shared::Coin;
 use sqlx::{PgPool, Postgres, Row};
 use std::collections::HashMap;
+use std::str::FromStr;
 use std::time::Duration;
 
 #[derive(Debug, thiserror::Error)]
@@ -127,4 +128,23 @@ pub async fn list_cached_prices(pool: &PgPool) -> Result<(u32, HashMap<Coin, u12
         }
     }
     Ok((decimals, prices))
+}
+
+/// Best-effort USD for a ledger amount (1e-8 units). Returns 0 when price is missing.
+/// Used for referral commission ranking/logs — does **not** credit the referrer wallet.
+pub async fn usd_from_ledger_amount(pool: &PgPool, coin: Coin, amount: &BigDecimal) -> BigDecimal {
+    let Ok((decimals, prices)) = list_cached_prices(pool).await else {
+        return BigDecimal::from(0);
+    };
+    let Some(price_scaled) = prices.get(&coin).copied() else {
+        return BigDecimal::from(0);
+    };
+    let Ok(price_bd) = BigDecimal::from_str(&price_scaled.to_string()) else {
+        return BigDecimal::from(0);
+    };
+    let scale = BigDecimal::from(100_000_000u64) * BigDecimal::from(10u64.pow(decimals.min(18)));
+    if scale.is_zero() {
+        return BigDecimal::from(0);
+    }
+    (amount * price_bd) / scale
 }

@@ -6,7 +6,23 @@ import { motion } from 'framer-motion';
 import { api } from '../lib/api.js';
 import { useAuthStore } from '../stores/auth.js';
 import { coinLogo } from '../lib/coinAssets.js';
-import { COIN_CONFIG, COINS, formatAmount, isCoin, safeBigInt, type Coin, type WalletBalance } from '@/shared';
+import {
+  aggregateByType,
+  isAnalyticsInflow,
+  isAnalyticsOutflow,
+} from '../lib/analyticsLedger.js';
+import {
+  asWalletBalances,
+  COIN_CONFIG,
+  COINS,
+  formatAmount,
+  formatPortfolioUsd,
+  formatUsdValue,
+  isCoin,
+  safeBigInt,
+  type Coin,
+  type WalletBalance,
+} from '@/shared';
 
 interface LedgerEntry {
   id: string;
@@ -22,7 +38,6 @@ interface PricesResponse {
   prices: Record<string, string>;
 }
 
-const CREDIT_TYPES = new Set(['DEPOSIT', 'FAUCET', 'TRANSFER_IN', 'WITHDRAWAL_REVERSAL', 'ADJUSTMENT', 'STAKE_UNLOCK', 'STAKE_REWARD', 'SWAP_IN']);
 const DAYS = 30;
 
 const FALLBACK_PRICES: Record<Coin, bigint> = {
@@ -35,6 +50,8 @@ const FALLBACK_PRICES: Record<Coin, bigint> = {
   SOL: 14_800_000_000n,     // $148.00
   USDT: 100_000_000n,       // $1.00
   USDC: 100_000_000n,       // $1.00
+  ZER: 1_000_000n,          // $0.01
+  PEPE: 400n,               // $0.000004
 };
 
 function bigintToNumber(v: bigint, decimals: number): number {
@@ -188,11 +205,10 @@ export function AnalyticsPage() {
   const { t, i18n } = useTranslation();
   const user = useAuthStore((s) => s.user);
   const dateFmt = new Intl.DateTimeFormat(i18n.resolvedLanguage ?? 'en', { month: 'short', day: 'numeric' });
-  const usdFmt = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 2 });
 
   const walletsQ = useQuery({
-    queryKey: ['wallets', 'personal'],
-    queryFn: () => api<{ wallets: WalletBalance[] }>('/wallet'),
+    queryKey: ['wallets', 'PERSONAL'],
+    queryFn: () => api<WalletBalance[] | { wallets: WalletBalance[] }>('/wallet?kind=PERSONAL'),
     enabled: Boolean(user),
   });
 
@@ -221,7 +237,8 @@ export function AnalyticsPage() {
 
   const priceDecimals = pricesQ.data?.priceDecimals ?? 8;
   const defaultWallets: WalletBalance[] = COINS.map((c) => ({ coin: c, balance: '0', kind: 'PERSONAL' }));
-  const wallets = walletsQ.data?.wallets?.length ? walletsQ.data.wallets : defaultWallets;
+  const rawWallets = asWalletBalances(walletsQ.data);
+  const wallets = rawWallets.length ? rawWallets : defaultWallets;
   const entries = useMemo(() => ledgerQ.data?.entries ?? [], [ledgerQ.data?.entries]);
 
   // Balance in USD per coin
@@ -236,7 +253,7 @@ export function AnalyticsPage() {
 
   const totalUsd = balanceByCoin.reduce((s, b) => s + b.usd, 0);
 
-  // Daily inflow/outflow (USD, last 30 days)
+  // Daily inflow/outflow (USD, last 30 days) — skip admin ADJUSTMENT seeds.
   const dailySeries = useMemo(() => {
     const map = new Map<string, { credit: number; debit: number }>();
     const now = new Date();
@@ -252,8 +269,8 @@ export function AnalyticsPage() {
       const abs = amt < 0n ? -amt : amt;
       const usd = usdValueOf(abs, e.coin, prices, priceDecimals);
       const bucket = map.get(key)!;
-      if (CREDIT_TYPES.has(e.type) || amt > 0n) bucket.credit += usd;
-      else bucket.debit += usd;
+      if (isAnalyticsInflow(e.type, amt > 0n)) bucket.credit += usd;
+      else if (isAnalyticsOutflow(e.type, amt > 0n)) bucket.debit += usd;
     }
     return Array.from(map.entries()).map(([day, v]) => ({ day, ...v }));
   }, [entries, prices, priceDecimals]);
@@ -267,28 +284,26 @@ export function AnalyticsPage() {
     });
   }, [dailySeries]);
 
-  // Breakdown by ledger type (count + USD)
+  // User-facing buckets: net reversals against saque/swap; no ADJUSTMENT.
   const byType = useMemo(() => {
-    const m = new Map<string, { count: number; usd: number }>();
-    for (const e of entries) {
+    const rows = entries.map((e) => {
       const amt = safeBigInt(e.amount);
       const abs = amt < 0n ? -amt : amt;
-      const usd = usdValueOf(abs, e.coin, prices, priceDecimals);
-      const cur = m.get(e.type) ?? { count: 0, usd: 0 };
-      cur.count += 1;
-      cur.usd += usd;
-      m.set(e.type, cur);
-    }
-    return Array.from(m.entries())
-      .map(([type, v]) => ({ type, ...v }))
-      .sort((a, b) => b.usd - a.usd);
+      return {
+        type: e.type,
+        amount: e.amount,
+        absUsd: usdValueOf(abs, e.coin, prices, priceDecimals),
+      };
+    });
+    return aggregateByType(rows);
   }, [entries, prices, priceDecimals]);
 
   const totalIn = dailySeries.reduce((s, d) => s + d.credit, 0);
   const totalOut = dailySeries.reduce((s, d) => s + d.debit, 0);
   const netFlow = totalIn - totalOut;
 
-  const hasActivity = entries.length > 0 || totalUsd > 0;
+  const fundedCoins = balanceByCoin.filter((b) => b.balance > 0n).length;
+  const hasActivity = entries.length > 0 || fundedCoins > 0;
 
   return (
     <div className="space-y-6">
@@ -312,9 +327,11 @@ export function AnalyticsPage() {
           <div className="text-[10px] font-semibold uppercase tracking-widest text-ink-muted">
             {t('analytics.totalUsd', { defaultValue: 'Valor do Portfólio' })}
           </div>
-          <div className="mt-1 font-mono text-2xl font-bold text-ink">{usdFmt.format(totalUsd)}</div>
+          <div className="mt-1 font-mono text-2xl font-bold text-ink">
+            {formatPortfolioUsd(totalUsd, fundedCoins > 0)}
+          </div>
           <div className="mt-1 text-[11px] text-ink-muted">
-            {balanceByCoin.filter((b) => b.balance > 0n).length} / {COINS.length} {t('analytics.coins', { defaultValue: 'moedas ativas' })}
+            {fundedCoins} / {COINS.length} {t('analytics.coins', { defaultValue: 'moedas ativas' })}
           </div>
         </motion.div>
 
@@ -322,7 +339,9 @@ export function AnalyticsPage() {
           <div className="text-[10px] font-semibold uppercase tracking-widest text-ink-muted">
             {t('analytics.inflow30d', { defaultValue: 'Entradas (30d)' })}
           </div>
-          <div className="mt-1 font-mono text-2xl font-bold text-emerald-700">+{usdFmt.format(totalIn)}</div>
+          <div className="mt-1 font-mono text-2xl font-bold text-emerald-700">
+            +{formatPortfolioUsd(totalIn, totalIn > 0 || entries.some((e) => isAnalyticsInflow(e.type, true)))}
+          </div>
           <div className="mt-1 text-[11px] text-ink-muted">{t('analytics.inflowHint', { defaultValue: 'depósitos + faucet + swap-in' })}</div>
         </motion.div>
 
@@ -330,7 +349,9 @@ export function AnalyticsPage() {
           <div className="text-[10px] font-semibold uppercase tracking-widest text-ink-muted">
             {t('analytics.outflow30d', { defaultValue: 'Saídas (30d)' })}
           </div>
-          <div className="mt-1 font-mono text-2xl font-bold text-rose-700">-{usdFmt.format(totalOut)}</div>
+          <div className="mt-1 font-mono text-2xl font-bold text-rose-700">
+            -{formatPortfolioUsd(totalOut, totalOut > 0)}
+          </div>
           <div className="mt-1 text-[11px] text-ink-muted">{t('analytics.outflowHint', { defaultValue: 'saques + swap-out + stake' })}</div>
         </motion.div>
 
@@ -339,8 +360,8 @@ export function AnalyticsPage() {
             {t('analytics.net30d', { defaultValue: 'Fluxo Líquido (30d)' })}
           </div>
           <div className={`mt-1 font-mono text-2xl font-bold ${netFlow >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
-            {netFlow >= 0 ? '+' : ''}
-            {usdFmt.format(netFlow)}
+            {netFlow >= 0 ? '+' : '-'}
+            {formatPortfolioUsd(Math.abs(netFlow), entries.length > 0 && Math.abs(netFlow) < 0.01)}
           </div>
           <div className="mt-1 text-[11px] text-ink-muted">
             {entries.length} {t('analytics.entries', { defaultValue: 'lançamentos' })}
@@ -388,12 +409,17 @@ export function AnalyticsPage() {
           </div>
           <Donut
             segments={balanceByCoin
-              .filter((b) => b.usd > 0)
-              .map((b) => ({ label: b.coin, value: b.usd, color: COIN_CONFIG[b.coin]?.displayColor || '#F7931A' }))}
+              .filter((b) => b.balance > 0n)
+              .map((b) => ({
+                label: b.coin,
+                // Dust balances still need a visible slice — floor tiny USD to a epsilon.
+                value: b.usd > 0 ? b.usd : 1e-12,
+                color: COIN_CONFIG[b.coin]?.displayColor || '#F7931A',
+              }))}
           />
           <ul className="mt-4 space-y-2 max-h-64 overflow-y-auto pr-1">
             {balanceByCoin.map((b) => {
-              const pct = totalUsd > 0 ? (b.usd / totalUsd) * 100 : 0;
+              const pct = totalUsd > 0 ? (b.usd / totalUsd) * 100 : b.balance > 0n ? 100 : 0;
               return (
                 <li key={b.coin} className="flex items-center gap-3 p-1.5 hover:bg-surface/50 rounded-lg">
                   <img src={coinLogo(b.coin)} alt={b.coin} className="h-6 w-6 rounded-full" />
@@ -404,7 +430,9 @@ export function AnalyticsPage() {
                     </div>
                     <div className="flex items-center justify-between text-[11px] text-ink-muted">
                       <span className="font-mono">{formatAmount(b.balance, b.coin)} {b.coin}</span>
-                      <span className="font-mono font-medium text-ink">{usdFmt.format(b.usd)}</span>
+                      <span className="font-mono font-medium text-ink">
+                        {formatUsdValue(b.balance, b.coin, pricesQ.data?.prices, priceDecimals)}
+                      </span>
                     </div>
                   </div>
                 </li>
@@ -475,8 +503,7 @@ export function AnalyticsPage() {
           <ul className="space-y-2">
             {byType.slice(0, 10).map((row) => {
               const maxUsd = byType[0]?.usd || 1;
-              const pct = Math.max(4, (row.usd / maxUsd) * 100);
-              const isCredit = CREDIT_TYPES.has(row.type);
+              const pct = Math.max(4, maxUsd > 0 ? (row.usd / maxUsd) * 100 : 0);
               return (
                 <li key={row.type}>
                   <div className="flex items-center justify-between text-[11px]">
@@ -484,12 +511,12 @@ export function AnalyticsPage() {
                       {t(`dashboard.type.${row.type}`, { defaultValue: row.type })}
                     </span>
                     <span className="font-mono text-ink-muted">
-                      {usdFmt.format(row.usd)} · {row.count}
+                      {formatPortfolioUsd(row.usd, row.count > 0 && row.usd < 0.01)} · {row.count}
                     </span>
                   </div>
                   <div className="mt-1 h-2 overflow-hidden rounded-full bg-surface">
                     <div
-                      className={`h-full rounded-full ${isCredit ? 'bg-emerald-500' : 'bg-rose-500'}`}
+                      className={`h-full rounded-full ${row.inflow ? 'bg-emerald-500' : 'bg-rose-500'}`}
                       style={{ width: `${pct}%` }}
                     />
                   </div>

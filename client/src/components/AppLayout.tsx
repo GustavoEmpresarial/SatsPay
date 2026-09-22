@@ -89,7 +89,7 @@ export function AppLayout() {
     { to: '/referrals', label: 'Indicações', icon: 'bi-people-fill', badge: '10% Bônus' },
     { to: '/airdrop', label: 'Airdrop $SATS', icon: 'bi-gift-fill', badge: 'Recompensas' },
     { to: '/stake', label: t('nav.stake'), icon: 'bi-graph-up-arrow', badge: t('nav.comingSoon', 'Em breve') },
-    { to: '/lend', label: t('nav.lend'), icon: 'bi-bank' },
+    { to: '/lend', label: t('nav.lend'), icon: 'bi-bank', badge: t('nav.maintenance', 'Manutenção') },
     { to: '/analytics', label: t('nav.analytics'), icon: 'bi-bar-chart-line-fill' },
     { to: '/support', label: t('nav.support'), icon: 'bi-life-preserver' },
     { to: '/settings', label: t('nav.settings'), icon: 'bi-gear-fill' },

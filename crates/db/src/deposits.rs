@@ -80,6 +80,16 @@ pub async fn get_or_create_address(pool: &PgPool, user_id: Uuid, coin: shared::C
     Ok(generated.address)
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CreditDepositOutcome {
+    /// Already CREDITED — no side-effects.
+    Noop,
+    /// Deposit row created/updated but not yet ledger-credited.
+    Recorded,
+    /// Ledger credit applied for the first time.
+    NewlyCredited,
+}
+
 /// Credits a confirmed on-chain deposit to the wallet ledger — idempotent
 /// per (tx_hash, vout). Called by the `deposit_watcher` job. Publishes
 /// `DepositConfirmed` to the outbox in the same transaction as the ledger
@@ -94,7 +104,7 @@ pub async fn credit_deposit(
     vout: i32,
     amount: BigDecimal,
     confirmations: i32,
-) -> Result<(), DepositsError> {
+) -> Result<CreditDepositOutcome, DepositsError> {
     let min_confs = coin_config(coin).min_confirmations as i32;
 
     let mut tx = pool.begin().await?;
@@ -111,7 +121,7 @@ pub async fn credit_deposit(
     if let Some(row) = &existing {
         let status: String = row.get("status");
         if status == "CREDITED" {
-            return Ok(());
+            return Ok(CreditDepositOutcome::Noop);
         }
     }
 
@@ -170,10 +180,13 @@ pub async fn credit_deposit(
             }),
         )
         .await?;
+
+        tx.commit().await?;
+        return Ok(CreditDepositOutcome::NewlyCredited);
     }
 
     tx.commit().await?;
-    Ok(())
+    Ok(CreditDepositOutcome::Recorded)
 }
 
 /// Reconciles one previously detected output against a successful chain

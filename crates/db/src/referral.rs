@@ -86,8 +86,16 @@ pub async fn link_referred_user(pool: &PgPool, referrer_code_or_username: &str, 
 
     if res.rows_affected() > 0 {
         // Grant bonus Airdrop points to referrer (+50 pts) and referred user (+50 pts welcome) only on first link
-        let _ = crate::airdrop::award_airdrop_points(pool, referrer_id, 50, 0, "REFERRAL_SIGNUP").await;
-        let _ = crate::airdrop::award_airdrop_points(pool, new_user_id, 50, 0, "REFERRAL_WELCOME").await;
+        if let Err(e) =
+            crate::airdrop::award_airdrop_points(pool, referrer_id, 50, 0, "REFERRAL_SIGNUP").await
+        {
+            tracing::warn!(%referrer_id, error = %e, "airdrop REFERRAL_SIGNUP award failed");
+        }
+        if let Err(e) =
+            crate::airdrop::award_airdrop_points(pool, new_user_id, 50, 0, "REFERRAL_WELCOME").await
+        {
+            tracing::warn!(%new_user_id, error = %e, "airdrop REFERRAL_WELCOME award failed");
+        }
     }
 
     Ok(Some(referrer_id))
@@ -205,7 +213,11 @@ pub async fn record_referral_commission(
     .await?;
 
     // Also credit airdrop points for commission activity
-    let _ = crate::airdrop::award_airdrop_points(pool, referrer_id, 10, 0, "COMMISSION_EARNED").await;
+    if let Err(e) =
+        crate::airdrop::award_airdrop_points(pool, referrer_id, 10, 0, "COMMISSION_EARNED").await
+    {
+        tracing::warn!(%referrer_id, error = %e, "airdrop COMMISSION_EARNED award failed");
+    }
 
     Ok(Some(comm_id))
 }

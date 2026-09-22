@@ -1,10 +1,12 @@
 use captcha::TurnstileVerifier;
 use chain::ChainRegistry;
+use changenow::ChangeNowClient;
 use crypto::SecretsService;
 use domain::auth::{AuthRepo, AuthService, EmailSender};
 use sqlx::PgPool;
 use std::sync::Arc;
 use std::time::Duration;
+use relay::RelayClient;
 use swapkit::SwapKitClient;
 
 /// App-level settings that would otherwise show up as magic numbers scattered
@@ -28,6 +30,10 @@ pub struct AppSettings {
     /// OTP even if the account has not enabled 2FA. Admin withdrawal approve
     /// always requires step-up OTP regardless of this flag.
     pub smtp_enabled: bool,
+    /// Public origin the hosted checkout is reachable at (no trailing slash) —
+    /// used to build the absolute `checkoutUrl` merchants redirect to. From
+    /// `PUBLIC_BASE_URL`, else the first `CORS_ORIGIN` entry.
+    pub public_base_url: String,
 }
 
 /// Shared axum state — auth service (generic over its repo) plus raw
@@ -49,6 +55,8 @@ pub struct AppState<R: AuthRepo> {
     pub captcha: Arc<TurnstileVerifier>,
     pub settings: AppSettings,
     pub swapkit: Arc<SwapKitClient>,
+    pub relay: Arc<RelayClient>,
+    pub changenow: Arc<ChangeNowClient>,
 }
 
 // Manual impl: `#[derive(Clone)]` would incorrectly require `R: Clone` even
@@ -65,6 +73,8 @@ impl<R: AuthRepo> Clone for AppState<R> {
             captcha: self.captcha.clone(),
             settings: self.settings.clone(),
             swapkit: self.swapkit.clone(),
+            relay: self.relay.clone(),
+            changenow: self.changenow.clone(),
         }
     }
 }

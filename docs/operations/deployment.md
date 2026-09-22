@@ -1,3 +1,18 @@
+# Deploy
+
+## Produção atual = compose na VM + Caddy
+
+O que está no ar (`satspay.pro`) **não é** o overlay k8s. É Docker Compose em `/root/bitcosats`, client em `127.0.0.1:4500`, API em `127.0.0.1:4501`, TLS na borda Cloudflare + Caddy. Segredos no `.env` do host (`0600`), não no Vault.
+
+- Deploy: `python3 scripts/deploy_to_vm.py` (`--backend` / `--all`) com `DEPLOY_SSH_KEY` (sem senha no repo).
+- Ameaças e gaps da VM: [`docs/security/threat-model-and-gaps.md`](../security/threat-model-and-gaps.md).
+- SSH, LUKS, backup da `ENCRYPTION_KEY`, SMTP/admin: [`vm-security-runbook.md`](vm-security-runbook.md).
+- Compose: `deploy/docker/docker-compose.yml`.
+
+O restante deste arquivo descreve a **topologia k8s** (dev/staging/prod overlays). Trate-a como caminho futuro / cluster de lab, não como a prod de hoje.
+
+---
+
 # Deploy — topologia k8s
 
 Ver também `deploy/k8s/README.md` para o passo a passo exato de subir o cluster de dev do zero.
@@ -83,6 +98,20 @@ kubectl kustomize --load-restrictor LoadRestrictionsNone deploy/k8s/overlays/pro
 - `overlays/staging` — dual-run namespace `bitcosats-staging` (1 replica, shared/dev
   deps). See `deploy/k8s/overlays/staging/README.md`.
 
+
+## TLS no Caddy (VM atual)
+
+O client hoje publica HTTP. Cifrar o disco não protege senha/JWT no fio. Bloco típico
+no Caddyfile que já emite Let's Encrypt:
+
+```
+satspay.pro, www.satspay.pro {
+	reverse_proxy 127.0.0.1:4500
+}
+```
+
+Depois bind do `client` em `127.0.0.1:4500` (não `0.0.0.0`). Cookie de refresh já usa
+`Secure` quando `NODE_ENV=production`.
 
 ## Variáveis de ambiente
 

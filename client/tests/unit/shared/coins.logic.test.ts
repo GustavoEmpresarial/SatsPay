@@ -1,22 +1,38 @@
 import { describe, expect, it } from 'vitest';
 import {
+  asWalletBalances,
   computeSwap,
   formatAmount,
+  formatAmountFixed,
+  formatPortfolioUsd,
   formatUsdValue,
   getCoinUsdValue,
   isCoin,
   isDepositWithdrawPaused,
   isSwapL2Coin,
   isSwapL2Pair,
+  isSwapCoin,
+  isSwapPair,
+  isSwapL1Coin,
   defaultDepositWithdrawCoin,
   parseAmount,
   safeBigInt,
   SWAP_DEFAULT_FEE_BPS,
   SWAP_L2_COINS,
+  SWAP_L1_COINS,
+  SWAP_COINS,
+  DEX_SWAP_COINS,
   DEPOSIT_WITHDRAW_PAUSED_COINS,
   COINS,
   COIN_CONFIG,
+  COIN_NETWORK,
+  coinNetwork,
+  isBridgePair,
+  isDexSwapPair,
+  isSameSwapNetwork,
   FALLBACK_PRICES,
+  formatLedgerAmount,
+  toLedgerUnits,
   type Coin,
 } from '../../../src/shared/coins.js';
 
@@ -25,24 +41,73 @@ describe('isCoin / COINS', () => {
     for (const c of COINS) expect(isCoin(c)).toBe(true);
     expect(isCoin('ETH')).toBe(false);
     expect(isCoin('')).toBe(false);
+    expect(COINS).toHaveLength(11);
+    expect(COINS).toContain('ZER');
+    expect(COIN_CONFIG.ZER.name).toBe('Zero');
+    expect(COIN_CONFIG.ZER.minConfirmations).toBe(10);
+    expect(FALLBACK_PRICES.ZER).toBeGreaterThan(0);
+    expect(COINS).toContain('PEPE');
+    expect(COIN_CONFIG.PEPE.name).toBe('Pepe');
+    expect(COIN_CONFIG.PEPE.minConfirmations).toBe(15);
+    expect(COIN_CONFIG.PEPE.withdrawalFee).toBe(5_000_000_000_000n);
+    expect(FALLBACK_PRICES.PEPE).toBeGreaterThan(0);
+    expect(isDepositWithdrawPaused('PEPE')).toBe(false);
   });
 });
 
 describe('swap L2 allowlist', () => {
-  it('allows only POL/USDT/USDC pairs', () => {
+  it('allows only POL/USDT/USDC/SOL for L2', () => {
     expect(isSwapL2Coin('POL')).toBe(true);
     expect(isSwapL2Coin('BTC')).toBe(false);
+    expect(isSwapL2Coin('PEPE')).toBe(false);
     expect(isSwapL2Pair('POL', 'USDT')).toBe(true);
     expect(isSwapL2Pair('POL', 'POL')).toBe(false);
     expect(isSwapL2Pair('BTC', 'LTC')).toBe(false);
-    expect(SWAP_L2_COINS).toEqual(['POL', 'USDT', 'USDC']);
+    expect(SWAP_L2_COINS).toEqual(['POL', 'USDT', 'USDC', 'SOL']);
+  });
+
+  it('includes L1 coins in full swap allowlist', () => {
+    expect(isSwapL1Coin('BTC')).toBe(true);
+    expect(isSwapCoin('BTC')).toBe(true);
+    expect(isSwapCoin('USDT')).toBe(true);
+    expect(isSwapCoin('PEPE')).toBe(false);
+    expect(isSwapPair('BTC', 'LTC')).toBe(true);
+    expect(isSwapPair('BTC', 'USDT')).toBe(true);
+    expect(isSwapPair('BTC', 'BTC')).toBe(false);
+    expect(SWAP_L1_COINS).toEqual(['BTC', 'LTC', 'DOGE', 'BCH', 'DGB']);
+    expect(SWAP_COINS).toContain('BTC');
+    expect(SWAP_COINS).toContain('SOL');
+  });
+});
+
+describe('coin custodial networks', () => {
+  it('marks USDT/USDC/POL as Polygon and PEPE as BSC', () => {
+    expect(coinNetwork('USDT').id).toBe('polygon');
+    expect(coinNetwork('USDC').short).toBe('Polygon');
+    expect(coinNetwork('POL').id).toBe('polygon');
+    expect(coinNetwork('SOL').id).toBe('solana');
+    expect(coinNetwork('PEPE').id).toBe('bsc');
+    expect(COIN_NETWORK.BTC.id).toBe('bitcoin');
+  });
+
+  it('separates same-network DEX swap from cross-network bridge', () => {
+    expect(DEX_SWAP_COINS).toEqual(['POL', 'USDT', 'USDC']);
+    expect(isDexSwapPair('POL', 'USDT')).toBe(true);
+    expect(isSameSwapNetwork('USDT', 'USDC')).toBe(true);
+    expect(isBridgePair('POL', 'USDT')).toBe(false);
+    expect(isBridgePair('SOL', 'USDT')).toBe(true);
+    expect(isBridgePair('BTC', 'LTC')).toBe(true);
+    expect(isDexSwapPair('SOL', 'USDT')).toBe(false);
   });
 });
 
 describe('deposit/withdraw pause list', () => {
-  it('pauses BTC LTC DOGE but keeps them as coins', () => {
-    expect(DEPOSIT_WITHDRAW_PAUSED_COINS).toEqual(['BTC', 'LTC', 'DOGE', 'DGB']);
+  it('pauses BTC LTC DOGE BCH DGB but keeps them as coins', () => {
+    expect(DEPOSIT_WITHDRAW_PAUSED_COINS).toEqual(['BTC', 'LTC', 'DOGE', 'BCH', 'DGB']);
     expect(isDepositWithdrawPaused('BTC')).toBe(true);
+    expect(isDepositWithdrawPaused('DGB')).toBe(true);
+    expect(isDepositWithdrawPaused('ZER')).toBe(false);
+    expect(isDepositWithdrawPaused('BCH')).toBe(true);
     expect(isDepositWithdrawPaused('POL')).toBe(false);
     expect(defaultDepositWithdrawCoin('BTC')).not.toBe('BTC');
     expect(isDepositWithdrawPaused(defaultDepositWithdrawCoin('BTC'))).toBe(false);
@@ -76,7 +141,7 @@ describe('safeBigInt', () => {
 describe('computeSwap', () => {
   it('applies default fee bps', () => {
     const q = computeSwap('BTC', 'LTC', 100_000_000n, 100_000_000_000n, 1_000_000_000n, SWAP_DEFAULT_FEE_BPS);
-    expect(q.feeBps).toBe(25);
+    expect(q.feeBps).toBe(SWAP_DEFAULT_FEE_BPS);
     expect(q.toAmount).toBeGreaterThan(0n);
     expect(q.feeAmount).toBeGreaterThan(0n);
     expect(q.toAmount + q.feeAmount).toBeGreaterThan(q.toAmount);
@@ -131,8 +196,16 @@ describe('formatAmount / parseAmount', () => {
   it('guards unknown coin casts', () => {
     const fake = 'ETH' as Coin;
     expect(formatAmount(1n, fake)).toBe('1');
+    expect(formatAmountFixed(1n, fake)).toBe('1');
     expect(parseAmount('1', fake)).toBe(0n);
     expect(getCoinUsdValue(1n, fake)).toBe(0);
+  });
+
+  it('formatAmountFixed always keeps 8 fraction digits', () => {
+    expect(formatAmountFixed(100_000_000n, 'BTC')).toBe('1.00000000');
+    expect(formatAmountFixed(1n, 'BTC')).toBe('0.00000001');
+    expect(formatAmountFixed(0n, 'ZER')).toBe('0.00000000');
+    expect(formatAmountFixed(800_000_000n, 'ZER')).toBe('8.00000000');
   });
 });
 
@@ -159,5 +232,71 @@ describe('getCoinUsdValue / formatUsdValue', () => {
     // tiny sat amount → very small USD with fallback BTC price
     expect(formatUsdValue(1n, 'DGB')).toMatch(/\$|</);
     expect(formatUsdValue(100n, 'DGB')).toMatch(/\$/);
+    // Never show bare $0.00 for a non-zero ledger credit
+    expect(formatUsdValue(1n, 'BTC')).not.toBe('$0.00');
+    expect(formatPortfolioUsd(0, true)).toBe('< $0.01');
+    expect(formatPortfolioUsd(0.004, true)).toBe('< $0.01');
+    expect(formatPortfolioUsd(0.004, false)).toBe('< $0.01');
+    expect(formatPortfolioUsd(0, false)).toBe('$0.00');
+    expect(formatPortfolioUsd(12.5, false)).toContain('12.50');
+  });
+});
+
+describe('asWalletBalances', () => {
+  it('accepts bare array or { wallets } wrapper', () => {
+    const row = { coin: 'BTC' as const, balance: '1', kind: 'PERSONAL' };
+    expect(asWalletBalances([row])).toEqual([row]);
+    expect(asWalletBalances({ wallets: [row] })).toEqual([row]);
+    expect(asWalletBalances(null)).toEqual([]);
+    expect(asWalletBalances({ wallets: undefined })).toEqual([]);
+  });
+});
+
+describe('formatLedgerAmount', () => {
+  it('renders ledger units as a quantity of coins', () => {
+    expect(formatLedgerAmount('2500000000', 'USDT')).toBe('25');
+    expect(formatLedgerAmount('100000000', 'POL')).toBe('1');
+    expect(formatLedgerAmount('1', 'BCH')).toBe('0.00000001');
+    expect(formatLedgerAmount('5555555556', 'POL')).toBe('55.55555556');
+  });
+
+  it('handles the fractional rows written before the API rejected decimals', () => {
+    // "7.2" here is 7.2 units of 1e-8 — the merchant dashboard used to print
+    // it raw and claim the invoice charged 7.2 POL.
+    expect(formatLedgerAmount('7.2000', 'POL')).toBe('0.000000072');
+    expect(formatLedgerAmount('0.5000', 'USDC')).toBe('0.000000005');
+  });
+
+  it('never throws on junk', () => {
+    expect(formatLedgerAmount('', 'BTC')).toBe('0');
+    expect(formatLedgerAmount(null, 'BTC')).toBe('0');
+    expect(formatLedgerAmount('abc', 'BTC')).toBe('0');
+    expect(formatLedgerAmount('0', 'BTC')).toBe('0');
+  });
+});
+
+describe('toLedgerUnits', () => {
+  it('converts a coin quantity into the integer the API takes', () => {
+    // The spelling a merchant reaches for ("25.00") is the one that broke a
+    // real integration; this is the conversion that makes it safe.
+    expect(toLedgerUnits('25')).toBe('2500000000');
+    expect(toLedgerUnits('25.00')).toBe('2500000000');
+    expect(toLedgerUnits('0.005')).toBe('500000');
+    expect(toLedgerUnits('0.00000001')).toBe('1');
+    expect(toLedgerUnits('25,5')).toBe('2550000000');
+  });
+
+  it('refuses what the ledger cannot hold', () => {
+    expect(toLedgerUnits('0.000000001')).toBeNull(); // 9 decimals
+    expect(toLedgerUnits('abc')).toBeNull();
+    expect(toLedgerUnits('')).toBeNull();
+    expect(toLedgerUnits('-1')).toBeNull();
+    expect(toLedgerUnits('0')).toBeNull();
+  });
+
+  it('round-trips with formatLedgerAmount', () => {
+    for (const coins of ['25', '0.005', '1', '0.00000001']) {
+      expect(formatLedgerAmount(toLedgerUnits(coins)!, 'USDT')).toBe(coins.replace(/^(\d+)\.?0*$/, '$1'));
+    }
   });
 });

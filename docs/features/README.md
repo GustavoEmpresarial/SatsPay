@@ -4,6 +4,7 @@
 > (`docs/features/<slug>/FEATURE.md` + `TC.md`) e em `docs/pages/<slug>/`.
 
 Gerador: `python3 scripts/generate_feature_docs.py`
+Slugs travados (não overwrite): `privacy`, `domain-auth`, `login`, `admin-login`.
 
 ## Como pesquisar
 
@@ -32,7 +33,9 @@ Slugs de domínio backend usam prefixo `domain-`.
 | [`admin-merchants`](admin-merchants/FEATURE.md) | Admin Merchants | admin |
 | [`admin-overview`](admin-overview/FEATURE.md) | Admin Overview | admin |
 | [`admin-stake`](admin-stake/FEATURE.md) | Admin Stake | admin |
+| [`admin-support`](admin-support/FEATURE.md) | Admin Support | admin |
 | [`admin-telemetry`](admin-telemetry/FEATURE.md) | Admin Telemetry | admin |
+| [`admin-users`](admin-users/FEATURE.md) | Admin Users | admin |
 | [`admin-withdrawals`](admin-withdrawals/FEATURE.md) | Admin Withdrawals | admin |
 | [`airdrop`](airdrop/FEATURE.md) | Airdrop | user |
 | [`analytics`](analytics/FEATURE.md) | Analytics | user |
@@ -92,7 +95,7 @@ Slugs de domínio backend usam prefixo `domain-`.
 - [`domain-observability`](domain-observability/FEATURE.md)
 - [`domain-worker`](domain-worker/FEATURE.md)
 - [`domain-chain`](domain-chain/FEATURE.md)
-- Admin UI: `admin-overview`, `admin-stake`, `admin-merchants`, `admin-telemetry`, `admin-withdrawals`
+- Admin UI: `admin-overview`, `admin-users`, `admin-stake`, `admin-merchants`, `admin-telemetry`, `admin-withdrawals`
 
 ## Relação com docs/pages
 

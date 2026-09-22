@@ -14,6 +14,10 @@
 | TC-privacy-06 | obs | Erros inesperados reportados; ruído esperado filtrado | [ ] |
 | TC-privacy-07 | security | Sem IDOR; sem vazar secrets em UI/logs | [ ] |
 | TC-privacy-08 | structure | `client/tests/unit/pages/privacy/` structure test se página SPA | [ ] |
+| TC-privacy-09 | sqlx | `backfill_pii` sela e-mail/merchant/ticket/IP e é idempotente | [ ] |
+| TC-privacy-10 | sqlx | saque grava `enc:v1:` e `list_user_withdrawals` devolve o endereço | [ ] |
+| TC-privacy-11 | sqlx | `blank_plaintext_emails` + login/export pelo HMAC | [ ] |
+| TC-privacy-12 | sqlx | `retain_expired_pii` apaga OTP velho, não toca ledger | [ ] |
 
 ## Automatizado
 

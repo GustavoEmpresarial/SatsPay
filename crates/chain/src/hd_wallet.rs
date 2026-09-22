@@ -3,11 +3,12 @@
 //! - **hot** mnemonic → single spend key per coin (`…/0/0`) that pays withdrawals
 //!   and receives sweeps.
 //!
-//! One BIP-39 seed covers every secp256k1 coin (BTC/LTC/DOGE/BCH/DGB/POL/USDT/USDC).
+//! One BIP-39 seed covers every secp256k1 coin (BTC/LTC/DOGE/BCH/DGB/POL/USDT/USDC/PEPE).
 //! Solana uses HMAC-SHA256 of the same seed (ed25519), not secp256k1.
 
 use crate::encoding::{
     base58check_encode, bech32_p2wpkh_encode, cashaddr_encode, eip55_encode, evm_address_from_uncompressed_pubkey, hash160,
+    zcash_t1_encode,
 };
 use crate::hd::{compressed_bytes, uncompressed_xy_bytes};
 use crate::params::{params_for, AddressKind, ChainNetwork};
@@ -88,26 +89,36 @@ pub fn account_path(coin: Coin) -> &'static str {
         Coin::Doge => "m/44'/3'/0'",
         Coin::Bch => "m/44'/145'/0'",
         Coin::Dgb => "m/84'/20'/0'",
-        Coin::Pol | Coin::Usdt | Coin::Usdc => "m/44'/60'/0'",
+        Coin::Pol | Coin::Usdt | Coin::Usdc | Coin::Pepe => "m/44'/60'/0'",
         Coin::Sol => "m/44'/501'/0'",
+        Coin::Zer => "m/44'/323'/0'",
     }
 }
 
 fn derive_secp_secret(mnemonic: &str, coin: Coin, index: u32) -> Result<[u8; 32], HdWalletError> {
+    derive_secp_children(mnemonic, coin, &[0, index])
+}
+
+/// `{account}/{index}` — the key that matches `derive_child_pubkey(account_xpub, index)`.
+/// Issued by mistake when the API had only the xpub. Not the BIP44 receive path.
+pub fn secret_from_account_index(mnemonic: &str, coin: Coin, index: u32) -> Result<[u8; 32], HdWalletError> {
+    if coin == Coin::Sol {
+        return Err(HdWalletError::Msg("sol has no secp account index".into()));
+    }
+    derive_secp_children(mnemonic, coin, &[index])
+}
+
+fn derive_secp_children(mnemonic: &str, coin: Coin, children: &[u32]) -> Result<[u8; 32], HdWalletError> {
     let secp = Secp256k1::new();
     let master = master_xpriv(mnemonic)?;
     let account = master
         .derive_priv(&secp, &DerivationPath::from_str(account_path(coin)).map_err(|e| e.to_string())?)
         .map_err(|e| e.to_string())?;
-    let child = account
-        .derive_priv(
-            &secp,
-            &[
-                ChildNumber::from_normal_idx(0).map_err(|e| e.to_string())?,
-                ChildNumber::from_normal_idx(index).map_err(|e| e.to_string())?,
-            ],
-        )
-        .map_err(|e| e.to_string())?;
+    let path: Vec<ChildNumber> = children
+        .iter()
+        .map(|index| ChildNumber::from_normal_idx(*index).map_err(|e| e.to_string()))
+        .collect::<Result<_, _>>()?;
+    let child = account.derive_priv(&secp, &path).map_err(|e| e.to_string())?;
     Ok(child.private_key.secret_bytes())
 }
 
@@ -176,5 +187,6 @@ pub fn address_from_secret_bytes(coin: Coin, network: ChainNetwork, secret: &[u8
             let secret: [u8; 32] = *secret;
             sol_address_from_secret(&secret)
         }
+        AddressKind::ZcashTransparent { version } => zcash_t1_encode(version, &hash160(&compressed_bytes(&pk))),
     })
 }

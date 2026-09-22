@@ -4,6 +4,7 @@
 //! the worker (missed job, worker downtime).
 
 use chain::ChainRegistry;
+use crypto::SecretsService;
 use serde::Deserialize;
 use sqlx::PgPool;
 
@@ -14,7 +15,7 @@ struct BroadcastPayload {
 }
 
 /// Drains all currently-pending `withdrawal_broadcast` jobs.
-pub async fn drain_broadcast_queue(pool: &PgPool, registry: &ChainRegistry, locked_by: &str) {
+pub async fn drain_broadcast_queue(pool: &PgPool, registry: &ChainRegistry, secrets: &SecretsService, locked_by: &str) {
     loop {
         let claimed = match queue::claim_next(pool, "withdrawal_broadcast", locked_by).await {
             Ok(Some(job)) => job,
@@ -27,7 +28,7 @@ pub async fn drain_broadcast_queue(pool: &PgPool, registry: &ChainRegistry, lock
 
         let payload: Result<BroadcastPayload, _> = serde_json::from_value(claimed.payload.clone());
         let outcome = match payload {
-            Ok(p) => db::withdrawals::process_broadcast(pool, p.withdrawal_id, registry).await.map_err(|e| e.to_string()),
+            Ok(p) => db::withdrawals::process_broadcast(pool, p.withdrawal_id, registry, Some(secrets)).await.map_err(|e| e.to_string()),
             Err(e) => Err(format!("malformed job payload: {e}")),
         };
 

@@ -5,6 +5,7 @@
 | Tipo | Local |
 |------|-------|
 | Unit — estrutura | `client/tests/unit/pages/admin-login/admin-login.structure.test.ts` |
+| Unit — 2FA+Turnstile | `client/tests/unit/pages/authForms.render.test.tsx` |
 
 ## Planejado (aprofundar cobertura)
 

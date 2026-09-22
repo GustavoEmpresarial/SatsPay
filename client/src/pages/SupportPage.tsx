@@ -32,8 +32,8 @@ interface SupportMessage {
 }
 
 interface TicketDetail {
-  ticket: TicketSummary;
-  messages: SupportMessage[];
+  ticket?: TicketSummary;
+  messages?: SupportMessage[];
 }
 
 function statusClass(status: string): string {
@@ -81,7 +81,7 @@ export function SupportPage() {
     onSuccess: (detail) => {
       setMessage('');
       setFormError(null);
-      setSelectedId(detail.ticket.id);
+      if (detail?.ticket?.id) setSelectedId(detail.ticket.id);
       void qc.invalidateQueries({ queryKey: ['support-tickets'] });
     },
     onError: (err) => {
@@ -98,7 +98,7 @@ export function SupportPage() {
     onSuccess: (detail) => {
       setReply('');
       void qc.invalidateQueries({ queryKey: ['support-tickets'] });
-      void qc.setQueryData(['support-ticket', detail.ticket.id], detail);
+      if (detail?.ticket?.id) void qc.setQueryData(['support-ticket', detail.ticket.id], detail);
     },
     onError: (err) => {
       setFormError(err instanceof ApiError ? err.message : t('support.errors.generic'));
@@ -107,10 +107,8 @@ export function SupportPage() {
 
   const tickets = ticketsQ.data?.tickets ?? [];
   const detail = detailQ.data;
-  const canReply =
-    detail &&
-    detail.ticket.status !== 'CLOSED' &&
-    detail.ticket.status !== 'RESOLVED';
+  const ticket = detail?.ticket;
+  const canReply = !!ticket && ticket.status !== 'CLOSED' && ticket.status !== 'RESOLVED';
 
   const fmt = useMemo(
     () => (iso: string) =>
@@ -261,16 +259,16 @@ export function SupportPage() {
           </ul>
         )}
 
-        {selectedId && detail && (
+        {selectedId && ticket && (
           <div className="mt-4 space-y-3 rounded-xl border border-border bg-paper p-4">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <h3 className="text-sm font-bold text-ink">{detail.ticket.subject}</h3>
-              <span className={`rounded-full px-2.5 py-0.5 text-[11px] font-bold ${statusClass(detail.ticket.status)}`}>
-                {t(`support.status.${detail.ticket.status}`, { defaultValue: detail.ticket.status })}
+              <h3 className="text-sm font-bold text-ink">{ticket.subject}</h3>
+              <span className={`rounded-full px-2.5 py-0.5 text-[11px] font-bold ${statusClass(ticket.status)}`}>
+                {t(`support.status.${ticket.status}`, { defaultValue: ticket.status })}
               </span>
             </div>
             <div className="max-h-72 space-y-3 overflow-y-auto">
-              {detail.messages.map((m) => (
+              {(detail?.messages ?? []).map((m) => (
                 <div
                   key={m.id}
                   className={`rounded-lg px-3 py-2 text-sm ${
@@ -299,7 +297,7 @@ export function SupportPage() {
                 <button
                   type="button"
                   disabled={!reply.trim() || replyMut.isPending}
-                  onClick={() => replyMut.mutate(detail.ticket.id)}
+                  onClick={() => replyMut.mutate(ticket.id)}
                   className="inline-flex items-center gap-2 rounded-xl border border-border px-3 py-2 text-sm font-semibold text-ink disabled:opacity-50"
                 >
                   {replyMut.isPending ? t('support.sending') : t('support.reply')}

@@ -2,13 +2,14 @@ use crate::bch_sign::build_and_sign_bch_p2pkh;
 use crate::btc_sign::{build_and_sign_p2wpkh, SignError, Utxo};
 use crate::encoding::{
     base58check_decode, base58check_encode, bech32_p2wpkh_decode, bech32_p2wpkh_encode, cashaddr_decode, cashaddr_encode, eip55_encode, eip55_validate,
-    evm_address_from_uncompressed_pubkey, hash160, solana_address_decode, solana_address_encode,
+    evm_address_from_uncompressed_pubkey, hash160, solana_address_decode, solana_address_encode, zcash_t1_decode, zcash_t1_encode, zcash_t1_validate,
+    ZCASH_T1_MAINNET,
 };
 use crate::evm_sign::{address_from_secret, parse_address, sign_legacy_tx, LegacyTx};
-use crate::hd::{compressed_bytes, derive_child_pubkey, uncompressed_xy_bytes};
+use crate::hd::{compressed_bytes, derive_child_pubkey, derive_receive_pubkey, uncompressed_xy_bytes};
 use crate::hd_wallet::{
     account_path, account_xpub, address_from_mnemonic, address_from_secret_bytes, generate_mnemonic, hot_address_from_mnemonic, hot_secret_from_mnemonic,
-    mnemonic_to_seed, secret_from_mnemonic, secret_to_wif,
+    mnemonic_to_seed, secret_from_account_index, secret_from_mnemonic, secret_to_wif,
 };
 use crate::params::{params, params_for, AddressKind, ChainNetwork};
 use crate::policy::assert_stub_client_allowed;
@@ -244,6 +245,30 @@ fn base58check_rejects_wrong_length() {
 }
 
 #[test]
+fn zcash_t1_round_trip_and_explorer_donation() {
+    let hash = [0x11u8; 20];
+    let addr = zcash_t1_encode(ZCASH_T1_MAINNET, &hash);
+    assert!(addr.starts_with("t1"));
+    assert_eq!(zcash_t1_decode(&addr), Some((ZCASH_T1_MAINNET, hash)));
+    assert!(zcash_t1_validate(&addr, ZCASH_T1_MAINNET));
+    assert!(!zcash_t1_validate(&addr, crate::encoding::ZCASH_T1_TESTNET));
+    assert!(zcash_t1_decode("ztestsapling1nottransparent").is_none());
+    assert!(zcash_t1_decode("t3notp2pkh").is_none());
+
+    // Donation address published on zerochain.info (transparent t1 only).
+    const DONATION: &str = "t1WYq17CbrQXWQiCPLEnDqtEUThcDDZzN1B";
+    let (ver, _) = zcash_t1_decode(DONATION).expect("explorer t1 must checksum");
+    assert_eq!(ver, ZCASH_T1_MAINNET);
+    assert!(zcash_t1_validate(DONATION, ZCASH_T1_MAINNET));
+    assert!(!StubClient::new(Coin::Zer).validate_address("zs1shielded"));
+}
+
+#[test]
+fn zer_hd_path_is_slip44_323() {
+    assert_eq!(account_path(Coin::Zer), "m/44'/323'/0'");
+}
+
+#[test]
 fn bech32_rejects_empty_and_non_v0() {
     assert!(bech32_p2wpkh_decode("bc", "bc1").is_none());
     // Valid bech32 but not witness v0 P2WPKH (use a known short invalid program path).
@@ -287,6 +312,15 @@ fn mainnet_params_cover_every_coin() {
             Coin::Sol => assert!(matches!(p.address_kind, AddressKind::Solana)),
             Coin::Usdt => assert_eq!(p.erc20_contract, Some("0xc2132D05D31c914a87C6611C10748AEb04B58e8F")),
             Coin::Usdc => assert_eq!(p.erc20_contract, Some("0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359")),
+            Coin::Zer => assert!(matches!(
+                p.address_kind,
+                AddressKind::ZcashTransparent { version: crate::encoding::ZCASH_T1_MAINNET }
+            )),
+            Coin::Pepe => {
+                assert!(matches!(p.address_kind, AddressKind::Evm));
+                assert_eq!(p.evm_chain_id, Some(56));
+                assert_eq!(p.erc20_contract, Some("0x25d887Ce7a35172C62FeBFD67a1856F20FaEbB00"));
+            }
         }
     }
     assert_eq!(params_for(Coin::Dgb, ChainNetwork::Testnet).bitcore_chain, None);
@@ -301,6 +335,9 @@ fn mainnet_params_cover_every_coin() {
         params_for(Coin::Usdc, ChainNetwork::Testnet).erc20_contract,
         Some("0x41E94Eb019C0762f9Bfcf9Fb1E58725BfB0e7582")
     );
+    assert!(params_for(Coin::Pepe, ChainNetwork::Testnet).erc20_contract.is_none());
+    assert!(params_for(Coin::Pepe, ChainNetwork::Testnet).evm_chain_id.is_none());
+    assert_eq!(account_path(Coin::Pepe), "m/44'/60'/0'");
 }
 
 // --- HD ---
@@ -317,6 +354,16 @@ fn hd_derive_child_pubkey_and_encodings() {
     assert!(derive_child_pubkey("not-an-xpub", 0).is_err());
     // Hardened bit set → not a valid non-hardened index for from_normal_idx.
     assert!(derive_child_pubkey(&xpub, 0x8000_0000).is_err());
+    let receive = derive_receive_pubkey(&xpub, 4).unwrap();
+    let secp = bitcoin::secp256k1::Secp256k1::new();
+    let spend = bitcoin::secp256k1::SecretKey::from_slice(&secret_from_mnemonic(mnemonic, Coin::Btc, 4).unwrap()).unwrap();
+    let spend_pk = bitcoin::secp256k1::PublicKey::from_secret_key(&secp, &spend);
+    assert_eq!(spend_pk.serialize(), receive.serialize(), "xpub receive path must match the mnemonic spend key");
+    let legacy = derive_child_pubkey(&xpub, 4).unwrap();
+    assert_ne!(spend_pk.serialize(), legacy.serialize(), "account/index is not the BIP44 receive address");
+    let legacy_sk = bitcoin::secp256k1::SecretKey::from_slice(&secret_from_account_index(mnemonic, Coin::Btc, 4).unwrap()).unwrap();
+    let legacy_pk = bitcoin::secp256k1::PublicKey::from_secret_key(&secp, &legacy_sk);
+    assert_eq!(legacy_pk.serialize(), legacy.serialize());
 }
 
 // --- hd_wallet ---
@@ -398,6 +445,7 @@ async fn registry_build_real_and_from_env_construct_only() {
     let cfg = RealClientConfig {
         bitcore_base_url: "http://127.0.0.1:9".into(),
         evm_rpc_url: "http://127.0.0.1:9".into(),
+        bsc_rpc_url: "http://127.0.0.1:9".into(),
         deposit_xpub: String::new(),
         hot_wallet_wif: None,
         evm_deposit_lookback_blocks: 10,
@@ -405,6 +453,10 @@ async fn registry_build_real_and_from_env_construct_only() {
         network: ChainNetwork::Testnet,
         sol_rpc_url: "http://127.0.0.1:9".into(),
         dgb_insight_url: "http://127.0.0.1:9".into(),
+        dgb_rpc_url: None,
+        zer_explorer_url: "http://127.0.0.1:9".into(),
+        zer_explorer_api_key: None,
+        zer_rpc_url: None,
         deposit_mnemonic: None,
         hot_mnemonic: None,
     };
@@ -418,6 +470,7 @@ async fn registry_build_real_and_from_env_construct_only() {
         "EVM_RPC_URL",
         "SOL_RPC_URL",
         "DGB_INSIGHT_API",
+        "DGB_RPC_URL",
         "EVM_DEPOSIT_LOOKBACK_BLOCKS",
         "FEE_CONFIRMATION_TARGET",
         "DEPOSIT_MNEMONIC",
@@ -431,6 +484,7 @@ async fn registry_build_real_and_from_env_construct_only() {
     std::env::set_var("EVM_RPC_URL", "http://127.0.0.1:9");
     std::env::set_var("SOL_RPC_URL", "http://127.0.0.1:9");
     std::env::set_var("DGB_INSIGHT_API", "http://127.0.0.1:9");
+    std::env::remove_var("DGB_RPC_URL");
     std::env::set_var("EVM_DEPOSIT_LOOKBACK_BLOCKS", "50");
     std::env::set_var("FEE_CONFIRMATION_TARGET", "3");
     std::env::remove_var("DEPOSIT_MNEMONIC");
@@ -457,7 +511,7 @@ async fn real_client_validate_address_and_hot_wallet_helpers() {
     let hex_key = format!("0x{}", hex::encode(secret));
     assert_eq!(parse_secret_key_bytes(&hex_key).unwrap(), secret);
 
-    for coin in [Coin::Btc, Coin::Doge, Coin::Bch, Coin::Pol, Coin::Sol, Coin::Ltc, Coin::Dgb] {
+    for coin in [Coin::Btc, Coin::Doge, Coin::Bch, Coin::Pol, Coin::Sol, Coin::Ltc, Coin::Dgb, Coin::Zer, Coin::Pepe] {
         let addr = hot_wallet_address(coin, ChainNetwork::Mainnet, &wif).unwrap();
         assert!(!addr.is_empty(), "{coin:?}");
     }
@@ -469,6 +523,7 @@ async fn real_client_validate_address_and_hot_wallet_helpers() {
         RealClientConfig {
             bitcore_base_url: "http://127.0.0.1:9".into(),
             evm_rpc_url: "http://127.0.0.1:9".into(),
+        bsc_rpc_url: "http://127.0.0.1:9".into(),
             deposit_xpub: String::new(),
             hot_wallet_wif: Some(wif.clone()),
             evm_deposit_lookback_blocks: 10,
@@ -476,6 +531,10 @@ async fn real_client_validate_address_and_hot_wallet_helpers() {
             network: ChainNetwork::Mainnet,
             sol_rpc_url: "http://127.0.0.1:9".into(),
             dgb_insight_url: "http://127.0.0.1:9".into(),
+            dgb_rpc_url: None,
+            zer_explorer_url: "http://127.0.0.1:9".into(),
+            zer_explorer_api_key: None,
+            zer_rpc_url: None,
             deposit_mnemonic: None,
             hot_mnemonic: None,
         },
@@ -492,6 +551,22 @@ fn evm_erc20_transfer_data_selector() {
     let data = crate::evm_client::erc20_transfer_data([0x11; 20], 1_000_000);
     assert_eq!(&data[..4], &[0xa9, 0x05, 0x9c, 0xbb]); // transfer(address,uint256)
     assert_eq!(data.len(), 4 + 32 + 32);
+}
+
+#[test]
+fn polygon_dex_spender_candidates_include_1inch() {
+    // selector + padded 1inch v6 address word
+    let mut data = vec![0xda, 0x5d, 0x41, 0x70];
+    data.extend_from_slice(&[0u8; 12]);
+    data.extend_from_slice(&hex::decode("111111125421ca6dc452d289314280a0f8842a65").unwrap());
+    data.extend_from_slice(&[0u8; 32]); // extra word
+    let spenders = crate::real_client::polygon_dex_spender_candidates(&data);
+    assert!(
+        spenders
+            .iter()
+            .any(|s| s.eq_ignore_ascii_case("0x111111125421cA6dc452D289314280a0f8842A65")),
+        "spenders={spenders:?}"
+    );
 }
 
 #[test]

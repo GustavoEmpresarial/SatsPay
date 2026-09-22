@@ -3,6 +3,9 @@
 
 Run from repo root:
   python3 scripts/generate_feature_docs.py
+
+LOCKED_FEATURE_SLUGS (privacy, domain-auth, login, admin-login) are hand-written
+and must not be overwritten — PII/HMAC/SMTP notes live there.
 """
 from __future__ import annotations
 
@@ -47,13 +50,13 @@ DOMAINS: list[dict] = [
     {
         "slug": "domain-chain",
         "title": "Integração on-chain",
-        "keywords": "BTC LTC DOGE BCH POL DGB SOL USDT USDC RPC HD xpub sweep hot wallet",
+        "keywords": "BTC LTC DOGE BCH POL DGB SOL USDT USDC ZER RPC HD xpub sweep hot wallet t1 zerod",
         "files": [
             "crates/chain/",
             "docs/architecture/chain-integration.md",
         ],
         "apis": [],
-        "notes": "Clientes RPC / explorers; hot + deposit addresses; DGB tem fallback Cryptoid.",
+        "notes": "Clientes RPC / explorers; hot + deposit addresses; DGB Insight; ZER só t1 via zerod (sem z-addr, sem SwapKit).",
     },
     {
         "slug": "domain-treasury-health",
@@ -75,19 +78,50 @@ DOMAINS: list[dict] = [
     {
         "slug": "domain-gateway-merchant",
         "title": "Gateway merchant (invoices + HMAC)",
-        "keywords": "merchant_deposit_invoices gateway HMAC api_keys webhook checkout order_id fee 0.5%",
+        "keywords": "merchant_deposit_invoices gateway HMAC api_keys webhook checkout order_id fee 0.25% uma-moeda-por-fatura deposit.confirmed checkoutUrl payUrl invoice_watcher ledger units idempotency toEmail public/send PEPE payout email OAuth",
         "files": [
             "crates/db/migrations/0010_merchant_deposit_invoices.sql",
+            "crates/db/migrations/0026_merchant_invoice_order_unique.sql",
+            "crates/db/migrations/0027_merchant_invoice_onchain.sql",
+            "crates/api-http/src/merchant_deposits.rs",
+            "crates/webhooks/src/lib.rs",
+            "crates/worker/src/invoice_watcher.rs",
             "docs/api/public-api-hmac.md",
+            "docs/api/http-api-reference.md",
             "client/src/pages/CheckoutPage.tsx",
             "client/src/pages/AdminMerchantsPage.tsx",
         ],
         "apis": [
-            "POST /v1/public/pay",
+            "POST /v1/merchant/deposits",
+            "GET /v1/merchant/deposits/:id",
+            "GET /v1/merchant/webhook-signing-secret",
             "GET /v1/public/pay/:id",
+            "POST /v1/public/pay/:id/balance",
             "GET /v1/admin/merchants/stats",
         ],
-        "notes": "Site X cria invoice → usuário paga on-chain → webhook. Taxa plataforma ~0,5%.",
+        "notes": (
+            "Criar fatura: `POST /v1/merchant/deposits` (201; aliases `/deposits/create`, `/invoices`) — "
+            "`/v1/public/pay` NÃO cria nada. Resposta traz `checkoutUrl` (absoluto) + `payUrl` (relativo). "
+            "`amount` é inteiro em unidades de ledger (1e-8), nunca decimal da moeda: 25 USDT = \"2500000000\" "
+            "(decimal → 400 AMOUNT_NOT_INTEGER). `orderId` único por merchant: repetir devolve 200 com a mesma "
+            "fatura, divergir devolve 409 DUPLICATE_ORDER_ID. Taxa plataforma 0,25% — GATEWAY_FEE_BPS=25 (`feeAmount`/`netAmount`; "
+            "no webhook o campo chama `fee`). Auth: `x-api-key` ou requisição assinada, escopo `deposits`, "
+            "whitelist de IP com IP real. Confirmação on-chain: `worker::invoice_watcher` → `confirm_invoice` → "
+            "sweep. Webhook `deposit.confirmed`, `X-SatsPay-Signature: sha256=<hex>` sobre o corpo cru, com "
+            "`timestamp`/`attempt` no corpo e retry com backoff (`crates/webhooks`). Statuses: "
+            "PENDING → DETECTED → CONFIRMED | EXPIRED | CANCELLED (não existe PAID). "
+            "Duas formas de precificar: `coin`+`amount` (trava a moeda) ou `amountUsd` "
+            "(o cliente escolhe no checkout via POST /v1/public/pay/:id/select-coin). "
+            "Cotação trava na escolha; variação até o pagamento é do merchant; conversão "
+            "arredonda para cima. Endereço abandonado continua vigiado "
+            "(`merchant_invoice_addresses`). Moedas aceitas por merchant em "
+            "/v1/merchant/settings (vazio = todas as ativas; pausada nunca é oferecida). "
+            "`POST /v1/public/send` `toEmail` é o e-mail de uma conta SatsPay que já existe — "
+            "e-mail digitado e e-mail do OAuth são os dois válidos, o mesmo campo, não é endereço on-chain. "
+            "Sem conta → recusa, sem débito. Não documentar 'só OAuth' nem 'não aceita e-mail arbitrário'. "
+            "A conta dona da chave não pode ser toEmail: 400 SEND_TO_SELF, sem débito, não é falta de saldo. "
+            "Checkout com saldo da própria conta dona da fatura: 400 CANNOT_PAY_OWN_INVOICE, sem débito."
+        ),
     },
     {
         "slug": "domain-auth",
@@ -105,7 +139,13 @@ DOMAINS: list[dict] = [
             "GET /v1/auth/me",
             "POST /v1/auth/admin/login",
         ],
-        "notes": "Access token em memória; refresh HttpOnly. RequireAdmin: NUNCA short-circuit useStore (React #311).",
+        "notes": (
+            "Access token em memória; refresh HttpOnly. RequireAdmin: NUNCA short-circuit useStore (React #311). "
+            "Login/register: Turnstile + rate-limit 10/5min (Postgres). E-mail indexado por HMAC; "
+            "PII_BLANK_EMAIL troca users.email por placeholder. AuthUser relê role e exige erased_at IS NULL. "
+            "SMTP_ENABLED=false: /admin/login OTP não chega — admin operacional é login user + ADMIN_EMAILS. "
+            "Audit metadata não grava e-mail."
+        ),
     },
     {
         "slug": "domain-observability",
@@ -137,6 +177,9 @@ DOMAINS: list[dict] = [
         "notes": "Debita HOUSE. Erro 'platform inventory insufficient' é esperado quando caixa vazia.",
     },
 ]
+
+# Hand-written FEATURE.md / TC.md — generator must not wipe these.
+LOCKED_FEATURE_SLUGS = frozenset({"privacy", "domain-auth", "login", "admin-login"})
 
 AUTH_HINT = {
     "admin": "RequireAdmin — role ADMIN ou sessão admin store",
@@ -344,8 +387,26 @@ def write_feature(
 - [ ] Docs FEATURE.md + TC.md atualizados nesta pasta
 """
 
-    (d / "FEATURE.md").write_text(feature)
-    (d / "TC.md").write_text(tc_body)
+    if slug == "domain-gateway-merchant":
+        feature = feature.replace(
+            "- Saldos: nunca confiar em coluna `balance` mutável — usar ledger.\n",
+            "- Saldos: nunca confiar em coluna `balance` mutável — usar ledger.\n"
+            "- `POST /v1/public/send` `toEmail`: e-mail de conta SatsPay que já existe. "
+            "E-mail digitado pelo usuário e e-mail do OAuth são os dois válidos — o mesmo campo. "
+            "Não é endereço on-chain. Sem conta → recusa, sem débito. "
+            "Proibido documentar ou implementar \"só o e-mail do login\" / \"não aceita e-mail arbitrário\".\n"
+            "- `POST /v1/public/send` recusa `toEmail` da conta dona da chave: HTTP 400, "
+            "`code` `SEND_TO_SELF`, corpo explica, nada debitado. Não é saldo insuficiente. "
+            "Checkout `POST /v1/public/pay/:id/balance` recusa o dono da fatura: "
+            "`CANNOT_PAY_OWN_INVOICE`, nada debitado.\n",
+            1,
+        )
+
+    if slug in LOCKED_FEATURE_SLUGS and (d / "FEATURE.md").exists():
+        print(f"locked FEATURE {slug} (hand-written, not overwritten)")
+    else:
+        (d / "FEATURE.md").write_text(feature)
+        (d / "TC.md").write_text(tc_body)
     (d / "README.md").write_text(
         f"""# {title}
 
@@ -401,10 +462,34 @@ def enrich_notes(comp: str, text: str, apis: list[str], tabs: list[str]) -> str:
         bits.append("Abas Saúde / Desempenho / Erros; autoatualização; resolve/ignore/clear.")
     if "FaucetPage" in comp:
         bits.append("Turnstile action `faucet_claim`; inventário HOUSE; cooldown.")
+    if comp == "LoginPage":
+        bits.append("Turnstile `login` no 1º e 2º passo (OTP); token reset após `codeSent`.")
+    if comp == "AdminLoginPage":
+        bits.append("Turnstile `admin_login` no 1º e 2º passo (OTP); token reset após `codeSent`.")
+    if comp == "CheckoutPage":
+        bits.append(
+            "Checkout público `/pay/:id` (+ `/pay/demo`). Métodos: saldo SatsPay e cripto. "
+            "Payload sem `feeAmount`/`callbackUrl`. Taxa 0,25% do comerciante. "
+            "Rate class `public-pay` (GET 60/min, select-coin 20/min, balance 10/min)."
+        )
     if "Withdraw" in comp:
         bits.append("2FA / fee / min withdrawal; status PENDING→BROADCAST→CONFIRMED.")
     if "Deposit" in comp:
         bits.append("Endereço HD por coin; watcher no worker credita ledger.")
+    if "MerchantDeposits" in comp:
+        bits.append(
+            "Gateway: `POST /v1/merchant/deposits` (aliases `/deposits/create`, `/invoices`) → 201 com "
+            "`checkoutUrl`/`payUrl`. `amount` em unidades de ledger (1e-8). `orderId` idempotente por merchant. "
+            "Confirmação via `worker::invoice_watcher` (on-chain) ou `POST /v1/public/pay/:id/balance` (saldo). "
+            "Webhook `deposit.confirmed` assinado `sha256=<hex>`; segredo em `GET /v1/merchant/webhook-signing-secret`. "
+            "Pausa BTC/LTC/DOGE → 503 DEPOSIT_PAUSED; `/v1/public/send` não pausa."
+        )
+    if "ApiDocs" in comp:
+        bits.append(
+            "Página pública do contrato da API. Tem de bater com `crates/api-http/src/merchant_deposits.rs` e "
+            "`crates/webhooks/src/lib.rs` — guardado por `client/tests/unit/contract/merchantGateway.contract.test.ts`. "
+            "Host único em `API_BASE`; tabela de moedas vem de `client/src/shared/coins.ts`."
+        )
     if "RequireAdmin" in text or "admin" in comp.lower():
         bits.append("UI admin sempre pt-BR.")
     return " ".join(bits)
@@ -483,6 +568,7 @@ def main() -> None:
         "> (`docs/features/<slug>/FEATURE.md` + `TC.md`) e em `docs/pages/<slug>/`.",
         "",
         "Gerador: `python3 scripts/generate_feature_docs.py`",
+        "Slugs travados (não overwrite): `privacy`, `domain-auth`, `login`, `admin-login`.",
         "",
         "## Como pesquisar",
         "",

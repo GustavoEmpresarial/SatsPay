@@ -36,7 +36,7 @@
 
 ## Comportamento (bruto)
 
-Página React `LoginPage`. Chama 1 endpoint(s) via `api()`.
+Página React `LoginPage`. Chama 1 endpoint(s) via `api()`. Turnstile `login` nos dois passos. Rate-limit 10/5min. Lookup de e-mail via HMAC após blank. Doc travado no gerador.
 
 ## Notas de overview legado
 
@@ -44,7 +44,7 @@ Página React `LoginPage`. Chama 1 endpoint(s) via `api()`.
 
 Fluxo: email+senha(+captcha) → `POST /v1/auth/login` → OTP (`codeSent`) ou `setSession` → `navigate(returnTo)`.
 
-Segurança client: `resolveReturnTo`, Turnstile action `login`, `reportAuthFailure` sem senha, tokens não no localStorage.
+Segurança client: `resolveReturnTo`, Turnstile action `login` **no 1º e no 2º passo** (token one-shot; reset após `codeSent`), `reportAuthFailure` sem senha, tokens não no localStorage.
 
 
 ## Bugs / armadilhas conhecidas

@@ -5,21 +5,24 @@
 use crate::client_ip::ClientIp;
 use crate::middleware::AuthUser;
 use crate::state::AppState;
-use axum::extract::{Query, State};
+use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
+use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use bigdecimal::BigDecimal;
 use domain::auth::AuthRepo;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::str::FromStr;
+use uuid::Uuid;
 
 pub fn routes<R: AuthRepo + 'static>() -> Router<AppState<R>> {
     Router::new()
         .route("/v1/withdrawals", post(request_withdrawal::<R>).get(list_withdrawals::<R>))
         .route("/v1/withdrawals/history", get(list_withdrawals::<R>))
+        .route("/v1/withdrawals/addresses", get(list_addresses::<R>).post(add_address::<R>))
+        .route("/v1/withdrawals/addresses/:id", delete(delete_address::<R>))
 }
 
 #[derive(Deserialize)]
@@ -34,6 +37,9 @@ struct WithdrawRequest {
     totp_code: Option<String>,
     #[serde(rename = "idempotencyKey")]
     idempotency_key: Option<String>,
+    /// `PERSONAL` (default) or `MERCHANT`. Invoice net credits land on MERCHANT.
+    #[serde(rename = "walletKind", alias = "kind")]
+    wallet_kind: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -66,7 +72,7 @@ async fn request_withdrawal<R: AuthRepo>(State(state): State<AppState<R>>, user:
     let account = match state.auth.get_user_by_id(user.id).await {
         Ok(Some(u)) => u,
         Ok(None) => return (StatusCode::NOT_FOUND, Json(json!({ "error": "user not found" }))).into_response(),
-        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e.to_string() }))).into_response(),
+        Err(e) => return crate::http_error::internal_error(&e),
     };
     if state.settings.smtp_enabled || account.two_factor_enabled {
         let code = body.email_code.as_deref().or(body.totp_code.as_deref());
@@ -107,7 +113,19 @@ async fn request_withdrawal<R: AuthRepo>(State(state): State<AppState<R>>, user:
         }
     }
 
-    let result = db::withdrawals::request_withdrawal(
+    let wallet_kind = match body.wallet_kind.as_deref().unwrap_or("PERSONAL").to_ascii_uppercase().as_str() {
+        "MERCHANT" => "MERCHANT",
+        "PERSONAL" => "PERSONAL",
+        _ => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({ "error": "walletKind must be PERSONAL or MERCHANT" })),
+            )
+                .into_response();
+        }
+    };
+    let ip_fp = state.secrets.ip_fingerprint(&ip);
+    let result = db::withdrawals::request_withdrawal_from(
         &state.pool,
         user.id,
         coin,
@@ -116,6 +134,8 @@ async fn request_withdrawal<R: AuthRepo>(State(state): State<AppState<R>>, user:
         client.as_ref(),
         &ip,
         body.idempotency_key.as_deref(),
+        Some(&state.secrets),
+        wallet_kind,
     )
     .await;
 
@@ -127,12 +147,12 @@ async fn request_withdrawal<R: AuthRepo>(State(state): State<AppState<R>>, user:
                 "WITHDRAWAL_REQUESTED".into(),
                 "Withdrawal".into(),
                 Some(withdrawal.id),
-                Some(ip),
+                Some(ip_fp.clone()),
                 Some(json!({
                     "coin": coin.as_str(),
                     "amount": body.amount,
-                    "toAddress": body.to_address,
-                    "requiresApproval": withdrawal.requires_approval
+                    "requiresApproval": withdrawal.requires_approval,
+                    "walletKind": wallet_kind
                 })),
             );
             if freshly_created && !withdrawal.requires_approval {
@@ -153,7 +173,7 @@ async fn request_withdrawal<R: AuthRepo>(State(state): State<AppState<R>>, user:
                 "WITHDRAWAL_REQUEST_FAILED".into(),
                 "Withdrawal".into(),
                 None,
-                Some(ip),
+                Some(ip_fp),
                 Some(json!({ "coin": coin.as_str(), "reason": e.to_string() })),
             );
             (StatusCode::BAD_REQUEST, Json(json!({ "error": e.to_string() }))).into_response()
@@ -195,7 +215,7 @@ async fn list_withdrawals<R: AuthRepo>(
     let coin_filter = q.coin.and_then(|c| shared::COINS.into_iter().find(|coin| coin.as_str().eq_ignore_ascii_case(&c)));
     let limit = q.limit.unwrap_or(50).clamp(1, 100);
 
-    match db::withdrawals::list_user_withdrawals(&state.pool, user.id, coin_filter, limit).await {
+    match db::withdrawals::list_user_withdrawals(&state.pool, user.id, coin_filter, limit, Some(&state.secrets)).await {
         Ok(withdrawals) => {
             let items: Vec<WithdrawalHistoryItemResp> = withdrawals
                 .into_iter()
@@ -214,6 +234,83 @@ async fn list_withdrawals<R: AuthRepo>(
                 .collect();
             Json(serde_json::json!({ "withdrawals": items })).into_response()
         }
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "error": e.to_string() }))).into_response(),
+        Err(e) => crate::http_error::internal_error(&e),
+    }
+}
+
+#[derive(Serialize)]
+struct AddressBookItemResp {
+    id: String,
+    coin: String,
+    label: String,
+    address: String,
+    #[serde(rename = "createdAt")]
+    created_at: String,
+}
+
+#[derive(Deserialize)]
+struct AddAddressBody {
+    coin: String,
+    label: String,
+    address: String,
+}
+
+async fn list_addresses<R: AuthRepo>(State(state): State<AppState<R>>, user: AuthUser) -> Response {
+    match db::withdrawals::list_address_book(&state.pool, user.id).await {
+        Ok(rows) => {
+            let addresses: Vec<AddressBookItemResp> = rows
+                .into_iter()
+                .map(|r| AddressBookItemResp {
+                    id: r.id.to_string(),
+                    coin: r.coin,
+                    label: r.label,
+                    address: r.address,
+                    created_at: r.created_at.to_rfc3339(),
+                })
+                .collect();
+            Json(json!({ "addresses": addresses })).into_response()
+        }
+        Err(e) => crate::http_error::internal_error(&e),
+    }
+}
+
+async fn add_address<R: AuthRepo>(
+    State(state): State<AppState<R>>,
+    user: AuthUser,
+    Json(body): Json<AddAddressBody>,
+) -> Response {
+    let Ok(coin) = body.coin.parse::<shared::Coin>() else {
+        return (StatusCode::BAD_REQUEST, Json(json!({ "error": "unknown coin" }))).into_response();
+    };
+    match db::withdrawals::add_address_book(&state.pool, user.id, coin, &body.label, &body.address).await {
+        Ok(row) => (
+            StatusCode::CREATED,
+            Json(AddressBookItemResp {
+                id: row.id.to_string(),
+                coin: row.coin,
+                label: row.label,
+                address: row.address,
+                created_at: row.created_at.to_rfc3339(),
+            }),
+        )
+            .into_response(),
+        Err(db::withdrawals::WithdrawalsError::InvalidAddress) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": { "code": "INVALID_ADDRESS", "message": "Endereço ou rótulo inválido." } })),
+        )
+            .into_response(),
+        Err(e) => crate::http_error::internal_error(&e),
+    }
+}
+
+async fn delete_address<R: AuthRepo>(
+    State(state): State<AppState<R>>,
+    user: AuthUser,
+    Path(id): Path<Uuid>,
+) -> Response {
+    match db::withdrawals::delete_address_book(&state.pool, user.id, id).await {
+        Ok(true) => StatusCode::NO_CONTENT.into_response(),
+        Ok(false) => (StatusCode::NOT_FOUND, Json(json!({ "error": "not found" }))).into_response(),
+        Err(e) => crate::http_error::internal_error(&e),
     }
 }

@@ -70,6 +70,7 @@ fn main() {
     println!("hot BTC {}", backup["hot"]["coins"]["BTC"]["address"]);
     println!("hot POL {}", backup["hot"]["coins"]["POL"]["address"]);
     println!("hot SOL {}", backup["hot"]["coins"]["SOL"]["address"]);
+    println!("hot ZER {}", backup["hot"]["coins"]["ZER"]["address"]);
 }
 
 fn chrono_like_now() -> String {

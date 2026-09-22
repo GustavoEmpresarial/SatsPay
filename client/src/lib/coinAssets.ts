@@ -1,24 +1,29 @@
-import type { Coin } from '@/shared';
+import { COINS, type Coin } from '@/shared';
 
-const BASE = 'https://cdn.jsdelivr.net/gh/atomiclabs/cryptocurrency-icons@1a63530be6e374711a8554f31b17e4cb92c25fa5/svg/color';
-
-const slug: Record<string, string> = {
-  BTC: 'btc',
-  LTC: 'ltc',
-  DOGE: 'doge',
-  BCH: 'bch',
-  POL: 'matic',
-  DGB: 'dgb',
-  SOL: 'sol',
-  USDT: 'usdt',
-  USDC: 'usdc',
-};
+/**
+ * Coin icons are served from this origin (`client/public/sdk/coins/`, also
+ * exposed by `GET /v1/public/coins` as `logoUrl`) instead of a third-party
+ * CDN: the hosted checkout should not depend on someone else's uptime to
+ * render, and merchants need an icon URL they are allowed to hotlink.
+ *
+ * `/sdk/` is served with `Access-Control-Allow-Origin: *` (see
+ * `client/nginx.conf`), so these are safe to embed cross-origin.
+ */
+const BASE = '/sdk/coins';
 
 export function coinLogo(coin: Coin | string): string {
   const sym = String(coin || '').toUpperCase();
-  if (sym === 'SOL') {
-    return 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/So11111111111111111111111111111111111111112/logo.png';
-  }
-  return `${BASE}/${slug[sym] || 'generic'}.svg`;
+  // Only symbols we actually ship an icon for; anything else would 404 and
+  // render as a broken image.
+  const known = (COINS as readonly string[]).includes(sym);
+  const file = known ? sym.toLowerCase() : 'generic';
+  // PEPE is a raster mark. An SVG that embeds that image stays blank when
+  // used as <img>, which is how every coin icon on the site is rendered.
+  const ext = sym === 'PEPE' ? 'png' : 'svg';
+  return `${BASE}/${file}.${ext}`;
 }
 
+/** Absolute variant, for anything rendered outside this origin (emails, SDK). */
+export function coinLogoAbsolute(coin: Coin | string, origin: string): string {
+  return `${origin.replace(/\/$/, '')}${coinLogo(coin)}`;
+}
