@@ -23,6 +23,11 @@ struct Limit {
     window: Duration,
 }
 
+fn public_pay_suffix(path: &str) -> Option<&str> {
+    path.strip_prefix("/v1/public/pay")
+        .or_else(|| path.strip_prefix("/public/pay"))
+}
+
 fn classify(method: &axum::http::Method, path: &str) -> (&'static str, Limit) {
     const MIN: u64 = 60;
     if path == "/v1/auth/login" || path == "/v1/auth/register" || path == "/v1/auth/admin/login" {
@@ -34,6 +39,16 @@ fn classify(method: &axum::http::Method, path: &str) -> (&'static str, Limit) {
     {
         // Public ingest — tighter than generic /v1 to limit flood/abuse.
         ("telemetry-ingest", Limit { max: 60, window: Duration::from_secs(MIN) })
+    } else if let Some(rest) = public_pay_suffix(path) {
+        if method == axum::http::Method::POST && rest.ends_with("/balance") {
+            ("public-pay-balance", Limit { max: 10, window: Duration::from_secs(MIN) })
+        } else if method == axum::http::Method::POST && rest.ends_with("/select-coin") {
+            ("public-pay-select", Limit { max: 20, window: Duration::from_secs(MIN) })
+        } else if method == axum::http::Method::GET {
+            ("public-pay-get", Limit { max: 60, window: Duration::from_secs(MIN) })
+        } else {
+            ("api", Limit { max: 2400, window: Duration::from_secs(5 * MIN) })
+        }
     } else if path.starts_with("/v1/withdrawals") && method == axum::http::Method::POST {
         ("withdrawals-post", Limit { max: 120, window: Duration::from_secs(5 * MIN) })
     } else if path.starts_with("/v1/withdrawals") {
@@ -48,7 +63,15 @@ fn classify(method: &axum::http::Method, path: &str) -> (&'static str, Limit) {
 }
 
 fn uses_shared_store(class: &str) -> bool {
-    matches!(class, "auth-credentials" | "faucet-claim" | "telemetry-ingest" | "withdrawals-post")
+    matches!(
+        class,
+        "auth-credentials"
+            | "faucet-claim"
+            | "telemetry-ingest"
+            | "withdrawals-post"
+            | "public-pay-select"
+            | "public-pay-balance"
+    )
 }
 
 struct Counters {
@@ -233,6 +256,30 @@ mod tests {
         assert_eq!(class, "auth-session");
         let (class, _) = classify(&Method::GET, "/healthz");
         assert_eq!(class, "other");
+    }
+
+    #[test]
+    fn classify_public_pay_is_tighter_than_generic_api() {
+        let (class, limit) = classify(&Method::GET, "/v1/public/pay/550e8400-e29b-41d4-a716-446655440000");
+        assert_eq!(class, "public-pay-get");
+        assert_eq!(limit.max, 60);
+        assert!(!uses_shared_store(class));
+
+        let (alias, _) = classify(&Method::GET, "/public/pay/demo");
+        assert_eq!(alias, "public-pay-get");
+
+        let (sel, sel_limit) = classify(&Method::POST, "/v1/public/pay/x/select-coin");
+        assert_eq!(sel, "public-pay-select");
+        assert_eq!(sel_limit.max, 20);
+        assert!(uses_shared_store(sel));
+
+        let (demo_sel, _) = classify(&Method::POST, "/public/pay/demo/select-coin");
+        assert_eq!(demo_sel, "public-pay-select");
+
+        let (bal, bal_limit) = classify(&Method::POST, "/v1/public/pay/x/balance");
+        assert_eq!(bal, "public-pay-balance");
+        assert_eq!(bal_limit.max, 10);
+        assert!(uses_shared_store(bal));
     }
 
     #[test]

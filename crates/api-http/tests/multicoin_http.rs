@@ -177,8 +177,9 @@ async fn customer_picks_a_coin_and_the_quote_locks(pool: PgPool) {
     assert_eq!(picked["coin"], "POL");
     assert_eq!(picked["amount"], "5555555556");
     assert!(picked["depositAddress"].as_str().unwrap().starts_with("0x"));
-    // The wallet URI must carry the coin quantity, not the ledger integer.
-    assert!(picked["qrCode"].as_str().unwrap().contains("amount=55.55555556"), "{picked}");
+    let qr = picked["qrCode"].as_str().unwrap();
+    assert_eq!(qr, picked["depositAddress"].as_str().unwrap());
+    assert!(!qr.contains("ethereum:") && !qr.contains("pol:"), "{picked}");
 
     // Picking again is idempotent: same address, no second HD index burned.
     let (st, again) = send(

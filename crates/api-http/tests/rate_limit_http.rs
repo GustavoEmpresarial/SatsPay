@@ -42,3 +42,31 @@ async fn login_rate_limit_returns_429(pool: PgPool) {
     }
     panic!("expected 429 within 11 login attempts, last={last_status}");
 }
+
+#[sqlx::test(migrations = "../db/migrations")]
+async fn public_pay_get_rate_limit_returns_429(pool: PgPool) {
+    let state = common::test_state(pool);
+    let ip = "198.51.100.51";
+    let mut last_status = axum::http::StatusCode::OK;
+    for _ in 0..61 {
+        let response = api_http::app_without_metrics(state.clone())
+            .oneshot(
+                axum::http::Request::builder()
+                    .method("GET")
+                    .uri("/v1/public/pay/00000000-0000-0000-0000-000000000001")
+                    .header("x-real-ip", ip)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        last_status = response.status();
+        if last_status == axum::http::StatusCode::TOO_MANY_REQUESTS {
+            let bytes = response.into_body().collect().await.unwrap().to_bytes();
+            let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+            assert_eq!(v["code"], "RATE_LIMITED");
+            return;
+        }
+    }
+    panic!("expected 429 within 61 public-pay GETs, last={last_status}");
+}

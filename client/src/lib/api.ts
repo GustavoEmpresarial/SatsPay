@@ -138,7 +138,7 @@ export function adaptRustResponse(path: string, data: unknown): unknown {
     };
   }
 
-  // Wallet list: bare array → { wallets: [...] } (query ?kind= is ignored by Rust; always PERSONAL)
+  // Wallet list: bare array → { wallets: [...] }. kind=PERSONAL|MERCHANT|DEVELOPER is honored by the API.
   if ((path === '/wallet' || path.startsWith('/wallet?')) && Array.isArray(data)) {
     return { wallets: data };
   }

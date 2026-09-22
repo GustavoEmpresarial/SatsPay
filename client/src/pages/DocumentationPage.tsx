@@ -208,13 +208,24 @@ export function DocumentationPage() {
               <div className="prose text-sm text-ink-muted space-y-4">
                 <p>
                   O <strong>Swap</strong> é custodial: você troca saldo na conta; a plataforma executa a rota on-chain via{' '}
-                  <strong>SwapKit</strong> (agrega THORChain, Chainflip, Mayan, Jupiter, etc.) ou, quando não há rota DEX
-                  (ex.: DGB), via pool interno <strong>SatsPay Liquidity</strong>.
+                  <strong>1inch / SwapKit</strong>, <strong>Relay</strong> (Polygon ↔ SOL) ou <strong>ChangeNOW</strong> (L1).
                 </p>
+                <h3 className="text-base font-bold text-ink pt-2">Swap vs Bridge</h3>
+                <ul className="list-disc pl-5 space-y-1">
+                  <li><strong>Swap</strong> (aba Swap): mesma rede — só POL ↔ USDT ↔ USDC na Polygon (DEX / 1inch).</li>
+                  <li><strong>Bridge</strong> (aba Bridge): redes distintas — Solana ↔ Polygon (Relay) ou L1 nativa ↔ outra moeda (ChangeNOW).</li>
+                </ul>
+                <h3 className="text-base font-bold text-ink pt-2">Rede de cada moeda na SatsPay</h3>
+                <ul className="list-disc pl-5 space-y-1">
+                  <li><strong>POL, USDT, USDC:</strong> Polygon PoS (não Ethereum).</li>
+                  <li><strong>SOL:</strong> Solana.</li>
+                  <li><strong>BTC, LTC, DOGE, BCH, DGB:</strong> rede nativa de cada uma (ChangeNOW).</li>
+                  <li><strong>PEPE:</strong> BNB Smart Chain (BEP-20). Depósito/saque ativos; gas em BNB. Swap cross-chain em breve.</li>
+                </ul>
                 <h3 className="text-base font-bold text-ink pt-2">Taxas transparentes</h3>
                 <ul className="list-disc pl-5 space-y-1">
                   <li><strong>Taxa de rede / provedor:</strong> inbound, network, outbound, liquidity — exibidas no quote.</li>
-                  <li><strong>Taxa SatsPay:</strong> 0,25% (same-chain) ou 0,50% (cross-chain), via affiliate SwapKit.</li>
+                  <li><strong>Taxa SatsPay:</strong> 0,25% (same-chain e cross-chain) — diferencial da plataforma.</li>
                 </ul>
                 <h3 className="text-base font-bold text-ink pt-2">Idempotência</h3>
                 <p>
@@ -300,6 +311,43 @@ export function DocumentationPage() {
                   automatizar pagamentos. As duas usam a mesma credencial de servidor.
                 </p>
 
+                <h3 className="text-base font-bold text-ink pt-2">Enviar para a conta SatsPay do seu cliente</h3>
+                <p>
+                  <code>POST /v1/public/send</code> debita a sua carteira comercial e credita a conta
+                  SatsPay do e-mail em <code>toEmail</code>. É transferência interna: sem taxa de rede
+                  e sem endereço de carteira. A chave precisa do escopo <code>send</code>.
+                </p>
+                <p>
+                  Esse e-mail é o da conta que <strong>recebe</strong>. No seu produto você pode pegá-lo
+                  dos dois jeitos abaixo. Os dois são válidos, e pode oferecer os dois ao mesmo tempo.
+                  O valor que você colocar em <code>toEmail</code> é o que a SatsPay usa.
+                </p>
+                <ol className="list-decimal pl-5 space-y-1.5 text-sm">
+                  <li>
+                    <strong>O cliente digita.</strong> Um campo de texto no seu site ou app. Ele escreve
+                    o e-mail da conta SatsPay dele. Você envia esse texto em <code>toEmail</code>.
+                  </li>
+                  <li>
+                    <strong>O cliente entra com SatsPay.</strong> O botão Login com SatsPay. Depois da
+                    troca do código, <code>GET /v1/oauth/userinfo</code> devolve <code>email</code> com{' '}
+                    <code>email_verified: true</code>. Esse e-mail também vai em <code>toEmail</code>.
+                  </li>
+                </ol>
+                <p>
+                  Não coloque o e-mail da sua própria chave de API, e não coloque endereço{' '}
+                  <code>bc1…</code>, <code>t1…</code> ou qualquer outra carteira: esta rota não saca
+                  on-chain. Se ninguém tiver conta SatsPay com aquele e-mail, a chamada falha com{' '}
+                  <code>TARGET_INELIGIBLE</code> e <strong>nada é debitado</strong>.
+                </p>
+                <p>
+                  O <code>toEmail</code> também não pode ser a conta que emitiu a chave. A API responde{' '}
+                  <code>400</code> com <code>code: SEND_TO_SELF</code> e o texto{' '}
+                  <code>cannot send to the SatsPay account that owns this API key</code>. Nada é debitado.
+                  Não é falta de saldo. Acontece quando quem recebe é o mesmo e-mail do comerciante — para
+                  testar, use outra conta SatsPay. Leia o campo <code>error</code> e o <code>code</code>;
+                  não substitua por uma mensagem genérica.
+                </p>
+
                 <h3 className="text-base font-bold text-ink pt-2">Gateway de cobranças</h3>
                 <p>
                   O seu backend cria a fatura, o cliente paga numa página sob o domínio oficial, e você
@@ -369,6 +417,9 @@ export function DocumentationPage() {
                   <Link to="/docs?tab=deposits" className="btn-secondary text-xs">
                     Gateway de cobranças →
                   </Link>
+                  <Link to="/docs?tab=payouts" className="btn-secondary text-xs">
+                    API de envios →
+                  </Link>
                   <Link to="/pay/demo" className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 font-bold text-xs px-3.5 py-2 flex items-center gap-1.5 transition-all">
                     <i className="bi bi-qr-code" />
                     <span>Ver o checkout de demonstração</span>
@@ -399,6 +450,9 @@ export function DocumentationPage() {
               <div className="prose text-sm text-ink-muted space-y-6">
                 <p>
                   O <strong>Login com SatsPay</strong> funciona de maneira análoga ao <em>Google Sign-In</em> ou <em>Apple ID</em>. Seus clientes e jogadores podem se cadastrar e efetuar login em sua plataforma com 1 clique utilizando a conta SatsPay verificada, sem necessidade de gerenciar senhas ou expor credenciais sensíveis.
+                </p>
+                <p>
+                  O <code>email</code> que volta em <code>/v1/oauth/userinfo</code> já está verificado. Ele serve como <code>toEmail</code> em <code>POST /v1/public/send</code> quando você for pagar essa conta. Se preferir, o cliente também pode digitar o e-mail da conta SatsPay dele num campo seu — os dois caminhos mandam para o mesmo campo. Veja a <Link to="/docs?tab=payouts" className="font-bold text-bitcoin hover:underline">API de envios</Link>.
                 </p>
 
                 {/* 3 STEPS GRID */}
@@ -499,6 +553,8 @@ function onSatsPaySignIn(response) {
   const profile = await userRes.json();
 
   // profile contém: { sub, id, username, email, email_verified, picture }
+  // profile.email (email_verified === true) pode ir em toEmail no POST /v1/public/send.
+  // O cliente também pode digitar outro e-mail de conta SatsPay. Os dois servem.
   console.log('Usuário autenticado:', profile.username, profile.email);
   res.json({ success: true, user: profile });
 });`}

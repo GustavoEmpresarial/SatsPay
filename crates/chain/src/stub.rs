@@ -33,9 +33,10 @@ fn validator_for(coin: Coin) -> Regex {
         Coin::Ltc => r"^ltc1q[0-9a-z]{20,60}$",
         Coin::Doge => r"^D[1-9A-HJ-NP-Za-km-z]{25,40}$",
         Coin::Bch => r"^bitcoincash:q[0-9a-z]{38,50}$",
-        Coin::Pol | Coin::Usdt | Coin::Usdc => r"^0x[0-9a-fA-F]{40}$",
+        Coin::Pol | Coin::Usdt | Coin::Usdc | Coin::Pepe => r"^0x[0-9a-fA-F]{40}$",
         Coin::Dgb => r"^dgb1q[0-9a-z]{20,60}$",
         Coin::Sol => r"^[1-9A-HJ-NP-Za-km-z]{32,44}$",
+        Coin::Zer => r"^t1[1-9A-HJ-NP-Za-km-z]{20,}$",
     };
     Regex::new(pattern).expect("static regex is valid")
 }
@@ -68,8 +69,9 @@ impl ChainClient for StubClient {
             Coin::Ltc => format!("ltc1q{}", &h[..38]),
             Coin::Doge => format!("D{}", safe_body(&h, 33)),
             Coin::Bch => format!("bitcoincash:q{}", safe_body(&h, 41)),
-            Coin::Pol | Coin::Usdt | Coin::Usdc => format!("0x{}", &h[..40]),
+            Coin::Pol | Coin::Usdt | Coin::Usdc | Coin::Pepe => format!("0x{}", &h[..40]),
             Coin::Dgb => format!("dgb1q{}", &h[..38]),
+            Coin::Zer => format!("t1{}", safe_body(&h, 33)),
             Coin::Sol => {
                 let mut pk = [0u8; 32];
                 let raw = hex::decode(&h).unwrap_or_default();

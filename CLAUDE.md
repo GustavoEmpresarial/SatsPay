@@ -34,3 +34,4 @@ Espelhos no repo:
 - Nunca `useStoreA() || useStoreB()` — React #311
 - HTML SPA: `Cache-Control: no-store` (`client/nginx.conf`)
 - Saldos só via ledger SUM
+- `POST /v1/public/send` campo `toEmail`: e-mail da conta SatsPay que recebe. Digitado ou o `email` verificado do Login com SatsPay — o mesmo campo. Sem conta → `400 TARGET_INELIGIBLE`, sem débito. Conta dona da chave → `400 SEND_TO_SELF` (`error` explica; não é falta de saldo), sem débito. Checkout `POST /v1/public/pay/:id/balance` da própria fatura → `400 CANNOT_PAY_OWN_INVOICE`, sem débito. Sempre `{ "error", "code" }`. Detalhe: `docs/api/public-api-hmac.md` §4.

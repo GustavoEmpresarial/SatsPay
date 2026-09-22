@@ -23,20 +23,20 @@ async fn main() {
         sqlx::query_scalar("INSERT INTO users (email, password_hash, role) VALUES ($1, $2, 'ADMIN') RETURNING id").bind(&admin_email).bind(&password_hash).fetch_one(&pool).await.unwrap();
 
     // --- Merchant ---
-    let status = db::merchant::get_status(&pool, user_id).await.unwrap();
+    let status = db::merchant::get_status(&pool, None, user_id).await.unwrap();
     assert_eq!(status.status, "NONE");
 
-    let applied = db::merchant::apply(&pool, user_id, "Acme Faucet", "https://acme.example", "A faucet site").await.unwrap();
+    let applied = db::merchant::apply(&pool, None, user_id, "Acme Faucet", "https://acme.example", "A faucet site").await.unwrap();
     assert_eq!(applied.status, "PENDING");
     println!("merchant applied status={}", applied.status);
 
     // Double apply while PENDING must fail.
-    let double_apply = db::merchant::apply(&pool, user_id, "Acme Faucet 2", "https://acme2.example", "desc").await;
+    let double_apply = db::merchant::apply(&pool, None, user_id, "Acme Faucet 2", "https://acme2.example", "desc").await;
     assert!(double_apply.is_err());
     println!("double-apply correctly rejected: {:?}", double_apply.err());
 
     db::merchant::approve(&pool, user_id, admin_id).await.unwrap();
-    let after_approve = db::merchant::get_status(&pool, user_id).await.unwrap();
+    let after_approve = db::merchant::get_status(&pool, None, user_id).await.unwrap();
     assert_eq!(after_approve.status, "APPROVED");
     println!("merchant approved status={}", after_approve.status);
 
@@ -56,12 +56,12 @@ async fn main() {
     let registry = ChainRegistry::build("development", true).unwrap();
     let client = registry.get(Coin::Btc);
     // Amount >= BTC approval_threshold (1_000_000) forces PENDING (requires_approval).
-    let (withdrawal, _created) = db::withdrawals::request_withdrawal(&pool, user_id, Coin::Btc, "bc1qsomevaliddestinationaddressxxxxxxxxxxxxxxx", BigDecimal::from(2_000_000u64), client.as_ref(), "127.0.0.1", None).await.unwrap();
+    let (withdrawal, _created) = db::withdrawals::request_withdrawal(&pool, user_id, Coin::Btc, "bc1qsomevaliddestinationaddressxxxxxxxxxxxxxxx", BigDecimal::from(2_000_000u64), client.as_ref(), "127.0.0.1", None, None).await.unwrap();
     assert_eq!(withdrawal.status, "PENDING");
     assert!(withdrawal.requires_approval);
     println!("withdrawal requires approval, status={}", withdrawal.status);
 
-    let pending = db::admin::list_pending_withdrawals(&pool).await.unwrap();
+    let pending = db::admin::list_pending_withdrawals(&pool, None).await.unwrap();
     assert!(pending.iter().any(|w| w.id == withdrawal.id));
 
     db::admin::approve_withdrawal(&pool, withdrawal.id, admin_id, Some("127.0.0.1")).await.unwrap();
@@ -75,7 +75,7 @@ async fn main() {
     println!("re-approve correctly rejected: {:?}", reapprove.err());
 
     // Process the broadcast (worker's job) then confirm settlement.
-    db::withdrawals::process_broadcast(&pool, withdrawal.id, &registry).await.unwrap();
+    db::withdrawals::process_broadcast(&pool, withdrawal.id, &registry, None).await.unwrap();
     let final_status: String = sqlx::query_scalar("SELECT status::text FROM withdrawals WHERE id = $1").bind(withdrawal.id).fetch_one(&pool).await.unwrap();
     assert_eq!(final_status, "CONFIRMED");
     println!("withdrawal broadcast+confirmed, status={final_status}");
@@ -108,11 +108,11 @@ async fn main() {
     assert_eq!(authed.id, issued.id);
     db::public_api::require_scope(&authed, "send").unwrap();
 
-    let send_ref = db::public_api::send_to_user(&pool, user_id, issued.id, Coin::Btc, &user2_email, BigDecimal::from(1_000_000u64), "smoke-send-1", 100).await.unwrap();
+    let send_ref = db::public_api::send_to_user(&pool, &secrets, user_id, issued.id, Coin::Btc, &user2_email, BigDecimal::from(1_000_000u64), "smoke-send-1", 100).await.unwrap();
     println!("sent via public API, reference={send_ref}");
 
     // Replay with the same idempotency key must not double-send.
-    let send_ref2 = db::public_api::send_to_user(&pool, user_id, issued.id, Coin::Btc, &user2_email, BigDecimal::from(1_000_000u64), "smoke-send-1", 100).await.unwrap();
+    let send_ref2 = db::public_api::send_to_user(&pool, &secrets, user_id, issued.id, Coin::Btc, &user2_email, BigDecimal::from(1_000_000u64), "smoke-send-1", 100).await.unwrap();
     assert_eq!(send_ref, send_ref2);
     let dev_balance: BigDecimal = sqlx::query_scalar("SELECT COALESCE(SUM(amount),0) FROM ledger_entries WHERE wallet_id = $1").bind(dev_wallet).fetch_one(&pool).await.unwrap();
     println!("dev wallet balance after ONE send (replay must not double-debit): {dev_balance}");

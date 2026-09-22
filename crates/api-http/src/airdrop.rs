@@ -1,7 +1,6 @@
 //! Módulo HTTP para gestão de Airdrop ($SATS Seasons & Leaderboard).
 
 use axum::extract::State;
-use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{Json, Router};
@@ -26,11 +25,7 @@ async fn get_overview<R: AuthRepo>(
 ) -> Response {
     match db::airdrop::get_user_airdrop_profile(&state.pool, user.id).await {
         Ok(profile) => Json(profile).into_response(),
-        Err(e) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "error": e.to_string() })),
-        )
-            .into_response(),
+        Err(e) => crate::http_error::internal_error(&e),
     }
 }
 
@@ -40,11 +35,7 @@ async fn get_logs<R: AuthRepo>(
 ) -> Response {
     match db::airdrop::list_user_point_logs(&state.pool, user.id, 50).await {
         Ok(logs) => Json(json!({ "logs": logs })).into_response(),
-        Err(e) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "error": e.to_string() })),
-        )
-            .into_response(),
+        Err(e) => crate::http_error::internal_error(&e),
     }
 }
 
@@ -54,11 +45,7 @@ async fn get_leaderboard<R: AuthRepo>(
 ) -> Response {
     match db::airdrop::get_airdrop_leaderboard(&state.pool, 100).await {
         Ok(list) => Json(json!({ "leaderboard": list })).into_response(),
-        Err(e) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "error": e.to_string() })),
-        )
-            .into_response(),
+        Err(e) => crate::http_error::internal_error(&e),
     }
 }
 

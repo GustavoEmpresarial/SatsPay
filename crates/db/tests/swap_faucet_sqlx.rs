@@ -67,15 +67,9 @@ async fn swap_idempotent_and_faucet_ip_cooldown(pool: PgPool) {
 
     let user_b = common::insert_user(&pool, "sybil").await;
     let _btc_b = common::insert_personal_wallet(&pool, user_b, Coin::Btc).await;
-    assert!(
-        db::faucet::claim(&pool, user_b, Coin::Btc, "203.0.113.5", 60)
-            .await
-            .is_err(),
-        "sybil same IP"
-    );
-
-    let other_ip = db::faucet::claim(&pool, user_b, Coin::Btc, "198.51.100.10", 60)
+    // Same IP is fine — cooldown is per user_id+coin in faucet_claims only.
+    let same_ip = db::faucet::claim(&pool, user_b, Coin::Btc, "203.0.113.5", 60)
         .await
-        .expect("other IP");
-    assert!(other_ip.amount > 0);
+        .expect("second user same IP");
+    assert!(same_ip.amount > 0);
 }

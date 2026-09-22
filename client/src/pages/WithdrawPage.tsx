@@ -1,12 +1,13 @@
 import { useState, useMemo, useEffect } from 'react';
 import { useSearchParams, useNavigate, Link } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'framer-motion';
 import { api } from '../lib/api.js';
 import { formatApiError } from '../lib/formatError.js';
 import { coinLogo } from '../lib/coinAssets.js';
 import { useAuthStore } from '../stores/auth.js';
-import { COIN_CONFIG, COINS, defaultDepositWithdrawCoin, formatAmount, isCoin, isDepositWithdrawPaused, safeBigInt, type Coin, type WalletBalance } from '@/shared';
+import { COIN_CONFIG, COINS, defaultDepositWithdrawCoin, depositWithdrawActiveCoins, depositWithdrawPausedCoinList, formatAmount, isCoin, isDepositWithdrawPaused, safeBigInt, type Coin, type WalletBalance } from '@/shared';
 import { Modal } from '../components/Modal.js';
 import { getExplorerTxUrl } from '../lib/chainExplorers.js';
 import { canWithdraw, isPlausibleAddress, parseHumanAmount } from '../lib/amountInput.js';
@@ -35,9 +36,8 @@ export interface WithdrawalHistoryItem {
   updatedAt: string;
 }
 
-const STORAGE_KEY = 'bitcosats_saved_addresses';
-
 export function WithdrawPage() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const qc = useQueryClient();
   const user = useAuthStore((s) => s.user);
@@ -56,14 +56,22 @@ export function WithdrawPage() {
 
   useEffect(() => {
     const urlCoin = searchParams.get('coin')?.toUpperCase();
-    if (urlCoin && isCoin(urlCoin) && urlCoin !== coin) {
-      setCoin(urlCoin);
+    const next = defaultDepositWithdrawCoin(urlCoin);
+    if (next !== coin) {
+      setCoin(next);
+    }
+    if (urlCoin && isCoin(urlCoin) && isDepositWithdrawPaused(urlCoin) && next !== urlCoin) {
+      setSearchParams((prev) => {
+        const p = new URLSearchParams(prev);
+        p.set('coin', next);
+        return p;
+      }, { replace: true });
     }
     const urlTab = searchParams.get('tab');
     if (urlTab === 'history' || urlTab === 'withdraw') {
       setActiveTab(urlTab);
     }
-  }, [searchParams, coin]);
+  }, [searchParams, coin, setSearchParams]);
 
   const [address, setAddress] = useState('');
   const [inputVal, setInputVal] = useState('');
@@ -75,18 +83,41 @@ export function WithdrawPage() {
   // Address book / Whitelist state
   const [showAddressBook, setShowAddressBook] = useState(false);
   const [newLabel, setNewLabel] = useState('');
-  const [savedAddresses, setSavedAddresses] = useState<SavedAddress[]>(() => {
-    try {
-      const stored = localStorage.getItem(`${STORAGE_KEY}_${user?.id || 'guest'}`);
-      return stored ? JSON.parse(stored) : [];
-    } catch {
-      return [];
-    }
+
+  const [walletKind, setWalletKind] = useState<'PERSONAL' | 'MERCHANT'>('PERSONAL');
+
+  const addressBookQ = useQuery({
+    queryKey: ['withdrawal-addresses'],
+    queryFn: () => api<{ addresses: SavedAddress[] }>('/withdrawals/addresses'),
+    enabled: Boolean(user),
+  });
+  const savedAddresses = addressBookQ.data?.addresses ?? [];
+
+  const saveAddressMut = useMutation({
+    mutationFn: (item: { coin: Coin; label: string; address: string }) =>
+      api<SavedAddress>('/withdrawals/addresses', { method: 'POST', json: item }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['withdrawal-addresses'] });
+      setNewLabel('');
+      setShowAddressBook(false);
+    },
+    onError: (err) => setMsg({ type: 'error', text: formatApiError(err) }),
+  });
+
+  const deleteAddressMut = useMutation({
+    mutationFn: (id: string) => api(`/withdrawals/addresses/${id}`, { method: 'DELETE' }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['withdrawal-addresses'] }),
+    onError: (err) => setMsg({ type: 'error', text: formatApiError(err) }),
   });
 
   const walletsQ = useQuery({
     queryKey: ['wallets', 'PERSONAL'],
     queryFn: () => api<WalletsResp>('/wallet?kind=PERSONAL'),
+    enabled: Boolean(user),
+  });
+  const merchantQ = useQuery({
+    queryKey: ['wallets', 'MERCHANT'],
+    queryFn: () => api<WalletsResp>('/wallet?kind=MERCHANT'),
     enabled: Boolean(user),
   });
 
@@ -117,15 +148,29 @@ export function WithdrawPage() {
       return acc;
     }, {});
   }, [walletsQ.data]);
+  const merchantMap = useMemo(() => {
+    return (merchantQ.data?.wallets ?? []).reduce<Record<string, WalletBalance>>((acc, w) => {
+      acc[w.coin] = w;
+      return acc;
+    }, {});
+  }, [merchantQ.data]);
 
-  const currentBal = walletMap[coin] ? safeBigInt(walletMap[coin]!.balance) : 0n;
+  const personalBal = walletMap[coin] ? safeBigInt(walletMap[coin]!.balance) : 0n;
+  const merchantBal = merchantMap[coin] ? safeBigInt(merchantMap[coin]!.balance) : 0n;
+  const currentBal = walletKind === 'MERCHANT' ? merchantBal : personalBal;
+
+  useEffect(() => {
+    if (merchantBal > 0n && personalBal === 0n) setWalletKind('MERCHANT');
+    else if (merchantBal === 0n) setWalletKind('PERSONAL');
+  }, [coin, merchantBal, personalBal]);
   const cfg = COIN_CONFIG[coin] || COIN_CONFIG.BTC;
   const fee = cfg.withdrawalFee || 0n;
   const faucetFee = cfg.faucetPayFee || 0n;
   const withdrawPaused = isDepositWithdrawPaused(coin);
 
-  // Sync URL search params
+  // Sync URL search params — only active (non-paused) coins are selectable
   const handleSelectCoin = (newCoin: Coin) => {
+    if (isDepositWithdrawPaused(newCoin)) return;
     setCoin(newCoin);
     setSearchParams((prev) => {
       const p = new URLSearchParams(prev);
@@ -136,6 +181,9 @@ export function WithdrawPage() {
     setMsg(null);
     setIsCoinSelectorOpen(false);
   };
+
+  const selectableCoins = useMemo(() => depositWithdrawActiveCoins(), []);
+  const pausedCoins = useMemo(() => depositWithdrawPausedCoinList(), []);
 
   const switchTab = (tab: 'withdraw' | 'history') => {
     setActiveTab(tab);
@@ -156,32 +204,17 @@ export function WithdrawPage() {
 
   const totalDebit = smallestAmount > 0n ? smallestAmount + fee : 0n;
 
-  const saveToStorage = (updated: SavedAddress[]) => {
-    setSavedAddresses(updated);
-    try {
-      localStorage.setItem(`${STORAGE_KEY}_${user?.id || 'guest'}`, JSON.stringify(updated));
-    } catch {
-      /* localStorage may throw in private browsing */
-    }
-  };
-
   const handleSaveCurrentAddress = () => {
     if (!address.trim() || !newLabel.trim()) return;
-    const item: SavedAddress = {
-      id: `${Date.now()}`,
+    saveAddressMut.mutate({
       coin,
       label: newLabel.trim(),
       address: address.trim(),
-    };
-    const updated = [...savedAddresses, item];
-    saveToStorage(updated);
-    setNewLabel('');
-    setShowAddressBook(false);
+    });
   };
 
   const handleDeleteSavedAddress = (id: string) => {
-    const updated = savedAddresses.filter((a) => a.id !== id);
-    saveToStorage(updated);
+    deleteAddressMut.mutate(id);
   };
 
   const withdrawMut = useMutation({
@@ -192,6 +225,7 @@ export function WithdrawPage() {
           coin,
           toAddress: address.trim(),
           amount: smallestAmount.toString(),
+          walletKind,
           ...(emailCode ? { emailCode: emailCode.trim() } : {}),
         },
       }),
@@ -205,6 +239,8 @@ export function WithdrawPage() {
         return;
       }
       qc.invalidateQueries({ queryKey: ['wallets'] });
+      qc.invalidateQueries({ queryKey: ['wallets', 'PERSONAL'] });
+      qc.invalidateQueries({ queryKey: ['wallets', 'MERCHANT'] });
       qc.invalidateQueries({ queryKey: ['ledger'] });
       qc.invalidateQueries({ queryKey: ['withdrawals-history'] });
       setAddress('');
@@ -382,7 +418,7 @@ export function WithdrawPage() {
                             </span>
                           </div>
                           <div className="text-xs text-ink-muted mt-0.5">
-                            Saldo: <strong className="font-mono text-ink">{formatAmount(currentBal, coin)} {coin}</strong>
+                            Saldo ({walletKind === 'MERCHANT' ? 'caixa' : 'pessoal'}): <strong className="font-mono text-ink">{formatAmount(currentBal, coin)} {coin}</strong>
                           </div>
                         </div>
                       </div>
@@ -400,17 +436,16 @@ export function WithdrawPage() {
                           initial={{ opacity: 0, y: 6 }}
                           animate={{ opacity: 1, y: 0 }}
                           exit={{ opacity: 0, y: 4 }}
-                          className="absolute z-30 left-0 right-0 top-full mt-2 rounded-2xl border border-border bg-paper p-2 shadow-xl max-h-72 overflow-y-auto"
+                          className="absolute z-30 left-0 right-0 top-full mt-2 rounded-2xl border border-border bg-paper p-2 shadow-xl max-h-[28rem] overflow-y-auto"
                         >
                           <div className="px-3 py-1.5 text-[11px] font-bold uppercase tracking-wider text-ink-muted border-b border-border/50 mb-1">
                             Escolha uma moeda para sacar:
                           </div>
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-1">
-                            {COINS.map((c) => {
+                            {selectableCoins.map((c) => {
                               const conf = COIN_CONFIG[c];
                               const bal = walletMap[c] ? safeBigInt(walletMap[c]!.balance) : 0n;
                               const isSelected = c === coin;
-                              const paused = isDepositWithdrawPaused(c);
                               return (
                                 <button
                                   key={c}
@@ -419,26 +454,17 @@ export function WithdrawPage() {
                                   className={`flex items-center justify-between p-2.5 rounded-xl text-left transition-colors ${
                                     isSelected
                                       ? 'bg-bitcoin/10 font-bold text-bitcoin-dark border border-bitcoin/30'
-                                      : paused
-                                        ? 'opacity-75 hover:bg-surface text-ink'
-                                        : 'hover:bg-surface text-ink'
+                                      : 'hover:bg-surface text-ink'
                                   }`}
                                 >
                                   <div className="flex items-center gap-2.5 truncate">
                                     <img
                                       src={coinLogo(c)}
                                       alt={c}
-                                      className={`h-6 w-6 rounded-full shrink-0 ${paused ? 'grayscale' : ''}`}
+                                      className="h-6 w-6 rounded-full shrink-0"
                                     />
                                     <div className="truncate">
-                                      <div className="text-xs font-semibold leading-tight flex items-center gap-1.5">
-                                        <span>{conf.name}</span>
-                                        {paused && (
-                                          <span className="rounded border border-amber-500/30 bg-amber-500/10 px-1 py-0.5 text-[9px] font-black uppercase text-amber-800">
-                                            Pausado
-                                          </span>
-                                        )}
-                                      </div>
+                                      <div className="text-xs font-semibold leading-tight">{conf.name}</div>
                                       <div className="text-[10px] text-ink-muted">{c}</div>
                                     </div>
                                   </div>
@@ -449,6 +475,43 @@ export function WithdrawPage() {
                               );
                             })}
                           </div>
+                          {pausedCoins.length > 0 && (
+                            <div className="mt-2 border-t border-border/50 pt-2 space-y-1">
+                              <div className="px-3 py-1 text-[11px] font-bold uppercase tracking-wider text-ink-muted">
+                                {t('withdraw.pausedSection')}
+                              </div>
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-1">
+                                {pausedCoins.map((c) => {
+                                  const conf = COIN_CONFIG[c];
+                                  return (
+                                    <button
+                                      key={c}
+                                      type="button"
+                                      disabled
+                                      aria-disabled="true"
+                                      className="flex cursor-not-allowed items-center justify-between rounded-xl p-2.5 text-left opacity-60"
+                                    >
+                                      <div className="flex items-center gap-2.5 truncate">
+                                        <img
+                                          src={coinLogo(c)}
+                                          alt=""
+                                          className="h-6 w-6 rounded-full shrink-0 grayscale"
+                                        />
+                                        <div className="truncate">
+                                          <div className="text-xs font-semibold leading-tight text-ink-muted">{conf.name}</div>
+                                          <div className="text-[10px] text-ink-muted">{c}</div>
+                                        </div>
+                                      </div>
+                                      <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-amber-500/25 bg-amber-500/10 px-2 py-0.5 text-[10px] font-semibold text-amber-800">
+                                        <i className="bi bi-pause-circle" />
+                                        {t('withdraw.pausedBadge')}
+                                      </span>
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          )}
                         </motion.div>
                       )}
                     </AnimatePresence>
@@ -601,6 +664,24 @@ export function WithdrawPage() {
                     <div className="mt-3.5 flex items-center justify-between gap-2 pt-3 border-t border-border/50">
                       <div className="text-[11px] text-ink-muted font-medium">
                         Disponível: <span className="font-mono font-bold text-ink">{formatAmount(currentBal, coin)}</span>
+                        {merchantBal > 0n && (
+                          <span className="ml-2 inline-flex gap-1">
+                            <button
+                              type="button"
+                              onClick={() => setWalletKind('MERCHANT')}
+                              className={`rounded-md px-1.5 py-0.5 font-bold ${walletKind === 'MERCHANT' ? 'bg-bitcoin/15 text-bitcoin-dark' : 'text-ink-muted'}`}
+                            >
+                              Caixa
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setWalletKind('PERSONAL')}
+                              className={`rounded-md px-1.5 py-0.5 font-bold ${walletKind === 'PERSONAL' ? 'bg-bitcoin/15 text-bitcoin-dark' : 'text-ink-muted'}`}
+                            >
+                              Pessoal
+                            </button>
+                          </span>
+                        )}
                       </div>
                       <div className="flex items-center gap-1.5">
                         {[25, 50, 75, 100].map((pct) => (
@@ -769,7 +850,8 @@ export function WithdrawPage() {
                     <span>Segurança de Envio</span>
                   </div>
                   <p className="leading-relaxed text-amber-700">
-                    Certifique-se de que o endereço pertence à rede <strong>{cfg.name}</strong>. Transações em blockchain são irreversíveis.
+                    Certifique-se de que o endereço pertence à rede <strong>{coin === 'PEPE' ? 'BNB Smart Chain (BEP-20)' : cfg.name}</strong>.
+                    {coin === 'PEPE' ? ' Não envie o PEPE da Ethereum. A taxa de rede (gas) é paga em BNB pela plataforma.' : ''} Transações em blockchain são irreversíveis.
                   </p>
                 </div>
               </div>

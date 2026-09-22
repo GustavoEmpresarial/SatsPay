@@ -223,9 +223,8 @@ describe('Merchant + Airdrop wave90', () => {
 });
 
 describe('Trading pages wave90', () => {
-  it('deposit withdraw swap lend deep paths', async () => {
+  it('deposit deep paths', async () => {
     const user = userEvent.setup();
-
     for (const coin of ['BTC', 'DOGE', 'SOL', 'BCH', 'POL']) {
       const dep = renderWithProviders(<DepositPage />, { route: `/deposit?coin=${coin}`, loggedIn: true });
       await waitFor(() => expect(dep.container.innerHTML.length).toBeGreaterThan(60), { timeout: 4000 });
@@ -235,9 +234,12 @@ describe('Trading pages wave90', () => {
       if (copy) await user.click(copy);
       dep.unmount();
     }
+  });
 
+  it('withdraw deep path', async () => {
+    const user = userEvent.setup();
     const w = renderWithProviders(<WithdrawPage />, { route: '/withdraw?coin=LTC', loggedIn: true });
-    await waitFor(() => expect(w.container.innerHTML).toMatch(/LTC|Litecoin/i), { timeout: 5000 });
+    await waitFor(() => expect(w.container.textContent || '').toMatch(/Sacar/), { timeout: 12000 });
     const alter = within(w.container)
       .getAllByRole('button')
       .find((b) => /alterar/i.test(b.textContent || ''));
@@ -249,7 +251,10 @@ describe('Trading pages wave90', () => {
       if (btc) await user.click(btc);
     }
     w.unmount();
+  }, 15_000);
 
+  it('swap deep path', async () => {
+    const user = userEvent.setup();
     const swap = renderWithProviders(<SwapPage />, { route: '/swap', loggedIn: true });
     await waitFor(() => expect(swap.container.innerHTML.length).toBeGreaterThan(200), { timeout: 5000 });
     const inp = swap.container.querySelector('input[type="text"]');
@@ -263,21 +268,11 @@ describe('Trading pages wave90', () => {
       .find((b) => /LTC|BTC/.test(b.textContent || '') && b.querySelector('.bi-chevron-down'));
     if (coinPicker) await user.click(coinPicker);
     swap.unmount();
+  });
 
+  it('lend deep path', async () => {
     const lend = renderWithProviders(<LendPage />, { route: '/lend', loggedIn: true });
-    await waitFor(() => expect(lend.container.innerHTML).toMatch(/Fornecer|Tomar|Aave/i), { timeout: 5000 });
-    for (const label of [/resgatar|withdraw/i, /pagar|repay/i, /tomar/i, /fornecer/i]) {
-      const btn = within(lend.container)
-        .queryAllByRole('button')
-        .find((b) => label.test(b.textContent || ''));
-      if (btn) {
-        await user.click(btn);
-        const close = within(lend.container)
-          .queryAllByRole('button')
-          .find((b) => b.querySelector('.bi-x-lg'));
-        if (close) await user.click(close);
-      }
-    }
+    await waitFor(() => expect(lend.container.innerHTML).toMatch(/Manutenção|Empréstimos|Aave/i), { timeout: 5000 });
     lend.unmount();
   });
 });

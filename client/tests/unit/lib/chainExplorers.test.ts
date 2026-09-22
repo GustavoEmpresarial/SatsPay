@@ -13,6 +13,8 @@ describe('getExplorerTxUrl', () => {
     expect(getExplorerTxUrl('USDT', hash)).toContain('polygonscan');
     expect(getExplorerTxUrl('USDC', hash)).toContain('polygonscan');
     expect(getExplorerTxUrl('DGB', hash)).toContain('digiexplorer');
+    expect(getExplorerTxUrl('ZER', hash)).toContain('zerochain.info');
+    expect(getExplorerTxUrl('PEPE', hash)).toContain('bscscan.com');
     expect(getExplorerTxUrl('SOL', hash)).toContain('solscan');
   });
 

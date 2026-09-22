@@ -118,7 +118,8 @@
     "apiDocs": "Docs da API",
     "live": "Live",
     "support": "Suporte",
-    "comingSoon": "Em breve"
+    "comingSoon": "Em breve",
+    "maintenance": "Manutenção"
   },
   "lend": {
     "title": "Empréstimos",
@@ -154,21 +155,37 @@
   },
   "swap": {
     "title": "Swap",
-    "subtitle": "DEX na Polygon (POL, USDT, USDC) via SwapKit — sem liquidez interna.",
+    "bridgeTitle": "Bridge",
+    "tabSwap": "Swap",
+    "tabBridge": "Bridge",
+    "subtitle": "Troque entre BTC, LTC, DOGE, BCH, DGB, SOL e Polygon (POL, USDT, USDC). Cada moeda tem a rede da SatsPay marcada no seletor.",
+    "subtitleSwap": "Troca na mesma rede. Na SatsPay: POL, USDT e USDC na Polygon (DEX / 1inch).",
+    "subtitleBridge": "Cruza redes distintas: Solana ↔ Polygon (Relay) ou L1 nativa ↔ outra moeda (ChangeNOW).",
+    "swapHint": "Só Polygon: POL ↔ USDT ↔ USDC. Para mudar de rede, use a aba Bridge.",
+    "bridgeHint": "Origem e destino em redes diferentes. Ex.: SOL (Solana) → USDT (Polygon), ou BTC → POL.",
     "from": "Você envia",
     "to": "Você recebe",
     "flip": "Inverter moedas",
     "rate": "Taxa de câmbio",
-    "fee": "Taxa do protocolo (0,25%)",
-    "receive": "Você recebe (líquido)",
-    "confirm": "Confirmar swap",
-    "confirming": "Executando swap…",
+    "fee": "Taxa SatsPay (0,25%)",
+    "receive": "Você recebe",
+    "confirm": "Trocar",
+    "confirmBridge": "Bridge",
+    "confirming": "Processando…",
     "success": "Swap concluído.",
+    "pending": "Enviado. Acompanhe o status no histórico.",
     "insufficient": "Saldo insuficiente para este valor.",
     "history": "Histórico de swaps",
+    "historyBridge": "Histórico de bridges",
     "empty": "Nenhum swap ainda.",
-    "poweredBy": "DEX SwapKit · Taxa SatsPay 0,25% (afiliado)",
-    "trustLine": "Custodial · Rota DEX (SwapKit) · Taxa transparente"
+    "emptyBridge": "Nenhum bridge ainda.",
+    "poweredBy": "1inch + Relay + ChangeNOW · taxa SatsPay 0,25%",
+    "trustLine": "Saldo na SatsPay · taxa 0,25% — nosso diferencial",
+    "trustLineSwap": "Swap Polygon · taxa SatsPay 0,25%",
+    "trustLineBridge": "Bridge cross-rede · taxa SatsPay 0,25%",
+    "pickCoin": "Selecione a criptomoeda",
+    "networkLegend": "USDT, USDC e POL na SatsPay = Polygon. SOL = Solana. L1 (BTC/LTC/…) = rede nativa. PEPE = BNB Smart Chain (depósito/saque; swap em breve).",
+    "networkOn": "Rede SatsPay: {{network}}"
   },
   "stake": {
     "title": "Staking",
@@ -203,7 +220,7 @@
   },
   "developer": {
     "balances": "Saldos do comerciante e da API",
-    "balancesHint": "Estes saldos alimentam sua API e seus pagamentos. Ficam separados e protegidos da carteira pessoal.",
+    "balancesHint": "O líquido das faturas cai neste caixa. Para sacar, abra Saque e escolha Caixa, ou mova para a pessoal.",
     "topUp": "Adicionar saldo",
     "withdrawToPersonal": "Mover para pessoal",
     "personalBalance": "Saldo Pessoal",
@@ -241,7 +258,7 @@
     },
     "balance": {
       "desc": "Retorna os saldos de todas as moedas vinculadas ao dono da chave de API.",
-      "scope": "Scope obrigatório: balance"
+      "scope": "Nenhum escopo de saldo é exigido; qualquer chave de API válida lê o saldo da conta."
     },
     "errors": {
       "text": "Erros seguem um formato consistente: { error: { code, message, details? } }. Códigos comuns: UNAUTHORIZED, VALIDATION_ERROR, RATE_LIMITED, INSUFFICIENT_BALANCE, NOT_FOUND."
@@ -250,7 +267,7 @@
       "text": "A API pública tem limite de 60 requisições por minuto por chave. Endpoints de autenticação (/auth/login, /auth/register) ficam limitados a 10 requisições a cada 15 minutos por IP."
     },
     "keys": {
-      "text": "Gerencie suas chaves em Configurações. Você pode criar chaves com escopos específicos (send, balance, history, *) e desativá-las a qualquer momento. As chaves são armazenadas com hash — o valor bruto só aparece uma vez, na geração.",
+      "text": "Gerencie suas chaves em Configurações. Você pode criar chaves com escopos específicos (deposits, send, history, *) e desativá-las a qualquer momento. O endpoint de saldo não verifica escopo. As chaves são armazenadas com hash — o valor bruto só aparece uma vez, na geração.",
       "manage": "Gerenciar chaves em Configurações"
     },
     "copy": "Copiar",
@@ -370,7 +387,7 @@
       "items": [
         {
           "q": "SatsPay cobra alguma taxa?",
-          "a": "O cadastro é grátis. Nos saques on-chain você paga só a taxa de rede da blockchain."
+          "a": "O cadastro e a carteira pessoal são grátis: nos saques on-chain você paga só a taxa de rede. No gateway de cobranças do comerciante a taxa é 0,25% por fatura, descontada do que o comerciante recebe — o cliente paga o valor integral."
         },
         {
           "q": "Quanto tempo demora um depósito?",
@@ -526,7 +543,12 @@
       "FAUCET": "Faucet",
       "TRANSFER_IN": "Recebido",
       "TRANSFER_OUT": "Enviado",
-      "ADJUSTMENT": "Ajuste"
+      "ADJUSTMENT": "Ajuste",
+      "MERCHANT_CHECKOUT": "Pagamento checkout",
+      "MERCHANT_DEPOSIT": "Depósito merchant",
+      "SWAP": "Swap",
+      "DEX_SWAP_OUT": "Swap",
+      "DEX_SWAP_REFUND": "Estorno de swap"
     }
   },
   "faucet": {
@@ -552,7 +574,10 @@
     "addressFor": "Endereço {{coin}}",
     "pausedBadge": "Pausado",
     "pausedTitle": "Depósitos de {{coin}} temporariamente pausados",
-    "pausedHint": "A moeda continua listada. Novos endereços e créditos por esta rede estão desabilitados por enquanto."
+    "pausedHint": "Novos endereços e créditos por esta rede estão desabilitados por enquanto. Escolha outra moeda no seletor.",
+    "pickerTitle": "Selecione um ativo para gerar endereço",
+    "pausedSection": "Temporariamente pausadas",
+    "pausedNetworks": "Temporariamente pausadas: {{list}}"
   },
   "withdraw": {
     "title": "Sacar",
@@ -568,7 +593,10 @@
     "success": "Saque enviado para processamento.",
     "pausedBadge": "Pausado",
     "pausedTitle": "Saques de {{coin}} temporariamente pausados",
-    "pausedHint": "A moeda continua listada. Saques desta rede estão desabilitados por enquanto."
+    "pausedHint": "Saques desta rede estão desabilitados por enquanto. Escolha outra moeda no seletor.",
+    "pickerTitle": "Escolha uma moeda para sacar",
+    "pausedSection": "Temporariamente pausadas",
+    "pausedNetworks": "Temporariamente pausadas: {{list}}"
   },
   "settings": {
     "title": "Configurações",
@@ -617,6 +645,19 @@
         "usernameLength": "O nome de usuário deve ter entre 3 e 24 caracteres",
         "usernameFormat": "Começa com letra; só letras, números e underscore"
       }
+    },
+    "privacy": {
+      "title": "Privacidade (LGPD)",
+      "lead": "Você pode baixar uma cópia dos seus dados ou encerrar a conta. O ledger financeiro é mantido por obrigação legal (art. 16).",
+      "export": "Baixar meus dados",
+      "exporting": "Preparando…",
+      "erase": "Encerrar e anonimizar conta",
+      "erasing": "Encerrando…",
+      "confirmEmail": "Confirme seu e-mail",
+      "confirmPhrase": "Digite APAGAR para confirmar",
+      "erased": "Conta encerrada. Você será desconectado.",
+      "exportOk": "Arquivo baixado.",
+      "error": "Não foi possível concluir o pedido."
     }
   },
   "footer": {
@@ -647,7 +688,7 @@
   },
   "pages": {
     "coins": {
-      "subtitle": "Depósito, saque e faucet nas 9 criptomoedas suportadas."
+      "subtitle": "Depósito, saque e faucet nas 10 criptomoedas suportadas."
     },
     "faq": {
       "subtitle": "Respostas rápidas sobre taxas, depósitos, 2FA e a API pública."
@@ -769,44 +810,48 @@
   "legal": {
     "privacy": {
       "title": "Política de Privacidade",
-      "updated": "Última atualização: 30 de agosto de 2026",
+      "updated": "Última atualização: 16 de setembro de 2026",
       "sections": [
         {
-          "title": "1. Quem somos",
+          "title": "1. Controlador e encarregado (LGPD)",
           "body": [
-            "A SatsPay opera uma carteira de micropagamentos multi-moeda e uma API para desenvolvedores. Esta política descreve quais dados processamos quando você usa bitcosats.com e serviços relacionados.",
-            "Para solicitações de privacidade, escreva para privacy@bitcosats.com."
+            "A SatsPay é a controladora dos dados pessoais tratados neste serviço (carteira multi-moeda, faucet e gateway de comerciante).",
+            "Pedidos de titular (acesso, correção, exportação, eliminação): use Configurações → Privacidade ou privacy@satspay.pro. Prazo de resposta: 15 dias (art. 18 e 19 da Lei 13.709/2018)."
           ]
         },
         {
-          "title": "2. Dados que coletamos",
+          "title": "2. Bases legais e dados",
           "body": [
-            "Dados de conta: e-mail, senha armazenada com hash, configurações opcionais de 2FA e preferências de modo da conta.",
-            "Atividade da carteira: depósitos, saques, transferências internas, eventos de stake, empréstimo e swap, além do uso da API vinculado às suas chaves.",
-            "Dados técnicos: endereço IP, tipo de navegador e identificadores necessários para segurança, controle de taxa de requisições e prevenção de fraude.",
-            "Não vendemos seus dados pessoais."
+            "Execução de contrato (art. 7º, V): e-mail, username, senha com hash Argon2, 2FA, chaves de API, faturas e webhooks.",
+            "Obrigação legal / exercício de direitos (art. 7º, II e VI): lançamentos do ledger. Esses valores não são apagados quando a conta é encerrada.",
+            "Prevenção a fraude e segurança (art. 7º, IX): IP (pode ser armazenado como HMAC), user-agent, captcha, auditoria de login.",
+            "Dados de cliente da loja (e-mail, nome, callback) ficam cifrados em repouso (AES-256-GCM) e não aparecem no checkout público.",
+            "Não vendemos dados pessoais."
           ]
         },
         {
-          "title": "3. Como usamos os dados",
+          "title": "3. Como usamos e com quem compartilhamos",
           "body": [
-            "Para oferecer carteiras, faucet, ferramentas de comerciante e acesso à API.",
-            "Para autenticar sessões, detectar abuso e cumprir obrigações legais aplicáveis.",
-            "Para enviar avisos do serviço (alertas de segurança, redefinição de senha e mudanças de produto)."
+            "Operar carteiras, faucet, swap, gateway e autenticação.",
+            "Operadores necessários: Cloudflare Turnstile (captcha), SMTP (códigos de e-mail), nós de blockchain (transações públicas).",
+            "A moeda on-chain e o tx_hash são públicos por natureza da rede."
           ]
         },
         {
           "title": "4. Retenção e segurança",
           "body": [
-            "Mantemos registros de conta e do ledger pelo tempo necessário para operar o serviço e cumprir obrigações legais.",
-            "Credenciais são armazenadas com hash; segredos de API são exibidos uma única vez na criação. Movimentações grandes de tesouraria podem exigir controles operacionais adicionais."
+            "Conta ativa: enquanto o contrato durar. Após encerrar: perfil anonimizado; ledger e valores de fatura permanecem.",
+            "OTP, tokens de captcha e telemetria têm prazo curto e são descartados.",
+            "Em trânsito: TLS no domínio. Em repouso: AES-256-GCM com AAD, HMAC pesquisável para e-mail, chaves de API hasheadas."
           ]
         },
         {
-          "title": "5. Seus direitos",
+          "title": "5. Direitos do titular",
           "body": [
-            "Conforme a sua jurisdição, você pode solicitar acesso, correção, exportação ou exclusão de dados pessoais, sujeitos a requisitos de segurança e retenção legal.",
-            "Envie um e-mail para privacy@bitcosats.com com o assunto \"Solicitação de privacidade\"."
+            "Confirmação, acesso e portabilidade: GET /v1/me/export (sessão autenticada) ou o botão em Configurações.",
+            "Eliminação/anonimização: POST /v1/me/erase com confirmação (e-mail + a palavra APAGAR). Sessões e chaves são revogadas.",
+            "Correção: username em Configurações. Correção de e-mail: pedido a privacy@satspay.pro.",
+            "Revogação e informação sobre compartilhamento: mesmo canal. Incidentes relevantes serão comunicados conforme art. 48."
           ]
         },
         {
@@ -980,6 +1025,82 @@
       "identityBody": "Acessar seu nome de usuário e ID de usuário SatsPay.",
       "emailTitle": "Endereço de e-mail",
       "emailBody": "Visualizar seu e-mail cadastrado ({{email}})."
+    }
+  },
+  "checkout": {
+    "loading": "Carregando checkout seguro...",
+    "badge": "Checkout Seguro",
+    "theStore": "a loja",
+    "order": "Pedido",
+    "expires": "Expira em",
+    "payTitle": "Pagamento",
+    "total": "Total a pagar",
+    "notFound": {
+      "title": "Cobrança não encontrada",
+      "body": "Este link de pagamento não existe ou expirou. Volte ao site de origem e tente novamente.",
+      "home": "Ir para SatsPay"
+    },
+    "demo": {
+      "title": "Demonstração",
+      "body": "Esta é uma fatura de exemplo para você ver o checkout. O endereço não é real, nenhum pagamento é processado e nenhum webhook é disparado."
+    },
+    "balance": {
+      "title": "Pagar com saldo SatsPay",
+      "instant": "Crédito instantâneo, sem espera na blockchain.",
+      "badge": "1 clique",
+      "need": "Necessário: {{amount}} {{coin}} na sua carteira pessoal.",
+      "pick": "Toque na moeda do seu saldo — sem QR e sem espera.",
+      "payCoin": "Pagar {{amount}} {{coin}}",
+      "enough": "Saldo ok",
+      "shortCoin": "Sem saldo",
+      "payNow": "Pagar agora · instantâneo",
+      "processing": "Processando pagamento...",
+      "signIn": "Entrar para pagar com saldo",
+      "showcase": "Vitrine: nesta demo nada é cobrado. Num checkout real, um toque quita na hora.",
+      "short": "Saldo insuficiente nesta moeda. Use cripto abaixo ou deposite na carteira.",
+      "error": "Saldo insuficiente ou erro ao processar. Use o endereço abaixo.",
+      "ownInvoice": "Esta cobrança é da sua própria conta de comerciante. O checkout não passa dinheiro da sua carteira pessoal para ela. Nada foi debitado. Use outra conta SatsPay, ou a transferência entre carteiras dentro da sua conta."
+    },
+    "crypto": {
+      "choose": "Escolha a moeda",
+      "chooseHint": "Na próxima tela você paga com saldo SatsPay ou envia o QR.",
+      "or": "ou envie o QR",
+      "onchain": "on-chain",
+      "confirms": "{{count}} confirmações",
+      "quoteLocked": "A cotação é travada quando você escolhe e vale até a fatura expirar.",
+      "switchError": "Não foi possível trocar de moeda agora. Tente novamente.",
+      "switch": "Pagar com outra moeda",
+      "estQuote": "(cotação estimada)",
+      "qrAlt": "QR Code de Pagamento",
+      "scan": "Escaneie com sua carteira ou exchange",
+      "address": "Endereço de destino",
+      "officialNet": "rede oficial",
+      "copy": "Copiar",
+      "copied": "Copiado",
+      "waiting": "Aguardando transferência na blockchain..."
+    },
+    "success": {
+      "title": "Pagamento concluído",
+      "body": "Seu pagamento de {{amount}} {{coin}} para {{store}} foi confirmado.",
+      "paid": "Valor pago",
+      "method": "Método",
+      "methodBalance": "Saldo SatsPay",
+      "methodOnchain": "On-chain",
+      "tx": "Hash Tx",
+      "backStore": "Voltar para {{store}} ({{seconds}}s)",
+      "done": "Concluído"
+    },
+    "expired": {
+      "title": "Tempo esgotado",
+      "body": "O prazo desta cobrança expirou. Peça um novo link no site de origem.",
+      "back": "Voltar para {{store}}"
+    },
+    "cancelled": {
+      "title": "Cobrança cancelada",
+      "body": "Esta cobrança foi cancelada. Peça um novo link no site de origem."
+    },
+    "footer": {
+      "secure": "Processado com segurança por"
     }
   }
 }

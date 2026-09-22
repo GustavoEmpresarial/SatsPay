@@ -10,7 +10,7 @@ import { describeAuditAction } from '../lib/auditActions.js';
 import { clsx } from 'clsx';
 
 type TwofaAction = 'enable' | 'disable';
-type SettingsTab = 'profile' | 'security' | 'sessions' | 'apps';
+type SettingsTab = 'profile' | 'security' | 'sessions' | 'apps' | 'privacy';
 
 interface AuthorizedApp {
   application_id: string;
@@ -43,7 +43,7 @@ function usernameIssue(username: string): string | null {
 
 export function SettingsPage() {
   const { t, i18n } = useTranslation();
-  const { user, updateUser } = useAuthStore();
+  const { user, updateUser, logout } = useAuthStore();
   const { mode, setMode } = usePrefsStore();
   const [activeTab, setActiveTab] = useState<SettingsTab>('profile');
 
@@ -53,6 +53,9 @@ export function SettingsPage() {
   const [username, setUsername] = useState(user?.username ?? '');
   const [usernameStatus, setUsernameStatus] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
   const [sessionMsg, setSessionMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [eraseEmail, setEraseEmail] = useState('');
+  const [erasePhrase, setErasePhrase] = useState('');
+  const [privacyMsg, setPrivacyMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   const securityLogsQ = useQuery({
     queryKey: ['security-logs'],
@@ -95,6 +98,34 @@ export function SettingsPage() {
       }
       setUsernameStatus({ type: 'error', text: formatApiError(err) });
     },
+  });
+
+  const exportData = useMutation({
+    mutationFn: () => api<Record<string, unknown>>('/me/export'),
+    onSuccess: (data) => {
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `satspay-export-${user?.id ?? 'me'}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      setPrivacyMsg({ type: 'success', text: t('settings.privacy.exportOk') });
+    },
+    onError: (err) => setPrivacyMsg({ type: 'error', text: formatApiError(err) }),
+  });
+
+  const eraseAccount = useMutation({
+    mutationFn: () =>
+      api('/me/erase', {
+        method: 'POST',
+        json: { confirmEmail: eraseEmail, confirm: erasePhrase },
+      }),
+    onSuccess: () => {
+      setPrivacyMsg({ type: 'success', text: t('settings.privacy.erased') });
+      logout();
+    },
+    onError: (err) => setPrivacyMsg({ type: 'error', text: formatApiError(err) }),
   });
 
   const requestCode = useMutation({
@@ -173,6 +204,7 @@ export function SettingsPage() {
     },
     { id: 'sessions', label: 'Sessões & Atividades', icon: 'bi-laptop' },
     { id: 'apps', label: 'Aplicações Conectadas', icon: 'bi-grid-fill' },
+    { id: 'privacy', label: t('settings.privacy.title'), icon: 'bi-shield-check' },
   ];
 
   return (
@@ -819,6 +851,60 @@ export function SettingsPage() {
                 ))}
               </div>
             )}
+          </section>
+        </div>
+      )}
+
+      {activeTab === 'privacy' && (
+        <div className="space-y-6 animate-fade-in">
+          <section className="card p-6 space-y-4">
+            <h2 className="text-base font-semibold text-ink flex items-center gap-2">
+              <i className="bi bi-shield-check text-bitcoin-dark" />
+              {t('settings.privacy.title')}
+            </h2>
+            <p className="text-sm text-ink-muted">{t('settings.privacy.lead')}</p>
+            {privacyMsg && (
+              <p className={privacyMsg.type === 'error' ? 'text-sm text-rose-600' : 'text-sm text-emerald-700'}>
+                {privacyMsg.text}
+              </p>
+            )}
+            <button
+              type="button"
+              className="btn-primary"
+              disabled={exportData.isPending}
+              onClick={() => exportData.mutate()}
+            >
+              {exportData.isPending ? t('settings.privacy.exporting') : t('settings.privacy.export')}
+            </button>
+            <div className="border-t border-border pt-4 space-y-3">
+              <label className="label text-xs" htmlFor="erase-email">
+                {t('settings.privacy.confirmEmail')}
+              </label>
+              <input
+                id="erase-email"
+                type="email"
+                className="input"
+                value={eraseEmail}
+                onChange={(e) => setEraseEmail(e.target.value)}
+              />
+              <label className="label text-xs" htmlFor="erase-phrase">
+                {t('settings.privacy.confirmPhrase')}
+              </label>
+              <input
+                id="erase-phrase"
+                className="input"
+                value={erasePhrase}
+                onChange={(e) => setErasePhrase(e.target.value)}
+              />
+              <button
+                type="button"
+                className="rounded-xl border border-rose-500/40 bg-rose-500/10 px-4 py-2 text-sm font-bold text-rose-600"
+                disabled={eraseAccount.isPending}
+                onClick={() => eraseAccount.mutate()}
+              >
+                {eraseAccount.isPending ? t('settings.privacy.erasing') : t('settings.privacy.erase')}
+              </button>
+            </div>
           </section>
         </div>
       )}

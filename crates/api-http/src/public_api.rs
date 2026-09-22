@@ -57,32 +57,35 @@ struct IssueKeyRequest {
 }
 
 async fn issue_key<R: AuthRepo>(State(state): State<AppState<R>>, user: AuthUser, Json(body): Json<IssueKeyRequest>) -> Response {
+    if let Err(msg) = crypto::validate_api_scopes(&body.scopes) {
+        return (StatusCode::BAD_REQUEST, Json(json!({ "error": msg, "code": "INVALID_SCOPE" }))).into_response();
+    }
     let scopes: Vec<&str> = body.scopes.iter().map(String::as_str).collect();
     let allowed_ips: Vec<&str> = body.allowed_ips.iter().map(String::as_str).collect();
     match db::public_api::issue_api_key(&state.pool, &state.secrets, user.id, &body.label, &scopes, &allowed_ips, body.expires_in_days, body.require_signature).await {
         Ok(key) => (StatusCode::CREATED, Json(key)).into_response(),
-        Err(e) => (StatusCode::BAD_REQUEST, Json(json!({ "error": e.to_string() }))).into_response(),
+        Err(e) => key_mutation_error(e),
     }
 }
 
 async fn rotate_key<R: AuthRepo>(State(state): State<AppState<R>>, user: AuthUser, Path(id): Path<Uuid>) -> Response {
     match db::public_api::rotate_api_key(&state.pool, &state.secrets, user.id, id).await {
         Ok(key) => Json(key).into_response(),
-        Err(e) => (StatusCode::NOT_FOUND, Json(json!({ "error": e.to_string() }))).into_response(),
+        Err(e) => key_lookup_error(e),
     }
 }
 
 async fn disable_key<R: AuthRepo>(State(state): State<AppState<R>>, user: AuthUser, Path(id): Path<Uuid>) -> Response {
     match db::public_api::disable_api_key(&state.pool, user.id, id).await {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
-        Err(e) => (StatusCode::NOT_FOUND, Json(json!({ "error": e.to_string() }))).into_response(),
+        Err(e) => key_lookup_error(e),
     }
 }
 
 async fn list_keys<R: AuthRepo>(State(state): State<AppState<R>>, user: AuthUser) -> Response {
-    match db::public_api::list_api_keys_by_user(&state.pool, user.id).await {
+    match db::public_api::list_api_keys_by_user(&state.pool, Some(&state.secrets), user.id).await {
         Ok(keys) => Json(json!({ "keys": keys })).into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e.to_string() }))).into_response(),
+        Err(e) => crate::http_error::internal_error(&e),
     }
 }
 
@@ -131,8 +134,27 @@ pub(crate) fn public_api_error_code(e: &PublicApiError) -> &'static str {
 
 pub(crate) fn key_rejection(e: &PublicApiError) -> ApiKeyRejection {
     let code = public_api_error_code(e);
-    let status = if code == "INTERNAL_ERROR" { StatusCode::INTERNAL_SERVER_ERROR } else { StatusCode::UNAUTHORIZED };
-    ApiKeyRejection(status, code, e.to_string())
+    if matches!(e, PublicApiError::Db(_)) {
+        tracing::error!(error = %e, "public API internal error");
+        return ApiKeyRejection(StatusCode::INTERNAL_SERVER_ERROR, "INTERNAL_ERROR", "internal error".into());
+    }
+    ApiKeyRejection(StatusCode::UNAUTHORIZED, code, key_rejection_message(code))
+}
+
+fn key_rejection_message(code: &'static str) -> String {
+    match code {
+        "INVALID_API_KEY" => "invalid api key",
+        "API_KEY_EXPIRED" => "api key expired",
+        "IP_NOT_ALLOWED" => "ip not allowed",
+        "KEY_REQUIRES_SIGNATURE" => "key requires signature",
+        "MISSING_SCOPE" => "missing scope",
+        "BAD_TIMESTAMP" => "bad timestamp",
+        "TIMESTAMP_OUT_OF_WINDOW" => "timestamp out of window",
+        "SIGNATURE_MISMATCH" => "signature mismatch",
+        "SIGNATURE_REPLAY" => "signature replay",
+        _ => "unauthorized",
+    }
+    .into()
 }
 
 /// Largest request body the API-key paths buffer. The signature covers a
@@ -223,9 +245,9 @@ async fn send<R: AuthRepo>(State(state): State<AppState<R>>, ApiKeyAuth(key, raw
     let (Ok(coin), Ok(amount)) = (body.coin.parse::<shared::Coin>(), body.amount.parse::<BigDecimal>()) else {
         return (StatusCode::BAD_REQUEST, Json(json!({ "error": "invalid request" }))).into_response();
     };
-    match db::public_api::send_to_user(&state.pool, key.user_id, key.id, coin, &body.to_email, amount.clone(), &body.idempotency_key, state.settings.public_api_daily_send_limit).await {
+    match db::public_api::send_to_user(&state.pool, &state.secrets, key.user_id, key.id, coin, &body.to_email, amount.clone(), &body.idempotency_key, state.settings.public_api_daily_send_limit).await {
         Ok(reference) => {
-            if let Some(to) = user_email(&state.pool, key.user_id).await {
+            if let Some(to) = user_email(&state.pool, Some(&state.secrets), key.user_id).await {
                 let body_text = format!(
                     "Your API key sent {amount} {} to {}.\n\nReference: {reference}",
                     coin.as_str(),
@@ -235,16 +257,62 @@ async fn send<R: AuthRepo>(State(state): State<AppState<R>>, ApiKeyAuth(key, raw
             }
             Json(json!({ "referenceId": reference })).into_response()
         }
-        Err(e) => (StatusCode::BAD_REQUEST, Json(json!({ "error": e.to_string() }))).into_response(),
+        Err(e) => public_send_error(e),
     }
 }
 
+fn key_mutation_error(e: db::public_api::PublicApiError) -> Response {
+    if matches!(e, db::public_api::PublicApiError::Db(_)) {
+        return crate::http_error::internal_error(&e);
+    }
+    (
+        StatusCode::BAD_REQUEST,
+        Json(json!({ "error": "could not issue API key", "code": "BAD_REQUEST" })),
+    )
+        .into_response()
+}
+
+fn key_lookup_error(e: db::public_api::PublicApiError) -> Response {
+    if matches!(e, db::public_api::PublicApiError::Db(_)) {
+        return crate::http_error::internal_error(&e);
+    }
+    (
+        StatusCode::NOT_FOUND,
+        Json(json!({ "error": "API key not found", "code": "NOT_FOUND" })),
+    )
+        .into_response()
+}
+
+/// Every send failure is `{ "error", "code" }`. The `error` string is what a
+/// merchant can show to their user; `code` is what they branch on.
+fn public_send_error(e: db::public_api::PublicApiError) -> Response {
+    if matches!(e, db::public_api::PublicApiError::Db(_)) {
+        return crate::http_error::internal_error(&e);
+    }
+    let code = public_api_error_code(&e);
+    let msg = match code {
+        "SEND_TO_SELF" => "cannot send to the SatsPay account that owns this API key. toEmail must be a different existing account. nothing was debited",
+        "TARGET_INELIGIBLE" => "no SatsPay account exists for toEmail. nothing was debited",
+        "WALLET_NOT_FOUND" => "sender or recipient wallet not found for this coin. nothing was debited",
+        "DAILY_LIMIT_REACHED" => "daily send limit reached for this API key. nothing was debited",
+        _ => "send rejected. nothing was debited",
+    };
+    (StatusCode::BAD_REQUEST, Json(json!({ "error": msg, "code": code }))).into_response()
+}
+
 async fn balance<R: AuthRepo>(State(state): State<AppState<R>>, ApiKeyAuth(key, _raw_body): ApiKeyAuth) -> Response {
+    if db::public_api::require_scope(&key, "balance").is_err() {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(json!({ "error": "missing required scope: balance", "code": "MISSING_SCOPE" })),
+        )
+            .into_response();
+    }
     match db::public_api::get_balance_for_api_key(&state.pool, key.user_id).await {
         Ok(balances) => {
             let map: serde_json::Map<String, serde_json::Value> = balances.into_iter().map(|(c, b)| (c.as_str().to_string(), json!(b.to_string()))).collect();
             Json(map).into_response()
         }
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e.to_string() }))).into_response(),
+        Err(e) => crate::http_error::internal_error(&e),
     }
 }

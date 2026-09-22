@@ -918,15 +918,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
   "depositAddress": "0x71C6705624342490cf03323decB0C392A8892A88",
   "payUrl": "/pay/550e8400-e29b-41d4-a716-446655440000",
   "checkoutUrl": "${API_BASE}/pay/550e8400-e29b-41d4-a716-446655440000",
-  "qrCode": "usdt:0x71C6705624342490cf03323decB0C392A8892A88?amount=25",
+  "qrCode": "0x71C6705624342490cf03323decB0C392A8892A88",
   "orderId": "ORD-99821",
   "expiresAt": "2026-09-02T18:00:00.000Z",
   "createdAt": "2026-09-02T17:00:00.000Z"
 }`}
                   />
                   <p className="text-[11px] text-ink-muted leading-relaxed">
-                    <b>qrCode</b> é uma URI de pagamento (<code className="font-mono">moeda:endereço?amount=…</code>) pronta para
-                    virar QR no seu front — não é imagem base64. <b>checkoutUrl</b> já vem absoluto; <b>payUrl</b> é o mesmo
+                    <b>qrCode</b> de POL, USDT, USDC e PEPE é só o endereço <code className="font-mono">0x</code>.
+                    <code className="font-mono">pol:</code> e <code className="font-mono">ethereum:</code> a carteira mostra como texto.
+                    UTXO fica BIP21 (<code className="font-mono">btc:endereço?amount=…</code>).
+                    Não é imagem base64. <b>checkoutUrl</b> já vem absoluto; <b>payUrl</b> é o mesmo
                     caminho relativo, caso você monte a URL por conta própria.
                   </p>
                 </div>
@@ -1394,6 +1396,10 @@ curl ${API_BASE}/v1/public/pay/demo`} />
                 <p className="text-[11px] text-ink-muted leading-relaxed">
                   Exige a sessão de <strong>quem paga</strong> (não a sua). Saldo insuficiente, fatura expirada
                   ou já paga são recusados com <code className="font-mono">code</code> próprio.
+                  A conta logada <strong>não pode ser a dona da fatura</strong>: nesse caso a resposta é{' '}
+                  <code className="font-mono">400 CANNOT_PAY_OWN_INVOICE</code> e nada é debitado. O checkout
+                  é para outro cliente. Passar da sua carteira pessoal para a de comerciante é a transferência
+                  dentro da conta logada, não esta rota.
                 </p>
                 <CodeBlock code={`curl -X POST ${API_BASE}/v1/public/pay/$INVOICE_ID/balance \\
   -H "Authorization: Bearer $JWT_DO_CLIENTE"`} />
@@ -1436,7 +1442,7 @@ curl ${API_BASE}/v1/public/pay/demo`} />
                   title="2.1 Consultar Saldos da Tesouraria Comercial"
                 />
                 <p className="text-xs sm:text-sm text-ink-muted">
-                  Retorna os saldos disponíveis em caixa em todas as 9 criptomoedas suportadas prontos para envio (representados em 8 decimais / satoshis).
+                  Retorna os saldos disponíveis em caixa em todas as moedas da conta ({COINS.join(', ')}), em unidades de ledger de 8 decimais.
                 </p>
 
                 <CodeBlock
@@ -1456,7 +1462,9 @@ curl ${API_BASE}/v1/public/pay/demo`} />
   "LTC": "25000000",           // 0.25 LTC (8 decimais: 100,000,000 = 1.0 LTC)
   "DOGE": "100000000",         // 1.00 DOGE (8 decimais: 100,000,000 = 1.0 DOGE)
   "BCH": "1500000",            // 0.015 BCH (8 decimais: 100,000,000 = 1.0 BCH)
-  "DGB": "50000000"            // 0.50 DGB (8 decimais: 100,000,000 = 1.0 DGB)
+  "DGB": "50000000",            // 0.50 DGB
+  "ZER": "100000000",           // 1.00 ZER
+  "PEPE": "100000000"           // 1.00 PEPE (ledger 8 decimais; na BNB Smart Chain o token tem 18)
 }`}
                 />
               </div>
@@ -1470,8 +1478,38 @@ curl ${API_BASE}/v1/public/pay/demo`} />
                   badge="Liquidação Instantânea (0ms)"
                 />
                 <p className="text-xs sm:text-sm text-ink-muted">
-                  Transfere fundos da sua carteira comercial para a conta SatsPay do usuário indicado pelo e-mail com garantia anti-duplicação via <code className="font-mono font-bold text-ink">idempotencyKey</code>.
+                  Debita a sua carteira comercial e credita a conta SatsPay do campo <code className="font-mono font-bold text-ink">toEmail</code>. Liquidação interna, sem taxa de rede. <code className="font-mono font-bold text-ink">idempotencyKey</code> impede o mesmo envio duas vezes.
                 </p>
+
+                <div className="rounded-2xl border border-border bg-surface p-4 space-y-2">
+                  <div className="flex items-center gap-2 text-ink font-bold text-xs">
+                    <i className="bi bi-envelope-check text-bitcoin text-base" />
+                    <span>De onde sai o toEmail</span>
+                  </div>
+                  <p className="text-xs text-ink-muted leading-relaxed">
+                    É o e-mail da conta que recebe. Não é o e-mail da sua chave de API e não é endereço de carteira. Os dois jeitos abaixo são válidos — use o que o seu cliente escolheu:
+                  </p>
+                  <ol className="text-xs text-ink-muted leading-relaxed list-decimal pl-4 space-y-1">
+                    <li><b className="text-ink">Ele digita</b> o e-mail da conta SatsPay num campo do seu site. Esse texto vai em <code className="font-mono text-ink font-bold">toEmail</code>.</li>
+                    <li><b className="text-ink">Ele entra com SatsPay.</b> O <code className="font-mono text-ink font-bold">email</code> de <code className="font-mono text-ink font-bold">GET /v1/oauth/userinfo</code> (<code className="font-mono text-ink font-bold">email_verified: true</code>) também vai em <code className="font-mono text-ink font-bold">toEmail</code>.</li>
+                  </ol>
+                  <p className="text-xs text-ink-muted leading-relaxed">
+                    Se não existir conta SatsPay com esse e-mail, a chamada falha com <code className="font-mono text-ink font-bold">TARGET_INELIGIBLE</code> e nada é debitado.
+                  </p>
+                </div>
+
+                <div className="rounded-2xl border border-amber-500/30 bg-amber-500/5 p-4 space-y-2">
+                  <div className="flex items-center gap-2 text-ink font-bold text-xs">
+                    <i className="bi bi-person-x text-amber-600 text-base" />
+                    <span>Não dá para enviar para a conta dona da chave</span>
+                  </div>
+                  <p className="text-xs text-ink-muted leading-relaxed">
+                    <code className="font-mono text-ink font-bold">toEmail</code> não pode ser o e-mail da conta SatsPay que emitiu a chave de API. A resposta é <code className="font-mono text-ink font-bold">400</code> com <code className="font-mono text-ink font-bold">code: SEND_TO_SELF</code> e a frase <code className="font-mono text-ink font-bold">cannot send to the SatsPay account that owns this API key</code>. Nada é debitado. Isso não é falta de saldo.
+                  </p>
+                  <p className="text-xs text-ink-muted leading-relaxed">
+                    Acontece quando você testa o envio logado com o mesmo e-mail do comerciante. O jogador ou cliente real, com outra conta SatsPay, passa. Mostre o <code className="font-mono text-ink font-bold">error</code> e o <code className="font-mono text-ink font-bold">code</code> para quem chama — não troque por um texto genérico de “tente de novo”.
+                  </p>
+                </div>
 
                 <div className="rounded-2xl border border-border bg-surface p-4 space-y-2">
                   <div className="flex items-center gap-2 text-ink font-bold text-xs">
@@ -1481,15 +1519,15 @@ curl ${API_BASE}/v1/public/pay/demo`} />
                   <ul className="text-xs text-ink-muted leading-relaxed list-disc pl-4 space-y-1">
                     <li>A chave precisa do escopo <code className="font-mono text-ink font-bold">send</code> — sem ele, <code className="font-mono text-ink font-bold">403 MISSING_SCOPE</code>.</li>
                     <li>Existe um limite diário de envios por chave; ao estourar, <code className="font-mono text-ink font-bold">DAILY_LIMIT_REACHED</code>.</li>
-                    <li>O destinatário precisa ter conta SatsPay com o e-mail informado; não é envio on-chain.</li>
+                    <li>O destinatário precisa ter conta SatsPay com o e-mail informado. Endereço on-chain não é aceito aqui.</li>
                     <li>Diferente do gateway de depósitos, <b>nenhuma moeda fica pausada</b> aqui — o envio é interno (ledger).</li>
                   </ul>
                 </div>
 
                 <ParamsTable
                   params={[
-                    { name: 'coin', type: 'String', required: true, desc: 'Criptomoeda a transferir (USDT, USDC, BTC, SOL, POL, LTC, DOGE, BCH, DGB).', example: '"USDT"' },
-                    { name: 'toEmail', type: 'String', required: true, desc: 'E-mail cadastrado na conta SatsPay do usuário destinatário.', example: '"usuario@email.com"' },
+                    { name: 'coin', type: 'String', required: true, desc: 'Criptomoeda a transferir (USDT, USDC, BTC, SOL, POL, LTC, DOGE, BCH, DGB, ZER, PEPE).', example: '"USDT"' },
+                    { name: 'toEmail', type: 'String', required: true, desc: 'E-mail da conta SatsPay que recebe. O seu usuário pode digitá-lo, ou você usa o email verificado do Login com SatsPay (GET /v1/oauth/userinfo). Os dois servem. Sem conta: 400 TARGET_INELIGIBLE, nada debitado. Se for a conta dona da chave: 400 SEND_TO_SELF, nada debitado — não é falta de saldo.', example: '"usuario@email.com"' },
                     { name: 'amount', type: 'String', required: true, desc: `Inteiro na menor fração interna (${INTERNAL_AMOUNT_DECIMALS} decimais), igual ao gateway de depósitos: "${toLedgerUnits(1)}" = 1,00 moeda.`, example: `"${toLedgerUnits(10)}"` },
                     { name: 'idempotencyKey', type: 'String', required: true, desc: 'ID único da sua operação para evitar cobrança ou envio duplicado.', example: '"payout_ord_99812"' },
                   ]}
@@ -2143,10 +2181,6 @@ const res = await fetch('${API_BASE}/v1/oauth/authorize', {
                         <td className="px-4 py-2.5 font-mono font-bold text-ink">send</td>
                         <td className="px-4 py-2.5 text-ink-muted">Envios/payouts (<code className="font-mono">POST /v1/public/send</code>)</td>
                       </tr>
-                      <tr>
-                        <td className="px-4 py-2.5 font-mono font-bold text-ink">balance</td>
-                        <td className="px-4 py-2.5 text-ink-muted">Consulta de saldos da tesouraria</td>
-                      </tr>
                     </tbody>
                   </table>
                 </div>
@@ -2371,7 +2405,7 @@ pub fn verify_webhook(raw_body: &[u8], signature_header: &str, webhook_secret: &
                         ['SIGNATURE_MISMATCH', '401', 'HMAC da requisição não confere.', 'Assine timestamp + método + caminho + SHA-256 do corpo.', 'amber'],
                         ['TIMESTAMP_OUT_OF_WINDOW', '401', 'x-timestamp fora da janela de 300s.', 'Sincronize o relógio do servidor (NTP).', 'amber'],
                         ['SIGNATURE_REPLAY', '401', 'Assinatura já usada antes.', 'Gere uma assinatura nova a cada requisição.', 'amber'],
-                        ['MISSING_SCOPE', '403', 'A chave não tem o escopo exigido pela rota.', 'Emita a chave com deposits / send / balance conforme o uso.', 'rose'],
+                        ['MISSING_SCOPE', '403', 'A chave não tem o escopo exigido pela rota.', 'Emita a chave com deposits ou send conforme o uso.', 'rose'],
                         ['UNKNOWN_COIN', '400', 'Símbolo de moeda não suportado.', 'Use um dos símbolos da tabela de moedas.', 'amber'],
                         ['DEPOSIT_PAUSED', '503', 'Depósitos dessa moeda estão temporariamente pausados.', 'Ofereça outra moeda ativa no checkout.', 'amber'],
                         ['AMOUNT_NOT_INTEGER', '400', 'amount veio com ponto/vírgula (ex.: "25.00").', 'Envie inteiro em unidades de 1e-8: 25 USDT = "2500000000".', 'rose'],
@@ -2385,6 +2419,11 @@ pub fn verify_webhook(raw_body: &[u8], signature_header: &str, webhook_secret: &
                         ['INVOICE_FORBIDDEN', '403', 'A fatura pertence a outro comerciante.', 'Use a chave do dono da fatura.', 'rose'],
                         ['INVOICE_INVALID_STATE', '400', 'Fatura já paga, expirada ou cancelada.', 'Crie uma nova fatura.', 'amber'],
                         ['INSUFFICIENT_BALANCE', '400', 'Saldo insuficiente para a operação.', 'Deposite na moeda correspondente.', 'amber'],
+                        ['SEND_TO_SELF', '400', 'toEmail é a conta que emitiu a chave. Não é falta de saldo.', 'Mande para outra conta SatsPay. Nada foi debitado. Mostre o campo error, não um texto genérico.', 'rose'],
+                        ['TARGET_INELIGIBLE', '400', 'Não existe conta SatsPay com esse toEmail.', 'Peça um e-mail de conta já cadastrada. Nada foi debitado.', 'amber'],
+                        ['DAILY_LIMIT_REACHED', '400', 'A chave estourou o limite diário de envios.', 'Espere o dia virar ou use outra chave. Nada foi debitado.', 'amber'],
+                        ['WALLET_NOT_FOUND', '400', 'Não há carteira do remetente ou do destinatário nessa moeda.', 'Confira a moeda e se o destinatário já tem carteira. Nada foi debitado.', 'amber'],
+                        ['CANNOT_PAY_OWN_INVOICE', '400', 'Quem pagou a fatura com saldo é o dono da cobrança.', 'O checkout é para outro cliente. Nada foi debitado. Use a transferência entre carteiras da conta logada.', 'rose'],
                         ['RATE_LIMITED', '429', 'Limite de requisições por IP excedido.', 'Use retry com backoff exponencial e jitter (veja Retry-After).', 'blue'],
                       ].map(([code, http, cause, fix, color]) => (
                         <tr key={code}>

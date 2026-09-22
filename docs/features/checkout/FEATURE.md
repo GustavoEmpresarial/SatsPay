@@ -15,7 +15,7 @@
 
 ## Keywords (busca)
 
-`checkout CheckoutPage /pay/:id /public/pay/:id /public/pay/:id/balance  public`
+`checkout CheckoutPage /pay/:id /public/coins /public/pay/:id /public/pay/:id/balance /public/pay/:id/select-coin /wallet  public`
 
 ## Rotas
 
@@ -27,8 +27,11 @@
 
 ## APIs usadas (client → `/v1…`)
 
+- `/public/coins` (prefixo `/v1` no servidor)
 - `/public/pay/:id` (prefixo `/v1` no servidor)
 - `/public/pay/:id/balance` (prefixo `/v1` no servidor)
+- `/public/pay/:id/select-coin` (prefixo `/v1` no servidor)
+- `/wallet` (prefixo `/v1` no servidor)
 
 ## Arquivos-chave
 
@@ -37,7 +40,7 @@
 
 ## Comportamento (bruto)
 
-Página React `CheckoutPage`. Chama 2 endpoint(s) via `api()`.
+Página React `CheckoutPage`. Chama 5 endpoint(s) via `api()`. Checkout público `/pay/:id` (+ `/pay/demo`). Métodos: saldo SatsPay e cripto. Payload sem `feeAmount`/`callbackUrl`. Taxa 0,25% do comerciante. Rate class `public-pay` (GET 60/min, select-coin 20/min, balance 10/min).
 
 ## Notas de overview legado
 

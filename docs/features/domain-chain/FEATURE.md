@@ -15,7 +15,7 @@
 
 ## Keywords (busca)
 
-`BTC LTC DOGE BCH POL DGB SOL USDT USDC RPC HD xpub sweep hot wallet`
+`BTC LTC DOGE BCH POL DGB SOL USDT USDC ZER RPC HD xpub sweep hot wallet t1 zerod`
 
 ## Rotas
 
@@ -36,7 +36,7 @@
 
 ## Comportamento (bruto)
 
-Clientes RPC / explorers; hot + deposit addresses; DGB tem fallback Cryptoid.
+Clientes RPC / explorers; hot + deposit addresses; DGB Insight; ZER só t1 via zerod (sem z-addr, sem SwapKit).
 
 ## Notas de overview legado
 

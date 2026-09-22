@@ -2,7 +2,9 @@
 //! Decision emails are sent best-effort by the HTTP layer (`api-http::merchant`)
 //! after a successful commit — this module stays free of SMTP/`EmailSender` deps.
 
+use crate::privacy::{self, KIND_MERCHANT_DESC, KIND_MERCHANT_NAME, KIND_MERCHANT_WEB};
 use chrono::{DateTime, Utc};
+use crypto::SecretsService;
 use sqlx::{PgPool, Row};
 use uuid::Uuid;
 
@@ -28,7 +30,7 @@ pub struct MerchantStatusView {
     pub applied_at: Option<DateTime<Utc>>,
 }
 
-pub async fn get_status(pool: &PgPool, user_id: Uuid) -> Result<MerchantStatusView, MerchantError> {
+pub async fn get_status(pool: &PgPool, secrets: Option<&SecretsService>, user_id: Uuid) -> Result<MerchantStatusView, MerchantError> {
     let row = sqlx::query(
         "SELECT merchant_status::text as status, merchant_rejection_reason, merchant_business_name, \
          merchant_website, merchant_description, merchant_applied_at FROM users WHERE id = $1",
@@ -37,12 +39,13 @@ pub async fn get_status(pool: &PgPool, user_id: Uuid) -> Result<MerchantStatusVi
     .fetch_optional(pool)
     .await?;
     let row = row.ok_or(MerchantError::NotFound)?;
+    let key = user_id.to_string();
     Ok(MerchantStatusView {
         status: row.get("status"),
         rejection_reason: row.get("merchant_rejection_reason"),
-        business_name: row.get("merchant_business_name"),
-        website: row.get("merchant_website"),
-        description: row.get("merchant_description"),
+        business_name: privacy::open_opt_option(secrets, KIND_MERCHANT_NAME, &key, row.get::<Option<String>, _>("merchant_business_name").as_deref()),
+        website: privacy::open_opt_option(secrets, KIND_MERCHANT_WEB, &key, row.get::<Option<String>, _>("merchant_website").as_deref()),
+        description: privacy::open_opt_option(secrets, KIND_MERCHANT_DESC, &key, row.get::<Option<String>, _>("merchant_description").as_deref()),
         applied_at: row.get("merchant_applied_at"),
     })
 }
@@ -50,7 +53,11 @@ pub async fn get_status(pool: &PgPool, user_id: Uuid) -> Result<MerchantStatusVi
 /// Apply (or re-apply after rejection). Atomic claim: only succeeds from
 /// `NONE`/`REJECTED`, so a second concurrent apply while one is already
 /// PENDING/APPROVED is rejected instead of silently overwriting it.
-pub async fn apply(pool: &PgPool, user_id: Uuid, business_name: &str, website: &str, description: &str) -> Result<MerchantStatusView, MerchantError> {
+pub async fn apply(pool: &PgPool, secrets: Option<&SecretsService>, user_id: Uuid, business_name: &str, website: &str, description: &str) -> Result<MerchantStatusView, MerchantError> {
+    let key = user_id.to_string();
+    let business_name = privacy::seal_opt(secrets, KIND_MERCHANT_NAME, &key, business_name);
+    let website = privacy::seal_opt(secrets, KIND_MERCHANT_WEB, &key, website);
+    let description = privacy::seal_opt(secrets, KIND_MERCHANT_DESC, &key, description);
     let result = sqlx::query(
         "UPDATE users SET merchant_status = 'PENDING'::merchant_status, merchant_business_name = $2, \
          merchant_website = $3, merchant_description = $4, merchant_applied_at = now(), \
@@ -58,15 +65,15 @@ pub async fn apply(pool: &PgPool, user_id: Uuid, business_name: &str, website: &
          WHERE id = $1 AND merchant_status IN ('NONE', 'REJECTED')",
     )
     .bind(user_id)
-    .bind(business_name)
-    .bind(website)
-    .bind(description)
+    .bind(&business_name)
+    .bind(&website)
+    .bind(&description)
     .execute(pool)
     .await?;
     if result.rows_affected() != 1 {
         return Err(MerchantError::AlreadyPending);
     }
-    get_status(pool, user_id).await
+    get_status(pool, secrets, user_id).await
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -81,11 +88,11 @@ pub struct ApplicationView {
     pub rejection_reason: Option<String>,
 }
 
-pub async fn list_applications(pool: &PgPool, status: Option<&str>) -> Result<Vec<ApplicationView>, MerchantError> {
+pub async fn list_applications(pool: &PgPool, secrets: Option<&SecretsService>, status: Option<&str>) -> Result<Vec<ApplicationView>, MerchantError> {
     let rows = match status {
         Some(s) => {
             sqlx::query(
-                "SELECT id, email, merchant_status::text as status, merchant_business_name, merchant_website, \
+                "SELECT id, email, email_enc, merchant_status::text as status, merchant_business_name, merchant_website, \
                  merchant_description, merchant_applied_at, merchant_rejection_reason \
                  FROM users WHERE merchant_status = $1::merchant_status ORDER BY merchant_applied_at ASC",
             )
@@ -95,7 +102,7 @@ pub async fn list_applications(pool: &PgPool, status: Option<&str>) -> Result<Ve
         }
         None => {
             sqlx::query(
-                "SELECT id, email, merchant_status::text as status, merchant_business_name, merchant_website, \
+                "SELECT id, email, email_enc, merchant_status::text as status, merchant_business_name, merchant_website, \
                  merchant_description, merchant_applied_at, merchant_rejection_reason \
                  FROM users WHERE merchant_status != 'NONE' ORDER BY merchant_applied_at ASC",
             )
@@ -105,15 +112,21 @@ pub async fn list_applications(pool: &PgPool, status: Option<&str>) -> Result<Ve
     };
     Ok(rows
         .into_iter()
-        .map(|r| ApplicationView {
-            user_id: r.get("id"),
-            email: r.get("email"),
-            status: r.get("status"),
-            business_name: r.get("merchant_business_name"),
-            website: r.get("merchant_website"),
-            description: r.get("merchant_description"),
-            applied_at: r.get("merchant_applied_at"),
-            rejection_reason: r.get("merchant_rejection_reason"),
+        .map(|r| {
+            let user_id: Uuid = r.get("id");
+            let key = user_id.to_string();
+            let email: String = r.get("email");
+            let email_enc: Option<String> = r.get("email_enc");
+            ApplicationView {
+                user_id,
+                email: privacy::reveal_stored_email(secrets, user_id, &email, email_enc.as_deref()),
+                status: r.get("status"),
+                business_name: privacy::open_opt_option(secrets, KIND_MERCHANT_NAME, &key, r.get::<Option<String>, _>("merchant_business_name").as_deref()),
+                website: privacy::open_opt_option(secrets, KIND_MERCHANT_WEB, &key, r.get::<Option<String>, _>("merchant_website").as_deref()),
+                description: privacy::open_opt_option(secrets, KIND_MERCHANT_DESC, &key, r.get::<Option<String>, _>("merchant_description").as_deref()),
+                applied_at: r.get("merchant_applied_at"),
+                rejection_reason: r.get("merchant_rejection_reason"),
+            }
         })
         .collect())
 }

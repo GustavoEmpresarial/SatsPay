@@ -15,7 +15,7 @@
 
 ## Keywords (busca)
 
-`settings SettingsPage /settings /auth/2fa/request /auth/me /auth/security-logs /auth/username /oauth/authorized-apps /oauth/authorized-apps/:id Perfil & Conta Segurança & 2FA Sessões & Atividades Aplicações Conectadas user`
+`settings SettingsPage /settings /auth/2fa/request /auth/me /auth/security-logs /auth/username /me/erase /oauth/authorized-apps /oauth/authorized-apps/:id Perfil & Conta Segurança & 2FA Sessões & Atividades Aplicações Conectadas user`
 
 ## Rotas
 
@@ -34,6 +34,7 @@
 - `/auth/me` (prefixo `/v1` no servidor)
 - `/auth/security-logs` (prefixo `/v1` no servidor)
 - `/auth/username` (prefixo `/v1` no servidor)
+- `/me/erase` (prefixo `/v1` no servidor)
 - `/oauth/authorized-apps` (prefixo `/v1` no servidor)
 - `/oauth/authorized-apps/:id` (prefixo `/v1` no servidor)
 
@@ -44,7 +45,7 @@
 
 ## Comportamento (bruto)
 
-Página React `SettingsPage`. Chama 6 endpoint(s) via `api()`. Abas/labels: Perfil & Conta, Segurança & 2FA, Sessões & Atividades, Aplicações Conectadas.
+Página React `SettingsPage`. Chama 7 endpoint(s) via `api()`. Abas/labels: Perfil & Conta, Segurança & 2FA, Sessões & Atividades, Aplicações Conectadas.
 
 ## Notas de overview legado
 

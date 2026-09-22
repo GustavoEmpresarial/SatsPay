@@ -16,7 +16,11 @@ export function coinLogo(coin: Coin | string): string {
   // Only symbols we actually ship an icon for; anything else would 404 and
   // render as a broken image.
   const known = (COINS as readonly string[]).includes(sym);
-  return `${BASE}/${known ? sym.toLowerCase() : 'generic'}.svg`;
+  const file = known ? sym.toLowerCase() : 'generic';
+  // PEPE is a raster mark. An SVG that embeds that image stays blank when
+  // used as <img>, which is how every coin icon on the site is rendered.
+  const ext = sym === 'PEPE' ? 'png' : 'svg';
+  return `${BASE}/${file}.${ext}`;
 }
 
 /** Absolute variant, for anything rendered outside this origin (emails, SDK). */

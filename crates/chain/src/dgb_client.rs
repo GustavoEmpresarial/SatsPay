@@ -1,17 +1,23 @@
-//! DigiByte Insight / Blockbook client — live UTXOs, fee estimate, broadcast.
+//! DigiByte client — self-hosted JSON-RPC (`scantxoutset`) first, Insight/Blockbook fallback.
 
 use crate::btc_sign::Utxo;
 use crate::types::{ChainError, OnchainTx};
+use crate::utxo_node_rpc::UtxoNodeRpc;
 use serde::Deserialize;
 use serde_json::json;
 
 pub struct DgbClient {
     http: reqwest::Client,
     bases: Vec<String>,
+    rpc: Option<UtxoNodeRpc>,
 }
 
 impl DgbClient {
     pub fn new(primary: &str) -> Self {
+        Self::with_rpc(primary, None)
+    }
+
+    pub fn with_rpc(primary: &str, rpc_url: Option<&str>) -> Self {
         let mut bases = vec![primary.trim_end_matches('/').to_string()];
         for extra in [
             "https://digiexplorer.info/api",
@@ -21,7 +27,20 @@ impl DgbClient {
                 bases.push(extra.to_string());
             }
         }
-        Self { http: reqwest::Client::new(), bases }
+        let rpc = rpc_url.and_then(|raw| {
+            let raw = raw.trim();
+            if raw.is_empty() {
+                return None;
+            }
+            match UtxoNodeRpc::new(raw) {
+                Ok(c) => Some(c),
+                Err(e) => {
+                    tracing::warn!(error = %e.message, "DGB_RPC_URL invalid; Insight fallback only");
+                    None
+                }
+            }
+        });
+        Self { http: reqwest::Client::new(), bases, rpc }
     }
 
     async fn get_json<T: for<'de> Deserialize<'de>>(&self, suffix: &str) -> Result<T, ChainError> {
@@ -40,6 +59,12 @@ impl DgbClient {
     }
 
     pub async fn fetch_deposits(&self, address: &str) -> Result<Vec<OnchainTx>, ChainError> {
+        if let Some(rpc) = &self.rpc {
+            match rpc.scan_address(address).await {
+                Ok(txs) => return Ok(txs),
+                Err(e) => tracing::warn!(error = %e.message, address, "DGB scantxoutset failed; trying Insight"),
+            }
+        }
         if let Ok(utxos) = self.get_json::<Vec<InsightUtxo>>(&format!("/addr/{address}/utxo")).await {
             return Ok(utxos
                 .into_iter()
@@ -66,6 +91,12 @@ impl DgbClient {
     }
 
     pub async fn get_balance(&self, address: &str) -> Result<u128, ChainError> {
+        if let Some(rpc) = &self.rpc {
+            match rpc.get_balance(address).await {
+                Ok(sats) => return Ok(sats),
+                Err(e) => tracing::warn!(error = %e.message, address, "DGB node balance failed; trying Insight"),
+            }
+        }
         // Insight-style `/addr/{address}`
         if let Ok(v) = self.get_json::<serde_json::Value>(&format!("/addr/{address}")).await {
             if let Some(s) = v.get("balanceSat").and_then(|x| x.as_u64()).map(|u| u as u128) {
@@ -126,6 +157,12 @@ impl DgbClient {
     }
 
     pub async fn fetch_utxos(&self, address: &str) -> Result<Vec<Utxo>, ChainError> {
+        if let Some(rpc) = &self.rpc {
+            match rpc.fetch_utxos(address).await {
+                Ok(utxos) => return Ok(utxos),
+                Err(e) => tracing::warn!(error = %e.message, address, "DGB node UTXOs failed; trying Insight"),
+            }
+        }
         let raw: Vec<InsightUtxo> = self.get_json(&format!("/addr/{address}/utxo")).await?;
         Ok(raw
             .into_iter()
@@ -139,14 +176,26 @@ impl DgbClient {
     }
 
     pub async fn estimate_fee_sat_per_byte(&self) -> Result<u64, ChainError> {
+        if let Some(rpc) = &self.rpc {
+            if let Ok(fee) = rpc.estimate_fee_sat_per_byte().await {
+                return Ok(fee.max(1));
+            }
+        }
         let fee_per_kb: f64 = self.get_json("/utils/estimatefee?nbBlocks=2").await.unwrap_or(-1.0);
         if fee_per_kb > 0.0 {
             return Ok(((fee_per_kb * 100_000_000.0) / 1000.0).max(1.0) as u64);
         }
-        Err(ChainError { message: "DGB fee estimate unavailable".into() })
+        // DigiByte floors at 1 sat/vB; keep withdrawals unblocked if indexers are down.
+        Ok(1)
     }
 
     pub async fn broadcast(&self, raw_hex: &str) -> Result<String, ChainError> {
+        if let Some(rpc) = &self.rpc {
+            match rpc.broadcast(raw_hex).await {
+                Ok(txid) => return Ok(txid),
+                Err(e) => tracing::warn!(error = %e.message, "DGB sendrawtransaction failed; trying Insight"),
+            }
+        }
         let mut last = String::new();
         for base in &self.bases {
             let url = format!("{base}/tx/send");

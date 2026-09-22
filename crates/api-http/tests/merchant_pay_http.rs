@@ -73,6 +73,31 @@ async fn merchant_pay_simulate_webhook_apikey(pool: PgPool) {
 
     let inv1 = create(state.clone(), merch_token.clone(), format!("o-{}", Uuid::new_v4())).await;
 
+    // The merchant cannot pay their own invoice from the personal wallet.
+    common::credit_personal(&state.pool, merch_uid, Coin::Pol, 5_000_000).await;
+    let own = api_http::app_without_metrics(state.clone())
+        .oneshot(
+            axum::http::Request::builder()
+                .method("POST")
+                .uri(format!("/v1/public/pay/{inv1}/balance"))
+                .header("authorization", format!("Bearer {merch_token}"))
+                .header("x-real-ip", "203.0.113.86")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let own_st = own.status();
+    let own_bytes = own.into_body().collect().await.unwrap().to_bytes();
+    assert_eq!(
+        own_st,
+        axum::http::StatusCode::BAD_REQUEST,
+        "own pay={}",
+        String::from_utf8_lossy(&own_bytes)
+    );
+    let own_json: serde_json::Value = serde_json::from_slice(&own_bytes).unwrap();
+    assert_eq!(own_json["code"], "CANNOT_PAY_OWN_INVOICE");
+
     // Payer with balance
     let (state_p, payer_token, payer_id, _) = common::register_user(pool.clone(), "payer").await;
     let payer_uid = Uuid::parse_str(&payer_id).unwrap();

@@ -16,6 +16,7 @@ pub mod merchant_settings;
 pub mod network_fees;
 pub mod oauth;
 pub mod pricing;
+pub mod privacy;
 pub mod public_api;
 pub mod referral;
 pub mod rewards;

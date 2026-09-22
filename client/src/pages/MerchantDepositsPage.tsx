@@ -151,6 +151,10 @@ export function MerchantDepositsPage() {
           <p className="text-xs sm:text-sm text-ink-muted mt-1">
             Histórico completo de faturas geradas via API REST com monitoramento de confirmações blockchain e entrega de webhooks (IPN).
           </p>
+          <p className="mt-2 text-xs text-ink rounded-xl border border-bitcoin/25 bg-bitcoin/5 px-3 py-2 max-w-2xl">
+            O cliente paga o valor integral. A taxa de 0,25% é descontada do que você recebe
+            (<span className="font-mono">feeAmount + netAmount = amount</span>).
+          </p>
         </div>
 
         {/* Cohesive Action Toolbar — one size for all four */}
@@ -402,7 +406,9 @@ export function MerchantDepositsPage() {
                   <th className="p-3.5">Ordem / Identificador</th>
                   <th className="p-3.5">Cliente / Site</th>
                   <th className="p-3.5">Moeda</th>
-                  <th className="p-3.5">Valor Cobrado</th>
+                  <th className="p-3.5">Cobrado</th>
+                  <th className="p-3.5">Taxa (0,25%)</th>
+                  <th className="p-3.5">Você recebe</th>
                   <th className="p-3.5">Status</th>
                   <th className="p-3.5">Webhook IPN</th>
                   <th className="p-3.5">Data / Hora</th>
@@ -446,6 +452,14 @@ export function MerchantDepositsPage() {
 
                       <td className="p-3.5 font-mono font-bold text-ink">
                         {formatLedgerAmount(inv.amount, inv.coin)}{' '}
+                        <span className="text-[10px] text-ink-muted">{inv.coin}</span>
+                      </td>
+                      <td className="p-3.5 font-mono text-ink-muted">
+                        {formatLedgerAmount(inv.feeAmount, inv.coin)}{' '}
+                        <span className="text-[10px]">{inv.coin}</span>
+                      </td>
+                      <td className="p-3.5 font-mono font-bold text-emerald-700">
+                        {formatLedgerAmount(inv.netAmount, inv.coin)}{' '}
                         <span className="text-[10px] text-ink-muted">{inv.coin}</span>
                       </td>
 

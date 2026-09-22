@@ -188,10 +188,11 @@ pub async fn dispatch_invoice_webhook(
     inv: &MerchantDepositInvoice,
     secrets: &SecretsService,
 ) -> DeliveryOutcome {
+    let inv = db::merchant_deposits::reveal_invoice_pii(secrets, inv);
     let attempt = inv.webhook_attempts + 1;
     let now = Utc::now();
     let delivery_id = Uuid::new_v4();
-    let payload_str = invoice_payload(inv, attempt, now).to_string();
+    let payload_str = invoice_payload(&inv, attempt, now).to_string();
     let signature = secrets.sign_webhook_payload(&inv.merchant_id.to_string(), &payload_str);
 
     let outcome = post_signed(&inv.callback_url, &payload_str, &signature, now, delivery_id).await;

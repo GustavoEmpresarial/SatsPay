@@ -8,6 +8,7 @@ pub mod auth;
 pub mod client_ip;
 pub mod deposits;
 pub mod faucet;
+pub mod http_error;
 pub mod lend;
 pub mod merchant;
 pub mod merchant_deposits;
@@ -152,9 +153,9 @@ async fn record_server_errors<R: AuthRepo + 'static>(
                 method: Some(method),
                 status_code: Some(status_code),
                 user_id: None,
-                ip_address,
+                ip_address: ip_address.map(|ip| state.secrets.ip_fingerprint(&ip)),
                 request_payload: None,
-                user_agent,
+                user_agent: user_agent.map(|ua| ua.chars().take(80).collect()),
             };
             let _ = db::telemetry::record_error(&pool, payload).await;
         });

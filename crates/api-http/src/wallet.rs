@@ -39,14 +39,18 @@ async fn list_wallets<R: AuthRepo>(
     Query(q): Query<ListWalletsQuery>,
 ) -> Response {
     let kind = q.kind.as_deref().unwrap_or("PERSONAL");
-    let kind = if kind.eq_ignore_ascii_case("DEVELOPER") { "DEVELOPER" } else { "PERSONAL" };
+    let kind = match kind.to_ascii_uppercase().as_str() {
+        "DEVELOPER" => "DEVELOPER",
+        "MERCHANT" => "MERCHANT",
+        _ => "PERSONAL",
+    };
     match db::wallet::list_wallets(&state.pool, user.id, kind).await {
         Ok(wallets) => {
             let payload: Vec<WalletResponse> =
                 wallets.into_iter().map(|w| WalletResponse { coin: w.coin, address: w.address, balance: w.balance.to_string(), kind: w.kind }).collect();
             Json(payload).into_response()
         }
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "error": e.to_string() }))).into_response(),
+        Err(e) => crate::http_error::internal_error(&e),
     }
 }
 
@@ -76,7 +80,7 @@ async fn transfer<R: AuthRepo>(
                 "WALLET_INTERNAL_TRANSFER".into(),
                 "Wallet".into(),
                 None,
-                Some(ip),
+                Some(state.secrets.ip_fingerprint(&ip)),
                 Some(serde_json::json!({ "coin": body.coin, "amount": body.amount, "direction": direction })),
             );
             StatusCode::NO_CONTENT.into_response()
@@ -107,7 +111,11 @@ struct LedgerEntryResponse {
 async fn list_ledger<R: AuthRepo>(State(state): State<AppState<R>>, user: AuthUser, Query(q): Query<LedgerQuery>) -> Response {
     let take = q.take.unwrap_or(50);
     let kind = q.kind.as_deref().unwrap_or("PERSONAL");
-    let kind = if kind.eq_ignore_ascii_case("DEVELOPER") { "DEVELOPER" } else { "PERSONAL" };
+    let kind = match kind.to_ascii_uppercase().as_str() {
+        "DEVELOPER" => "DEVELOPER",
+        "MERCHANT" => "MERCHANT",
+        _ => "PERSONAL",
+    };
     match db::wallet::list_ledger_entries(&state.pool, user.id, kind, q.coin.as_deref(), take).await {
         Ok(entries) => {
             let payload: Vec<LedgerEntryResponse> = entries
@@ -123,6 +131,6 @@ async fn list_ledger<R: AuthRepo>(State(state): State<AppState<R>>, user: AuthUs
                 .collect();
             Json(serde_json::json!({ "entries": payload })).into_response()
         }
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "error": e.to_string() }))).into_response(),
+        Err(e) => crate::http_error::internal_error(&e),
     }
 }

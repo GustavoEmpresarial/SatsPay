@@ -48,6 +48,8 @@ export function AdminLoginPage() {
       });
       if ('codeSent' in res) {
         setCodeSent(true);
+        setCaptchaToken(null);
+        turnstileRef.current?.reset();
       } else {
         setSession({
           admin: { id: res.user.id, email: res.user.email },
@@ -156,14 +158,12 @@ export function AdminLoginPage() {
                 </div>
               )}
 
-              {!codeSent && (
-                <Turnstile
-                  ref={turnstileRef}
-                  action={ADMIN_LOGIN_CAPTCHA_ACTION}
-                  onVerify={(token) => setCaptchaToken(token)}
-                  onReset={() => setCaptchaToken(null)}
-                />
-              )}
+              <Turnstile
+                ref={turnstileRef}
+                action={ADMIN_LOGIN_CAPTCHA_ACTION}
+                onVerify={(token) => setCaptchaToken(token)}
+                onReset={() => setCaptchaToken(null)}
+              />
 
               <button
                 disabled={loading}

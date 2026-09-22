@@ -61,6 +61,8 @@ where
         // tokens live for `JWT_ACCESS_TTL_SECS` and cannot be revoked, so a
         // stale `role` claim would keep a demoted admin privileged, and a
         // deleted account would keep working, until the token expired.
+        // `get_user_by_id` / `find_user_by_id` is `WHERE erased_at IS NULL`:
+        // an erased account is `Ok(None)` → 401 on every request (no jti deny-list).
         match state.auth.get_user_by_id(id).await {
             Ok(Some(user)) => Ok(AuthUser { id, role: user.role, two_factor: user.two_factor_enabled }),
             Ok(None) => Err(unauthorized()),

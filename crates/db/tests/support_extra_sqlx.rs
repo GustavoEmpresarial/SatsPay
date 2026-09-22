@@ -11,24 +11,24 @@ async fn support_topic_subjects_and_staff_on_closed(pool: PgPool) {
     let staff = common::insert_user(&pool, "sup2-s").await;
 
     // whitespace-only after trim on staff
-    let t = db::support::create_ticket(&pool, user, "other", "hello other")
+    let t = db::support::create_ticket(&pool, None, user, "other", "hello other")
         .await
         .unwrap();
     assert!(t.ticket.subject.contains("Outro"));
 
-    db::support::set_ticket_status(&pool, t.ticket.id, "CLOSED")
+    db::support::set_ticket_status(&pool, None, t.ticket.id, "CLOSED")
         .await
         .unwrap();
 
     // staff can still append note on CLOSED (status stays CLOSED)
-    let after = db::support::add_staff_message(&pool, staff, t.ticket.id, "nota final")
+    let after = db::support::add_staff_message(&pool, None, staff, t.ticket.id, "nota final")
         .await
         .unwrap();
     assert_eq!(after.ticket.status, "CLOSED");
     assert!(after.messages.iter().any(|m| m.author_role == "STAFF"));
 
     // list empty for stranger
-    let empty = db::support::list_tickets_for_user(&pool, staff).await.unwrap();
+    let empty = db::support::list_tickets_for_user(&pool, None, staff).await.unwrap();
     assert!(empty.is_empty() || empty.iter().all(|x| x.id != t.ticket.id));
 
     // Display all error variants (Display coverage)

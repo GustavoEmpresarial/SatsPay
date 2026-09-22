@@ -13,6 +13,8 @@ use shared::Coin;
 use sqlx::PgPool;
 use std::sync::Arc;
 use std::time::Duration;
+use relay::RelayClient;
+use changenow::ChangeNowClient;
 use swapkit::SwapKitClient;
 use tower::ServiceExt;
 use uuid::Uuid;
@@ -30,6 +32,8 @@ pub async fn seed_price_cache(pool: &PgPool) {
         (Coin::Sol, 15_000_000_000),
         (Coin::Usdt, 100_000_000),
         (Coin::Usdc, 100_000_000),
+        (Coin::Zer, 1_000_000),
+        (Coin::Pepe, 400),
     ] {
         sqlx::query(
             "INSERT INTO price_cache (coin, price_scaled, price_decimals, fetched_at) \
@@ -59,7 +63,7 @@ pub fn test_state(pool: PgPool) -> AppState<PgAuthRepo> {
     let email: Arc<dyn domain::auth::EmailSender> = Arc::new(NoopEmailSender);
     let secrets = Arc::new(SecretsService::from_hex(&"ab".repeat(32)).unwrap());
     let auth = Arc::new(AuthService::new(
-        Arc::new(PgAuthRepo::new(pool.clone())),
+        Arc::new(PgAuthRepo::with_secrets(pool.clone(), secrets.clone())),
         jwt,
         secrets.clone(),
         config,
@@ -94,6 +98,8 @@ pub fn test_state(pool: PgPool) -> AppState<PgAuthRepo> {
             public_base_url: "https://www.satspay.pro".into(),
         },
         swapkit: Arc::new(SwapKitClient::from_env()),
+        relay: Arc::new(RelayClient::from_env()),
+        changenow: Arc::new(ChangeNowClient::from_env()),
     }
 }
 
@@ -102,6 +108,13 @@ pub fn test_state(pool: PgPool) -> AppState<PgAuthRepo> {
 pub fn test_state_with_swapkit(pool: PgPool, swapkit_base: &str) -> AppState<PgAuthRepo> {
     let mut state = test_state(pool);
     state.swapkit = Arc::new(SwapKitClient::new_with_base(swapkit_base, Some("test-key".into())));
+    state
+}
+
+#[allow(dead_code)]
+pub fn test_state_with_relay(pool: PgPool, relay_base: &str) -> AppState<PgAuthRepo> {
+    let mut state = test_state(pool);
+    state.relay = Arc::new(RelayClient::new_for_tests(relay_base));
     state
 }
 

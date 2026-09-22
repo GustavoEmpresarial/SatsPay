@@ -210,7 +210,20 @@ Integre contra o `code`, nunca contra o texto.
 
 ### `GET /v1/withdrawals/history`
 - **Autenticação**: Bearer JWT
-- **Descrição**: Histórico de saques já liquidados ou rejeitados.
+- **Descrição**: Histórico de saques do usuário autenticado.
+
+### `GET /v1/withdrawals/addresses`
+- **Autenticação**: Bearer JWT
+- **Descrição**: Agenda de endereços de saque (servidor; sem localStorage).
+
+### `POST /v1/withdrawals/addresses`
+- **Autenticação**: Bearer JWT
+- **Body**: `{ "coin": "BTC", "label": "cold", "address": "bc1…" }`
+- **Descrição**: Salva/atualiza um endereço na agenda.
+
+### `DELETE /v1/withdrawals/addresses/:id`
+- **Autenticação**: Bearer JWT
+- **Descrição**: Remove um endereço da agenda.
 
 ---
 
@@ -264,6 +277,11 @@ Integre contra o `code`, nunca contra o texto.
 ---
 
 ## 6. Faucet e Diretório Faucetlist (`/v1/faucet` e `/v1/faucetlist`)
+
+### `GET /v1/faucet/status`
+- **Autenticação**: Bearer JWT
+- **Descrição**: Relógio de 11h por moeda, lido de `faucet_claims`. Alias `/faucet/status`.
+  `{ "cooldownMinutes": 660, "coins": [{ "coin": "BTC", "nextClaimAt": null }] }`. `nextClaimAt` null = livre.
 
 ### `POST /v1/faucet/claim/:coin`
 - **Autenticação**: Bearer JWT
@@ -405,8 +423,8 @@ Integre contra o `code`, nunca contra o texto.
   para unidades inteiras a favor do comerciante — `feeAmount + netAmount == amount` exato.
 - **Resposta `201`**: `id`, `status`, `coin`, `amount`, `feeAmount` (0,25%), `netAmount`,
   `depositAddress`, `payUrl` (relativo), `checkoutUrl` (absoluto, via `PUBLIC_BASE_URL`),
-  `qrCode` (URI `moeda:endereço?amount=`), `orderId`, `expiresAt`, `createdAt`.
-- **Pausa**: BTC/LTC/DOGE/DGB → `503 DEPOSIT_PAUSED` (`shared::DEPOSIT_WITHDRAW_PAUSED_COINS`).
+  `qrCode` (endereço `0x` cru para POL/USDT/USDC/PEPE; BIP21 para UTXO — não use `pol:` nem `ethereum:`), `orderId`, `expiresAt`, `createdAt`.
+- **Pausa**: BTC/LTC/DOGE/BCH/DGB → `503 DEPOSIT_PAUSED` (`shared::DEPOSIT_WITHDRAW_PAUSED_COINS`).
 
 ### `GET /v1/merchant/deposits` / `GET /v1/merchant/deposits/:id`
 - **Autenticação**: igual à criação. `:id` de outro comerciante → `403 INVOICE_FORBIDDEN`.
@@ -445,11 +463,20 @@ Integre contra o `code`, nunca contra o texto.
 ### `POST /v1/merchant/deposits/:id/test-webhook`
 - **Autenticação**: Bearer JWT (dono da fatura). Dispara uma entrega de teste.
 
+### `GET /v1/me/export` e `POST /v1/me/erase`
+- Sessão JWT. Export devolve perfil, saldos (SUM do ledger), faturas sem `callbackUrl` e prefixos de key.
+- Erase exige `confirmEmail` + `confirm: "APAGAR"`. Anonimiza e-mail/username, revoga sessões e keys. **Não** apaga `ledger_entries` (LGPD art. 16).
+
 ### `GET /v1/public/pay/:id` e `POST /v1/public/pay/:id/balance`
 - Checkout público (sem `callbackUrl`/`siteUserId` na resposta) e pagamento com saldo SatsPay.
+- Rate class `public-pay` por IP: GET 60/min, `POST .../select-coin` 20/min, `POST .../balance` 10/min
+  (aliases sem `/v1` iguais). Excesso → `429` `RATE_LIMITED`.
 - `amount` é o inteiro de ledger; `amountDisplay` é a mesma quantia em unidades da moeda,
-  e `qrCode` usa a quantia da moeda (BIP21/EIP-681) — um carteira que escaneasse o inteiro
-  de ledger pediria 2,5 bilhões de USDT numa fatura de 25.
+  `qrCode` de EVM é só o endereço. UTXO usa BIP21 com a quantia em moedas, não o inteiro de ledger.
+- `POST .../balance` debita a carteira **pessoal** de quem está logado e credita a carteira
+  **comerciante** do dono da fatura. Se forem a mesma conta, `400 CANNOT_PAY_OWN_INVOICE` e
+  nada é debitado. O checkout é para outro cliente. Mover o próprio dinheiro é a transferência
+  entre carteiras da conta logada (`POST /v1/wallet/transfer`), não esta rota.
 
 ### `GET /v1/public/pay/demo`
 - Fatura sintética para demonstração: sem linha no banco, sem dinheiro, sem webhook.
@@ -555,6 +582,10 @@ Integre contra o `code`, nunca contra o texto.
 - **Descrição**: Liga ou desliga a emissão de um programa sem apagá-lo.
 
 ### Credenciamento de comerciantes
+
+### `GET /v1/admin/users`
+- **Query**: `role` (`USER`|`ADMIN`), `q` (e-mail/username/UUID), `include_erased` (bool), `limit` (1–500, default 200)
+- **Descrição**: Lista contas da plataforma (sem HOUSE). E-mail revelado para admin via `email_enc` quando PII está selado.
 
 ### `GET /v1/admin/merchant/applications`
 - **Descrição**: Fila de pedidos de credenciamento aguardando decisão.
@@ -671,7 +702,13 @@ botão oficial recebe apenas o `checkoutUrl` que o seu backend já criou.
 
 ### `POST /v1/public/send`
 - **Autenticação**: `x-api-key` com escopo `send`; HMAC se a chave exigir.
-- **Body**: `{"coin": "USDT", "amount": "2500000000", "toEmail": "…", "idempotencyKey": "…"}`
+- **Body**: `{"coin": "USDT", "amount": "2500000000", "toEmail": "destinatario@example.com", "idempotencyKey": "…"}`
+- **`toEmail`**: e-mail da conta SatsPay que **recebe**. Dois jeitos, o mesmo campo: o usuário digita o e-mail da conta dele, ou entra com SatsPay e você manda o `email` verificado de `GET /v1/oauth/userinfo`. Não é endereço on-chain.
+- **Resposta de erro**: sempre `{ "error": "…", "code": "…" }`. Trate pelo `code`.
+  - `400 TARGET_INELIGIBLE` — não existe conta com esse e-mail. Nada debitado.
+  - `400 SEND_TO_SELF` — `toEmail` é a conta que emitiu a chave. Não é falta de saldo. Nada debitado. Use outra conta.
+  - `400 DAILY_LIMIT_REACHED` — limite diário da chave. Nada debitado.
+  - `400 WALLET_NOT_FOUND` — sem carteira dessa moeda no remetente ou no destinatário. Nada debitado.
 - **Descrição**: Transfere da carteira do dono da chave para outro usuário **pela plataforma**
   (não é saque on-chain). `idempotencyKey` é obrigatório: repetir a mesma chave devolve a
   operação original em vez de enviar de novo. Há limite diário por conta

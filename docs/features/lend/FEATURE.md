@@ -39,6 +39,8 @@
 
 ## Comportamento (bruto)
 
+**Manutenção (2026-09-21):** UI `/lend` é landing “Manutenção”; API `/v1/lend/*` responde `503 LEND_MAINTENANCE`. Sem supply/borrow/withdraw/repay até reabrir.
+
 Página React `LendPage`. Chama 4 endpoint(s) via `api()`.
 
 ## Notas de overview legado

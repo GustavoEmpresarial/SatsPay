@@ -15,7 +15,8 @@ use axum::{async_trait, Json, Router};
 use bigdecimal::{BigDecimal, ToPrimitive};
 use db::merchant_deposits::{
     create_invoice, get_invoice_by_id, get_invoice_by_order_id, list_invoices_by_merchant,
-    pay_invoice_with_balance, CreateDepositInvoiceInput, MerchantDepositError, MerchantDepositInvoice,
+    pay_invoice_with_balance, reveal_invoice_pii, seal_invoice_pii, CreateDepositInvoiceInput,
+    MerchantDepositError, MerchantDepositInvoice,
 };
 use domain::auth::AuthRepo;
 use serde::Deserialize;
@@ -245,12 +246,32 @@ fn parse_amount(raw: &str, coin: shared::Coin) -> Result<BigDecimal, Rejected> {
     BigDecimal::from_str(raw).map_err(|_| invalid())
 }
 
-/// Payment URI for a wallet to scan. `amount` here is a **decimal quantity of
-/// coins** (BIP21 / EIP-681), not the ledger integer the API takes: a 25 USDT
-/// invoice used to encode `amount=2500000000`, which a scanning wallet reads
-/// as 2.5 billion USDT.
-fn payment_uri(coin: &str, address: &str, ledger_amount: &BigDecimal) -> String {
-    format!("{}:{}?amount={}", coin.to_lowercase(), address, human_amount(coin, ledger_amount))
+/// Payment URI for a wallet to scan. UTXO coins stay BIP21
+/// (`btc:addr?amount=0.001`). EVM wallets dump `pol:` and `ethereum:0x…@137?value=`
+/// as raw text, so POL/USDT/USDC/PEPE encode only the `0x` address. The
+/// amount stays on the checkout page.
+pub(crate) fn payment_uri(coin: &str, address: &str, ledger_amount: &BigDecimal) -> String {
+    let network = match std::env::var("CHAIN_NETWORK").as_deref() {
+        Ok("testnet") => chain::ChainNetwork::Testnet,
+        _ => chain::ChainNetwork::Mainnet,
+    };
+    payment_uri_for(coin, address, ledger_amount, network)
+}
+
+fn payment_uri_for(
+    coin: &str,
+    address: &str,
+    ledger_amount: &BigDecimal,
+    network: chain::ChainNetwork,
+) -> String {
+    let Some(parsed) = coin.parse::<shared::Coin>().ok() else {
+        return format!("{}:{address}?amount={}", coin.to_lowercase(), ledger_amount);
+    };
+    let params = chain::params_for(parsed, network);
+    if params.evm_chain_id.is_some() {
+        return address.to_string();
+    }
+    format!("{}:{address}?amount={}", coin.to_lowercase(), human_amount(coin, ledger_amount))
 }
 
 /// Ledger units (1e-8) rendered as the decimal quantity of coins a human — or
@@ -357,7 +378,7 @@ async fn create_deposit_handler<R: AuthRepo>(
             Some(list) => db::merchant_settings::live_coins(&list),
             None => match db::merchant_settings::accepted_coins(&state.pool, auth.merchant_id).await {
                 Ok(list) => list,
-                Err(e) => return fail(StatusCode::INTERNAL_SERVER_ERROR, "INTERNAL_ERROR", &e.to_string()),
+                Err(e) => return crate::http_error::internal_error(&e),
             },
         };
         if resolved.is_empty() {
@@ -376,7 +397,7 @@ async fn create_deposit_handler<R: AuthRepo>(
         return fail(StatusCode::BAD_REQUEST, "UNKNOWN_COIN", "unknown coin");
     };
     // Same pause list as personal deposits — merchant invoice addresses for
-    // BTC/LTC/DOGE/DGB stay blocked until DEPOSIT_WITHDRAW_PAUSED_COINS is cleared.
+    // BTC/LTC/DOGE/BCH/DGB stay blocked until DEPOSIT_WITHDRAW_PAUSED_COINS is cleared.
     // `/v1/public/send` (ledger payout to users) is intentionally NOT paused.
     if shared::is_deposit_withdraw_paused(coin) {
         return (
@@ -452,7 +473,7 @@ async fn create_deposit_handler<R: AuthRepo>(
             };
         }
         Err(MerchantDepositError::NotFound) => {}
-        Err(e) => return fail(StatusCode::INTERNAL_SERVER_ERROR, "INTERNAL_ERROR", &e.to_string()),
+        Err(e) => return crate::http_error::internal_error(&e),
     }
 
     // Every invoice needs its OWN address: the watcher attributes an on-chain
@@ -473,7 +494,7 @@ async fn create_deposit_handler<R: AuthRepo>(
         }
     };
 
-    let input = CreateDepositInvoiceInput {
+    let mut input = CreateDepositInvoiceInput {
         merchant_id: auth.merchant_id,
         api_key_id: auth.api_key_id,
         site_user_id: body.site_user_id,
@@ -495,6 +516,7 @@ async fn create_deposit_handler<R: AuthRepo>(
         price_decimals,
         quote_price_scaled: quote_price.clone(),
     };
+    seal_invoice_pii(&state.secrets, &mut input);
 
     match create_invoice(&state.pool, input).await {
         Ok(inv) => (StatusCode::CREATED, Json(invoice_json(&inv, &state.settings.public_base_url))).into_response(),
@@ -512,7 +534,7 @@ async fn create_deposit_handler<R: AuthRepo>(
                 ),
             }
         }
-        Err(e) => fail(StatusCode::BAD_REQUEST, "INVOICE_CREATE_FAILED", &e.to_string()),
+        Err(_) => fail(StatusCode::BAD_REQUEST, "INVOICE_CREATE_FAILED", "could not create invoice"),
     }
 }
 
@@ -522,8 +544,11 @@ async fn list_deposits_handler<R: AuthRepo>(
     auth: MerchantAuth,
 ) -> Response {
     match list_invoices_by_merchant(&state.pool, auth.merchant_id, query.limit.unwrap_or(50), query.offset.unwrap_or(0)).await {
-        Ok(list) => Json(json!({ "invoices": list })).into_response(),
-        Err(e) => fail(StatusCode::INTERNAL_SERVER_ERROR, "INTERNAL_ERROR", &e.to_string()),
+        Ok(list) => {
+            let opened: Vec<_> = list.iter().map(|inv| reveal_invoice_pii(&state.secrets, inv)).collect();
+            Json(json!({ "invoices": opened })).into_response()
+        }
+        Err(_) => fail(StatusCode::INTERNAL_SERVER_ERROR, "INTERNAL_ERROR", "internal error"),
     }
 }
 
@@ -537,7 +562,7 @@ async fn get_deposit_handler<R: AuthRepo>(
             if inv.merchant_id != auth.merchant_id {
                 return fail(StatusCode::FORBIDDEN, "INVOICE_FORBIDDEN", "forbidden");
             }
-            Json(inv).into_response()
+            Json(reveal_invoice_pii(&state.secrets, &inv)).into_response()
         }
         Err(_) => fail(StatusCode::NOT_FOUND, "INVOICE_NOT_FOUND", "invoice not found"),
     }
@@ -590,7 +615,7 @@ async fn public_invoice_json<R: AuthRepo>(state: &AppState<R>, inv: &MerchantDep
                     "name": shared::coin_config(option.coin).name,
                     "amount": option.amount.to_string(),
                     "amountDisplay": human_amount(option.coin.as_str(), &option.amount),
-                    "logoUrl": format!("{base}/sdk/coins/{}.svg", option.coin.as_str().to_lowercase()),
+                    "logoUrl": crate::public_catalog::coin_logo_url(base, option.coin.as_str()),
                     "minConfirmations": shared::coin_config(option.coin).min_confirmations,
                 }));
             }
@@ -614,7 +639,7 @@ async fn public_invoice_json<R: AuthRepo>(state: &AppState<R>, inv: &MerchantDep
         "expiresAt": inv.expires_at,
         "paidAt": inv.paid_at,
         "txHash": inv.tx_hash,
-        "logoUrl": format!("{base}/sdk/coins/{}.svg", inv.coin.to_lowercase()),
+        "logoUrl": crate::public_catalog::coin_logo_url(base, &inv.coin),
         // Multi-coin: empty while there is nothing to choose between.
         "coinOptions": options,
         "coinLocked": !can_switch,
@@ -688,7 +713,7 @@ async fn select_coin_handler<R: AuthRepo>(
     // customer flipping between two coins must not mint a second one.
     let existing = match db::merchant_multicoin::find_invoice_address(&state.pool, inv.id, coin).await {
         Ok(found) => found,
-        Err(e) => return fail(StatusCode::INTERNAL_SERVER_ERROR, "INTERNAL_ERROR", &e.to_string()),
+        Err(e) => return crate::http_error::internal_error(&e),
     };
 
     let addr = match existing {
@@ -741,7 +766,7 @@ async fn select_coin_handler<R: AuthRepo>(
             .await
             {
                 Ok(a) => a,
-                Err(e) => return fail(StatusCode::INTERNAL_SERVER_ERROR, "INTERNAL_ERROR", &e.to_string()),
+                Err(e) => return crate::http_error::internal_error(&e),
             }
         }
     };
@@ -756,7 +781,7 @@ async fn select_coin_handler<R: AuthRepo>(
         Err(db::merchant_multicoin::MultiCoinError::NotPayable) => {
             fail(StatusCode::BAD_REQUEST, "INVOICE_INVALID_STATE", "invoice is no longer payable")
         }
-        Err(e) => fail(StatusCode::INTERNAL_SERVER_ERROR, "INTERNAL_ERROR", &e.to_string()),
+        Err(e) => crate::http_error::internal_error(&e),
     }
 }
 
@@ -795,6 +820,13 @@ async fn pay_with_balance_handler<R: AuthRepo>(
         }
         Err(MerchantDepositError::InsufficientBalance) => {
             fail(StatusCode::BAD_REQUEST, "INSUFFICIENT_BALANCE", "insufficient balance")
+        }
+        Err(MerchantDepositError::PayerIsMerchant) => {
+            fail(
+                StatusCode::BAD_REQUEST,
+                "CANNOT_PAY_OWN_INVOICE",
+                "this invoice belongs to the same SatsPay account that is paying. the checkout cannot move money from your personal wallet into your own merchant wallet. nothing was debited",
+            )
         }
         Err(MerchantDepositError::InvalidStatus) => {
             fail(StatusCode::BAD_REQUEST, "INVOICE_INVALID_STATE", "invoice already paid or expired")
@@ -838,7 +870,7 @@ async fn get_settings_handler<R: AuthRepo>(State(state): State<AppState<R>>, aut
                 .collect::<Vec<_>>(),
         }))
         .into_response(),
-        Err(e) => fail(StatusCode::INTERNAL_SERVER_ERROR, "INTERNAL_ERROR", &e.to_string()),
+        Err(e) => crate::http_error::internal_error(&e),
     }
 }
 
@@ -861,7 +893,7 @@ async fn put_settings_handler<R: AuthRepo>(State(state): State<AppState<R>>, aut
             "NO_USABLE_COIN",
             "at least one accepted coin must currently be enabled for deposits",
         ),
-        Err(e) => fail(StatusCode::INTERNAL_SERVER_ERROR, "INTERNAL_ERROR", &e.to_string()),
+        Err(e) => crate::http_error::internal_error(&e),
     }
 }
 
@@ -1018,9 +1050,25 @@ mod display_tests {
 
     #[test]
     fn payment_uri_encodes_the_coin_quantity() {
-        let uri = payment_uri("USDT", "0xabc", &BigDecimal::from(2_500_000_000u64));
-        assert_eq!(uri, "usdt:0xabc?amount=25");
-        assert!(!uri.contains("2500000000"), "wallet would send 2.5 billion USDT: {uri}");
+        let net = chain::ChainNetwork::Mainnet;
+        let uri = payment_uri_for("USDT", "0xabc", &BigDecimal::from(2_500_000_000u64), net);
+        assert_eq!(uri, "0xabc");
+        assert!(!uri.contains(':'), "wallet shows the URI as text: {uri}");
+        assert_eq!(
+            payment_uri_for("BTC", "bc1qtest", &BigDecimal::from(100_000u64), net),
+            "btc:bc1qtest?amount=0.001"
+        );
+    }
+
+    #[test]
+    fn pol_qr_is_the_bare_address() {
+        let uri = payment_uri_for(
+            "POL",
+            "0x12E5FCB80D69929Daa4e978C26De73271f9E70A5",
+            &BigDecimal::from(190_485_262u64),
+            chain::ChainNetwork::Mainnet,
+        );
+        assert_eq!(uri, "0x12E5FCB80D69929Daa4e978C26De73271f9E70A5");
     }
 
     #[test]

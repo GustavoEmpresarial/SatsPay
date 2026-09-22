@@ -26,5 +26,6 @@ describe('Admin Login — structure', () => {
     const src = readFileSync(pagePath, 'utf8');
     expect(src).toContain('ADMIN_LOGIN_CAPTCHA_ACTION');
     expect(src).toContain('captchaToken');
+    expect(src).not.toMatch(/!codeSent\s*&&[\s\S]*Turnstile/);
   });
 });

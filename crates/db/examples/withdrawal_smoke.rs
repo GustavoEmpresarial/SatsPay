@@ -58,6 +58,7 @@ async fn main() {
         client.as_ref(),
         "127.0.0.1",
         None,
+        None,
     )
     .await
     .expect("request_withdrawal");
@@ -78,7 +79,7 @@ async fn main() {
     let pool2 = pool.clone();
     let registry2 = ChainRegistry::build("development", true).unwrap();
     let wid = withdrawal.id;
-    let (r1, r2) = tokio::join!(db::withdrawals::process_broadcast(&pool, wid, &registry), db::withdrawals::process_broadcast(&pool2, wid, &registry2));
+    let (r1, r2) = tokio::join!(db::withdrawals::process_broadcast(&pool, wid, &registry, None), db::withdrawals::process_broadcast(&pool2, wid, &registry2, None));
     r1.expect("process_broadcast 1");
     r2.expect("process_broadcast 2");
 

@@ -1,10 +1,12 @@
 use captcha::TurnstileVerifier;
 use chain::ChainRegistry;
+use changenow::ChangeNowClient;
 use crypto::SecretsService;
 use domain::auth::{AuthRepo, AuthService, EmailSender};
 use sqlx::PgPool;
 use std::sync::Arc;
 use std::time::Duration;
+use relay::RelayClient;
 use swapkit::SwapKitClient;
 
 /// App-level settings that would otherwise show up as magic numbers scattered
@@ -53,6 +55,8 @@ pub struct AppState<R: AuthRepo> {
     pub captcha: Arc<TurnstileVerifier>,
     pub settings: AppSettings,
     pub swapkit: Arc<SwapKitClient>,
+    pub relay: Arc<RelayClient>,
+    pub changenow: Arc<ChangeNowClient>,
 }
 
 // Manual impl: `#[derive(Clone)]` would incorrectly require `R: Clone` even
@@ -69,6 +73,8 @@ impl<R: AuthRepo> Clone for AppState<R> {
             captcha: self.captcha.clone(),
             settings: self.settings.clone(),
             swapkit: self.swapkit.clone(),
+            relay: self.relay.clone(),
+            changenow: self.changenow.clone(),
         }
     }
 }

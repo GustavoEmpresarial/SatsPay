@@ -13,13 +13,13 @@
 | TC-domain-faucet-house-05 | i18n | Strings user-facing pt-BR (admin 100% pt-BR) | [ ] |
 | TC-domain-faucet-house-06 | obs | Erros inesperados reportados; ruído esperado filtrado | [ ] |
 | TC-domain-faucet-house-07 | security | Sem IDOR; sem vazar secrets em UI/logs | [ ] |
-| TC-domain-faucet-house-08 | structure | `client/tests/unit/pages/domain-faucet-house/` structure test se página SPA | [ ] |
+| TC-domain-faucet-house-08 | structure | Domínio backend (sem SPA) — N/A; cobrir via `faucet` / sqlx HOUSE | [ ] |
 
 ## Automatizado
 
 | Suite | Path |
 |-------|------|
-| Structure (se SPA) | `client/tests/unit/pages/domain-faucet-house/` |
+| Structure (se SPA) | N/A (domínio backend; ver `docs/features/faucet/`) |
 | API HTTP (se admin/core) | `crates/api-http/tests/` |
 | SQLx | `crates/db/tests/` |
 

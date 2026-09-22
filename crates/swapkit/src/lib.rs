@@ -9,10 +9,10 @@ use serde_json::Value;
 use shared::{format_amount, Coin};
 use std::time::Duration;
 
-/// Same-chain DEX routes (Jupiter / 1inch / …) → 25 bps.
+/// Same-chain DEX routes (Jupiter / 1inch / …) → 25 bps (0.25%) — diferencial SatsPay.
 pub const DEFAULT_FEE_BPS_SAME: u32 = 25;
-/// Cross-chain routes (THOR / Chainflip / Mayan / …) → 50 bps.
-pub const DEFAULT_FEE_BPS_CROSS: u32 = 50;
+/// Cross-chain / ChangeNOW / Relay → 25 bps (0.25%).
+pub const DEFAULT_FEE_BPS_CROSS: u32 = 25;
 
 const SAME_CHAIN_PROVIDERS: &[&str] = &[
     "JUPITER",
@@ -24,6 +24,10 @@ const SAME_CHAIN_PROVIDERS: &[&str] = &[
     "SUSHISWAP",
     "KYBERSWAP",
     "PANCAKESWAP",
+    "RELAY",
+    "ZEROX",
+    "0X",
+    "PARASWAP",
 ];
 
 #[derive(Debug, thiserror::Error)]
@@ -113,7 +117,7 @@ impl SwapKitClient {
         self.fee_bps_cross
     }
 
-    /// Platform fee bps for a route: 25 same-chain DEX, 50 cross-chain.
+    /// Platform fee bps for a route: same-chain DEX vs cross-chain (defaults 25/25).
     pub fn platform_fee_bps(&self, providers: &[String], from: Coin, to: Coin) -> u32 {
         if is_same_chain(from, to) || providers.iter().any(|p| is_same_chain_provider(p)) {
             self.fee_bps_same
@@ -237,7 +241,7 @@ pub fn asset_id(coin: Coin) -> Option<&'static str> {
         // Polygon PoS bridged stables (checksum as returned by SwapKit quotes)
         Coin::Usdt => Some("POL.USDT-0xc2132D05D31c914a87C6611C10748AEb04B58e8F"),
         Coin::Usdc => Some("POL.USDC-0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359"),
-        Coin::Dgb => None,
+        Coin::Dgb | Coin::Zer | Coin::Pepe => None,
     }
 }
 
@@ -249,7 +253,7 @@ pub fn chain_key(coin: Coin) -> Option<&'static str> {
         Coin::Bch => Some("BCH"),
         Coin::Sol => Some("SOL"),
         Coin::Pol | Coin::Usdt | Coin::Usdc => Some("POL"),
-        Coin::Dgb => None,
+        Coin::Dgb | Coin::Zer | Coin::Pepe => None,
     }
 }
 
@@ -271,6 +275,7 @@ pub fn route_priority(tx_hint: Option<&str>) -> u8 {
         Some("simpleTransfer") => 0,
         Some("transferWithMemo") => 1,
         Some("contractCall") => 2,
+        Some("solanaRelay") => 2,
         _ => 3,
     }
 }
@@ -421,6 +426,108 @@ impl SwapResponse {
     pub fn memo_str(&self) -> Option<&str> {
         self.memo.as_deref().or_else(|| self.extra.get("memo").and_then(|v| v.as_str()))
     }
+
+    /// Extract EVM contract-call fields from SwapKit `/v3/swap` payload (`tx` object).
+    pub fn contract_call_tx(&self) -> Option<ContractCallTx> {
+        extract_contract_call_tx(&self.extra)
+            .or_else(|| self.meta.as_ref().and_then(extract_contract_call_tx))
+    }
+}
+
+/// Unsigned EVM tx fields returned by SwapKit for `txHint=contractCall`.
+#[derive(Debug, Clone)]
+pub struct ContractCallTx {
+    pub to: String,
+    pub data: String,
+    pub value_wei: u128,
+    pub gas_limit: Option<u64>,
+    pub gas_price_wei: Option<u128>,
+    pub from: Option<String>,
+    /// ERC-20 spender SwapKit requires (`meta.approvalAddress`). Prefer this over guessing.
+    pub approval_address: Option<String>,
+}
+
+fn extract_approval_address(root: &Value) -> Option<String> {
+    root.get("meta")
+        .and_then(|m| m.get("approvalAddress"))
+        .or_else(|| root.get("approvalAddress"))
+        .and_then(|v| v.as_str())
+        .filter(|s| s.starts_with("0x") && s.len() == 42)
+        .map(str::to_string)
+}
+
+fn extract_contract_call_tx(root: &Value) -> Option<ContractCallTx> {
+    let tx = root.get("tx").or_else(|| {
+        root.get("transaction")
+            .or_else(|| root.get("evmTransaction"))
+    })?;
+    let to = tx
+        .get("to")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())?
+        .to_string();
+    let data = tx
+        .get("data")
+        .and_then(|v| v.as_str())
+        .filter(|s| s.starts_with("0x") || s.starts_with("0X"))?
+        .to_string();
+    let value_wei = parse_u128_loose(tx.get("value")).unwrap_or(0);
+    let gas_limit = parse_u64_loose(tx.get("gas").or_else(|| tx.get("gasLimit")));
+    let gas_price_wei = parse_u128_loose(tx.get("gasPrice"));
+    let from = tx
+        .get("from")
+        .and_then(|v| v.as_str())
+        .map(str::to_string);
+    let approval_address = extract_approval_address(root);
+    Some(ContractCallTx {
+        to,
+        data,
+        value_wei,
+        gas_limit,
+        gas_price_wei,
+        from,
+        approval_address,
+    })
+}
+
+/// Parse contract-call fields from a stored SwapKit swap payload (jsonb).
+pub fn parse_contract_call_tx(payload: &Value) -> Option<ContractCallTx> {
+    extract_contract_call_tx(payload).or_else(|| {
+        // Deserialized SwapResponse keeps unknown fields under flatten `extra`.
+        serde_json::from_value::<SwapResponse>(payload.clone())
+            .ok()
+            .and_then(|s| s.contract_call_tx())
+    })
+}
+
+fn parse_u128_loose(v: Option<&Value>) -> Option<u128> {
+    let v = v?;
+    if let Some(n) = v.as_u64() {
+        return Some(n as u128);
+    }
+    if let Some(s) = v.as_str() {
+        let s = s.trim();
+        if let Some(hex) = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
+            return u128::from_str_radix(hex, 16).ok();
+        }
+        return s.parse::<u128>().ok();
+    }
+    None
+}
+
+fn parse_u64_loose(v: Option<&Value>) -> Option<u64> {
+    let v = v?;
+    if let Some(n) = v.as_u64() {
+        return Some(n);
+    }
+    if let Some(s) = v.as_str() {
+        let s = s.trim();
+        if let Some(hex) = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
+            return u64::from_str_radix(hex, 16).ok();
+        }
+        return s.parse::<u64>().ok();
+    }
+    None
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -536,6 +643,8 @@ mod tests {
     fn asset_map_covers_non_dgb() {
         assert!(asset_id(Coin::Btc).is_some());
         assert!(asset_id(Coin::Dgb).is_none());
+        assert!(asset_id(Coin::Zer).is_none());
+        assert!(asset_id(Coin::Pepe).is_none());
         assert!(is_same_chain(Coin::Pol, Coin::Usdt));
         assert!(!is_same_chain(Coin::Btc, Coin::Ltc));
     }
@@ -571,6 +680,8 @@ mod tests {
         assert_eq!(route_priority(None), 3);
         assert!(chain_key(Coin::Btc).is_some());
         assert!(chain_key(Coin::Dgb).is_none());
+        assert!(chain_key(Coin::Zer).is_none());
+        assert!(chain_key(Coin::Pepe).is_none());
         assert!(parse_human_to_ledger("", Coin::Btc).is_none());
         assert!(parse_human_to_ledger("abc", Coin::Btc).is_none());
     }
@@ -615,6 +726,35 @@ mod tests {
         };
         assert!(fail.is_failed());
         assert_eq!(fail.outbound_tx().as_deref(), Some("xyz"));
+    }
+
+    #[test]
+    fn parses_contract_call_tx_from_swapkit_payload() {
+        let payload = serde_json::json!({
+            "tx": {
+                "to": "0x9025B8ff35Ca44f7018C3a37FE0f69e63DBb0743",
+                "gas": "0x5b514",
+                "data": "0xda5d417000000000",
+                "from": "0x3D1e1B922dDD0463c8698aa0330a673DBfE4D079",
+                "value": "1913944460000000000",
+                "gasPrice": "0x3fb44f004d"
+            },
+            "providers": ["ONEINCH"],
+            "meta": {
+                "approvalAddress": "0x6C0AD82f9721A6dc986381d19338601a2E6370e5"
+            }
+        });
+        let call = parse_contract_call_tx(&payload).expect("parse");
+        assert_eq!(call.to.to_lowercase(), "0x9025b8ff35ca44f7018c3a37fe0f69e63dbb0743");
+        assert!(call.data.starts_with("0xda5d4170"));
+        assert_eq!(call.value_wei, 1_913_944_460_000_000_000);
+        assert_eq!(call.gas_limit, Some(0x5b514));
+        assert_eq!(call.gas_price_wei, Some(0x3fb44f004d));
+        assert!(call.from.unwrap().eq_ignore_ascii_case("0x3D1e1B922dDD0463c8698aa0330a673DBfE4D079"));
+        assert_eq!(
+            call.approval_address.as_deref(),
+            Some("0x6C0AD82f9721A6dc986381d19338601a2E6370e5")
+        );
     }
 
     #[test]

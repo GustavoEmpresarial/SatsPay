@@ -497,29 +497,14 @@ describe('OAuthAppsPage UI', () => {
 });
 
 describe('LendPage markets', () => {
-  it('mounts markets and opens supply modal', async () => {
-    const user = userEvent.setup();
+  it('shows maintenance landing', async () => {
     const { container, unmount } = renderWithProviders(<LendPage />, {
       route: '/lend',
       loggedIn: true,
     });
-    await waitFor(() => expect(container.innerHTML).toMatch(/USDT|Supply|Fornecer|Aave/i), {
+    await waitFor(() => expect(container.innerHTML).toMatch(/Manutenção|Empréstimos|Aave/i), {
       timeout: 5000,
     });
-
-    const supplyBtn = within(container)
-      .queryAllByRole('button')
-      .find((b) => /supply|fornecer|depositar/i.test(b.textContent || ''));
-    if (supplyBtn) await user.click(supplyBtn);
-
-    const modalInput = container.querySelector('[role="dialog"] input, .modal input');
-    if (modalInput) await user.type(modalInput as HTMLElement, '10');
-
-    const close = within(container)
-      .queryAllByRole('button')
-      .find((b) => /cancel|fechar|close/i.test(b.textContent || ''));
-    if (close) await user.click(close);
-
     unmount();
   });
 });

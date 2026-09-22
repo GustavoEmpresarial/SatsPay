@@ -1,6 +1,8 @@
 //! In-app support tickets (user ↔ staff). No email.
 
+use crate::privacy::{self, KIND_MSG_BODY, KIND_TICKET_SUBJECT};
 use chrono::{DateTime, Utc};
+use crypto::SecretsService;
 use serde::Serialize;
 use sqlx::{PgPool, Row};
 use uuid::Uuid;
@@ -78,6 +80,7 @@ pub struct SupportTicketDetail {
 
 pub async fn create_ticket(
     pool: &PgPool,
+    secrets: Option<&SecretsService>,
     user_id: Uuid,
     topic: &str,
     body: &str,
@@ -87,35 +90,46 @@ pub async fn create_ticket(
     if body.is_empty() || body.len() > 4000 {
         return Err(SupportError::EmptyMessage);
     }
-    let subject = format!("[SatsPay] {}", topic_subject(topic));
+    let ticket_id = Uuid::new_v4();
+    let msg_id = Uuid::new_v4();
+    let subject = privacy::seal_opt(
+        secrets,
+        KIND_TICKET_SUBJECT,
+        &ticket_id.to_string(),
+        &format!("[SatsPay] {}", topic_subject(topic)),
+    );
+    let body = privacy::seal_opt(secrets, KIND_MSG_BODY, &msg_id.to_string(), body);
 
     let mut tx = pool.begin().await?;
-    let ticket_id: Uuid = sqlx::query_scalar(
-        "INSERT INTO support_tickets (user_id, topic, subject, status) \
-         VALUES ($1, $2, $3, 'OPEN') RETURNING id",
-    )
-    .bind(user_id)
-    .bind(topic)
-    .bind(&subject)
-    .fetch_one(&mut *tx)
-    .await?;
-
     sqlx::query(
-        "INSERT INTO support_messages (ticket_id, author_id, author_role, body) \
-         VALUES ($1, $2, 'USER', $3)",
+        "INSERT INTO support_tickets (id, user_id, topic, subject, status) \
+         VALUES ($1, $2, $3, $4, 'OPEN')",
     )
     .bind(ticket_id)
     .bind(user_id)
-    .bind(body)
+    .bind(topic)
+    .bind(&subject)
+    .execute(&mut *tx)
+    .await?;
+
+    sqlx::query(
+        "INSERT INTO support_messages (id, ticket_id, author_id, author_role, body) \
+         VALUES ($1, $2, $3, 'USER', $4)",
+    )
+    .bind(msg_id)
+    .bind(ticket_id)
+    .bind(user_id)
+    .bind(&body)
     .execute(&mut *tx)
     .await?;
 
     tx.commit().await?;
-    get_ticket_for_user(pool, user_id, ticket_id).await
+    get_ticket_for_user(pool, secrets, user_id, ticket_id).await
 }
 
 pub async fn list_tickets_for_user(
     pool: &PgPool,
+    secrets: Option<&SecretsService>,
     user_id: Uuid,
 ) -> Result<Vec<SupportTicketSummary>, SupportError> {
     let rows = sqlx::query(
@@ -132,21 +146,25 @@ pub async fn list_tickets_for_user(
 
     Ok(rows
         .into_iter()
-        .map(|r| SupportTicketSummary {
-            id: r.get("id"),
-            topic: r.get("topic"),
-            subject: r.get("subject"),
-            status: r.get("status"),
-            created_at: r.get("created_at"),
-            updated_at: r.get("updated_at"),
-            message_count: r.get("message_count"),
-            user_email: None,
+        .map(|r| {
+            let id: Uuid = r.get("id");
+            SupportTicketSummary {
+                id,
+                topic: r.get("topic"),
+                subject: privacy::open_opt(secrets, KIND_TICKET_SUBJECT, &id.to_string(), &r.get::<String, _>("subject")),
+                status: r.get("status"),
+                created_at: r.get("created_at"),
+                updated_at: r.get("updated_at"),
+                message_count: r.get("message_count"),
+                user_email: None,
+            }
         })
         .collect())
 }
 
 pub async fn get_ticket_for_user(
     pool: &PgPool,
+    secrets: Option<&SecretsService>,
     user_id: Uuid,
     ticket_id: Uuid,
 ) -> Result<SupportTicketDetail, SupportError> {
@@ -165,18 +183,18 @@ pub async fn get_ticket_for_user(
     let ticket = SupportTicketSummary {
         id: row.get("id"),
         topic: row.get("topic"),
-        subject: row.get("subject"),
+        subject: privacy::open_opt(secrets, KIND_TICKET_SUBJECT, &ticket_id.to_string(), &row.get::<String, _>("subject")),
         status: row.get("status"),
         created_at: row.get("created_at"),
         updated_at: row.get("updated_at"),
         message_count: row.get("message_count"),
         user_email: None,
     };
-    let messages = list_messages(pool, ticket_id).await?;
+    let messages = list_messages(pool, secrets, ticket_id).await?;
     Ok(SupportTicketDetail { ticket, messages })
 }
 
-async fn list_messages(pool: &PgPool, ticket_id: Uuid) -> Result<Vec<SupportMessage>, SupportError> {
+async fn list_messages(pool: &PgPool, secrets: Option<&SecretsService>, ticket_id: Uuid) -> Result<Vec<SupportMessage>, SupportError> {
     let rows = sqlx::query(
         "SELECT id, author_role::text as author_role, body, created_at \
          FROM support_messages WHERE ticket_id = $1 ORDER BY created_at ASC",
@@ -186,17 +204,21 @@ async fn list_messages(pool: &PgPool, ticket_id: Uuid) -> Result<Vec<SupportMess
     .await?;
     Ok(rows
         .into_iter()
-        .map(|r| SupportMessage {
-            id: r.get("id"),
-            author_role: r.get("author_role"),
-            body: r.get("body"),
-            created_at: r.get("created_at"),
+        .map(|r| {
+            let id: Uuid = r.get("id");
+            SupportMessage {
+                id,
+                author_role: r.get("author_role"),
+                body: privacy::open_opt(secrets, KIND_MSG_BODY, &id.to_string(), &r.get::<String, _>("body")),
+                created_at: r.get("created_at"),
+            }
         })
         .collect())
 }
 
 pub async fn add_user_message(
     pool: &PgPool,
+    secrets: Option<&SecretsService>,
     user_id: Uuid,
     ticket_id: Uuid,
     body: &str,
@@ -218,14 +240,17 @@ pub async fn add_user_message(
         return Err(SupportError::Closed);
     }
 
+    let msg_id = Uuid::new_v4();
+    let body = privacy::seal_opt(secrets, KIND_MSG_BODY, &msg_id.to_string(), body);
     let mut tx = pool.begin().await?;
     sqlx::query(
-        "INSERT INTO support_messages (ticket_id, author_id, author_role, body) \
-         VALUES ($1, $2, 'USER', $3)",
+        "INSERT INTO support_messages (id, ticket_id, author_id, author_role, body) \
+         VALUES ($1, $2, $3, 'USER', $4)",
     )
+    .bind(msg_id)
     .bind(ticket_id)
     .bind(user_id)
-    .bind(body)
+    .bind(&body)
     .execute(&mut *tx)
     .await?;
     sqlx::query(
@@ -235,11 +260,12 @@ pub async fn add_user_message(
     .execute(&mut *tx)
     .await?;
     tx.commit().await?;
-    get_ticket_for_user(pool, user_id, ticket_id).await
+    get_ticket_for_user(pool, secrets, user_id, ticket_id).await
 }
 
 pub async fn list_tickets_admin(
     pool: &PgPool,
+    secrets: Option<&SecretsService>,
     status_filter: Option<&str>,
 ) -> Result<Vec<SupportTicketSummary>, SupportError> {
     if let Some(s) = status_filter {
@@ -248,7 +274,7 @@ pub async fn list_tickets_admin(
     let rows = if let Some(status) = status_filter {
         sqlx::query(
             "SELECT t.id, t.topic, t.subject, t.status::text as status, t.created_at, t.updated_at, \
-                    u.email as user_email, \
+                    u.id as user_id, u.email as user_email, u.email_enc, \
                     (SELECT COUNT(*) FROM support_messages m WHERE m.ticket_id = t.id)::bigint as message_count \
              FROM support_tickets t \
              JOIN users u ON u.id = t.user_id \
@@ -262,7 +288,7 @@ pub async fn list_tickets_admin(
     } else {
         sqlx::query(
             "SELECT t.id, t.topic, t.subject, t.status::text as status, t.created_at, t.updated_at, \
-                    u.email as user_email, \
+                    u.id as user_id, u.email as user_email, u.email_enc, \
                     (SELECT COUNT(*) FROM support_messages m WHERE m.ticket_id = t.id)::bigint as message_count \
              FROM support_tickets t \
              JOIN users u ON u.id = t.user_id \
@@ -275,26 +301,33 @@ pub async fn list_tickets_admin(
 
     Ok(rows
         .into_iter()
-        .map(|r| SupportTicketSummary {
-            id: r.get("id"),
-            topic: r.get("topic"),
-            subject: r.get("subject"),
-            status: r.get("status"),
-            created_at: r.get("created_at"),
-            updated_at: r.get("updated_at"),
-            message_count: r.get("message_count"),
-            user_email: Some(r.get("user_email")),
+        .map(|r| {
+            let id: Uuid = r.get("id");
+            let user_id: Uuid = r.get("user_id");
+            let email: String = r.get("user_email");
+            let email_enc: Option<String> = r.get("email_enc");
+            SupportTicketSummary {
+                id,
+                topic: r.get("topic"),
+                subject: privacy::open_opt(secrets, KIND_TICKET_SUBJECT, &id.to_string(), &r.get::<String, _>("subject")),
+                status: r.get("status"),
+                created_at: r.get("created_at"),
+                updated_at: r.get("updated_at"),
+                message_count: r.get("message_count"),
+                user_email: Some(privacy::reveal_stored_email(secrets, user_id, &email, email_enc.as_deref())),
+            }
         })
         .collect())
 }
 
 pub async fn get_ticket_admin(
     pool: &PgPool,
+    secrets: Option<&SecretsService>,
     ticket_id: Uuid,
 ) -> Result<SupportTicketDetail, SupportError> {
     let row = sqlx::query(
         "SELECT t.id, t.topic, t.subject, t.status::text as status, t.created_at, t.updated_at, \
-                u.email as user_email, \
+                u.id as user_id, u.email as user_email, u.email_enc, \
                 (SELECT COUNT(*) FROM support_messages m WHERE m.ticket_id = t.id)::bigint as message_count \
          FROM support_tickets t \
          JOIN users u ON u.id = t.user_id \
@@ -305,22 +338,26 @@ pub async fn get_ticket_admin(
     .await?
     .ok_or(SupportError::NotFound)?;
 
+    let user_id: Uuid = row.get("user_id");
+    let email: String = row.get("user_email");
+    let email_enc: Option<String> = row.get("email_enc");
     let ticket = SupportTicketSummary {
         id: row.get("id"),
         topic: row.get("topic"),
-        subject: row.get("subject"),
+        subject: privacy::open_opt(secrets, KIND_TICKET_SUBJECT, &ticket_id.to_string(), &row.get::<String, _>("subject")),
         status: row.get("status"),
         created_at: row.get("created_at"),
         updated_at: row.get("updated_at"),
         message_count: row.get("message_count"),
-        user_email: Some(row.get("user_email")),
+        user_email: Some(privacy::reveal_stored_email(secrets, user_id, &email, email_enc.as_deref())),
     };
-    let messages = list_messages(pool, ticket_id).await?;
+    let messages = list_messages(pool, secrets, ticket_id).await?;
     Ok(SupportTicketDetail { ticket, messages })
 }
 
 pub async fn add_staff_message(
     pool: &PgPool,
+    secrets: Option<&SecretsService>,
     staff_id: Uuid,
     ticket_id: Uuid,
     body: &str,
@@ -338,14 +375,17 @@ pub async fn add_staff_message(
         return Err(SupportError::NotFound);
     }
 
+    let msg_id = Uuid::new_v4();
+    let body = privacy::seal_opt(secrets, KIND_MSG_BODY, &msg_id.to_string(), body);
     let mut tx = pool.begin().await?;
     sqlx::query(
-        "INSERT INTO support_messages (ticket_id, author_id, author_role, body) \
-         VALUES ($1, $2, 'STAFF', $3)",
+        "INSERT INTO support_messages (id, ticket_id, author_id, author_role, body) \
+         VALUES ($1, $2, $3, 'STAFF', $4)",
     )
+    .bind(msg_id)
     .bind(ticket_id)
     .bind(staff_id)
-    .bind(body)
+    .bind(&body)
     .execute(&mut *tx)
     .await?;
     sqlx::query(
@@ -356,11 +396,12 @@ pub async fn add_staff_message(
     .execute(&mut *tx)
     .await?;
     tx.commit().await?;
-    get_ticket_admin(pool, ticket_id).await
+    get_ticket_admin(pool, secrets, ticket_id).await
 }
 
 pub async fn set_ticket_status(
     pool: &PgPool,
+    secrets: Option<&SecretsService>,
     ticket_id: Uuid,
     status: &str,
 ) -> Result<SupportTicketDetail, SupportError> {
@@ -377,5 +418,5 @@ pub async fn set_ticket_status(
     if n == 0 {
         return Err(SupportError::NotFound);
     }
-    get_ticket_admin(pool, ticket_id).await
+    get_ticket_admin(pool, secrets, ticket_id).await
 }

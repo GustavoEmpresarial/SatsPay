@@ -6,7 +6,7 @@ import { motion } from 'framer-motion';
 import { api } from '../lib/api.js';
 import { coinLogo } from '../lib/coinAssets.js';
 import { useAuthStore } from '../stores/auth.js';
-import { COIN_CONFIG, COINS, formatAmount, formatUsdValue, getCoinUsdValue, safeBigInt, type Coin, type WalletBalance } from '@/shared';
+import { COIN_CONFIG, COINS, asWalletBalances, formatAmount, formatPortfolioUsd, formatUsdValue, getCoinUsdValue, safeBigInt, type Coin, type WalletBalance } from '@/shared';
 
 interface LedgerEntry {
   id: string;
@@ -55,7 +55,7 @@ export function DashboardPage() {
     balance: '0',
     kind: 'PERSONAL',
   }));
-  const rawList = Array.isArray(walletsQ.data) ? walletsQ.data : walletsQ.data?.wallets ?? [];
+  const rawList = asWalletBalances(walletsQ.data);
   const wallets = rawList.length ? rawList : defaultWallets;
   const coinsWithBalance = useMemo(() => wallets.filter((w) => safeBigInt(w.balance) > 0n).length, [wallets]);
   const twoFaOn = Boolean(user?.twoFactorEnabled);
@@ -66,12 +66,7 @@ export function DashboardPage() {
     }, 0);
   }, [wallets, pricesQ.data]);
 
-  const totalBalanceUsdFormatted = new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(totalBalanceUsd);
+  const totalBalanceUsdFormatted = formatPortfolioUsd(totalBalanceUsd, coinsWithBalance > 0);
 
   const dateFmt = new Intl.DateTimeFormat(i18n.resolvedLanguage ?? 'en', {
     month: 'short',

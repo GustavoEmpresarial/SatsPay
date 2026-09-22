@@ -222,8 +222,7 @@ describe('contract: onboarding path', () => {
   it('only advertises scopes the backend enforces', () => {
     const enforced = [...publicApi.matchAll(/require_scope\(&\w+, "(\w+)"\)/g)].map((m) => m[1]);
     expect(enforced).toContain('send');
-    // `balance` was advertised for years and is checked nowhere.
-    expect(enforced).not.toContain('balance');
+    expect(enforced).toContain('balance');
     expect(docs).not.toMatch(/scopes.*"balance"/);
   });
 });

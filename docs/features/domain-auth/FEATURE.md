@@ -43,6 +43,14 @@
 
 Access token em memória; refresh HttpOnly. RequireAdmin: NUNCA short-circuit useStore (React #311).
 
+Login/register: Turnstile + rate-limit 10/5min (Postgres compartilhado). E-mail indexado por HMAC; `PII_BLANK_EMAIL` troca `users.email` por placeholder. `AuthUser` relê `role` e exige `erased_at IS NULL` a cada request (sem denylist de access JWT; TTL ~900s).
+
+`SMTP_ENABLED=false`: `/admin/login` pede OTP que ninguém recebe. **Admin operacional** = login de usuário + `ADMIN_EMAILS`. Não fingir 2FA por e-mail até SMTP real.
+
+Audit metadata de auth **não** grava e-mail (`user_id` basta).
+
+Doc gerado à mão — `scripts/generate_feature_docs.py` **não** sobrescreve este FEATURE.
+
 ## Notas de overview legado
 
 _sem overview em docs/pages_

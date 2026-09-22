@@ -26,6 +26,22 @@ pub struct BroadcastResult {
     pub fee_amount: u128,
 }
 
+/// Unsigned EVM contract-call fields from a DEX aggregator (SwapKit / 1inch / …).
+#[derive(Debug, Clone)]
+pub struct EvmContractCall {
+    pub to: String,
+    pub data_hex: String,
+    pub value_wei: u128,
+    pub gas_limit_hint: Option<u64>,
+    pub gas_price_hint: Option<u128>,
+    /// Expected `from` (hot wallet). Rejected if it does not match our key.
+    pub from_hint: Option<String>,
+    /// On-chain sell amount (token units) when spending an ERC-20 — used for approve.
+    pub erc20_sell_amount: Option<u128>,
+    /// SwapKit `meta.approvalAddress` — the spender that must be approved (required for ERC-20).
+    pub approval_address: Option<String>,
+}
+
 #[derive(Debug, Error)]
 #[error("{message}")]
 pub struct ChainError {
@@ -60,5 +76,22 @@ pub trait ChainClient: Send + Sync {
     async fn sweep_deposit_to_hot(&self, hd_index: u32) -> Result<Option<BroadcastResult>, BroadcastError> {
         let _ = hd_index;
         Ok(None)
+    }
+    /// Sign + broadcast an EVM contract call (DEX router). Default: unsupported.
+    async fn broadcast_evm_contract_call(&self, call: EvmContractCall) -> Result<BroadcastResult, BroadcastError> {
+        let _ = call;
+        Err(BroadcastError {
+            message: format!("contractCall not supported for {}", self.coin().as_str()),
+            safe_to_reverse: true,
+        })
+    }
+
+    /// Sign + broadcast a Relay Solana step (`instructions` + ALTs). Default: unsupported.
+    async fn broadcast_solana_relay_tx(&self, solana_tx: &serde_json::Value) -> Result<BroadcastResult, BroadcastError> {
+        let _ = solana_tx;
+        Err(BroadcastError {
+            message: format!("solanaRelay not supported for {}", self.coin().as_str()),
+            safe_to_reverse: true,
+        })
     }
 }

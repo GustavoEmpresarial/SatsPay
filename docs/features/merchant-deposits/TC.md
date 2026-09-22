@@ -14,6 +14,10 @@
 | TC-merchant-deposits-06 | obs | Erros inesperados reportados; ruído esperado filtrado | [ ] |
 | TC-merchant-deposits-07 | security | Sem IDOR; sem vazar secrets em UI/logs | [ ] |
 | TC-merchant-deposits-08 | structure | `client/tests/unit/pages/merchant-deposits/` structure test se página SPA | [ ] |
+| TC-merchant-deposits-09 | ui-tab | Aba/seção «Endereços de Depósito» carrega e exibe empty/loading/data | [ ] |
+| TC-merchant-deposits-10 | ui-tab | Aba/seção «Chaves de API» carrega e exibe empty/loading/data | [ ] |
+| TC-merchant-deposits-11 | ui-tab | Aba/seção «Ver Checkout (Demo)» carrega e exibe empty/loading/data | [ ] |
+| TC-merchant-deposits-12 | ui-tab | Aba/seção «Documentação» carrega e exibe empty/loading/data | [ ] |
 
 ## Automatizado
 

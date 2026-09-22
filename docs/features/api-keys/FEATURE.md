@@ -15,7 +15,7 @@
 
 ## Keywords (busca)
 
-`api keys ApiKeysPage /api-keys /public/keys /public/keys/:id /public/keys/:id/rotate Gateway de Depósitos (Invoicing) Envios & Payouts (Saques) Consulta de Saldos Histórico & Extratos user`
+`api keys ApiKeysPage /api-keys /public/keys /public/keys/:id /public/keys/:id/rotate Gateway de Depósitos (Invoicing) Envios & Payouts (Saques) Consulta de Saldos user`
 
 ## Rotas
 
@@ -26,7 +26,6 @@
 - Gateway de Depósitos (Invoicing)
 - Envios & Payouts (Saques)
 - Consulta de Saldos
-- Histórico & Extratos
 
 ## APIs usadas (client → `/v1…`)
 
@@ -41,7 +40,7 @@
 
 ## Comportamento (bruto)
 
-Página React `ApiKeysPage`. Chama 3 endpoint(s) via `api()`. Abas/labels: Gateway de Depósitos (Invoicing), Envios & Payouts (Saques), Consulta de Saldos, Histórico & Extratos.
+Página React `ApiKeysPage`. Chama 3 endpoint(s) via `api()`. Abas/labels: Gateway de Depósitos (Invoicing), Envios & Payouts (Saques), Consulta de Saldos.
 
 ## Notas de overview legado
 

@@ -17,6 +17,10 @@ export function getExplorerTxUrl(coin: string, txHash: string): string {
       return `https://polygonscan.com/tx/${txHash}`;
     case 'DGB':
       return `https://digiexplorer.info/tx/${txHash}`;
+    case 'ZER':
+      return `https://zerochain.info/tx/${txHash}`;
+    case 'PEPE':
+      return `https://bscscan.com/tx/${txHash}`;
     case 'SOL':
       return `https://solscan.io/tx/${txHash}`;
     default:

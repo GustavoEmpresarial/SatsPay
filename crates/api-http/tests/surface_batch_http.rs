@@ -57,7 +57,7 @@ async fn get(app: axum::Router, uri: &str, token: Option<&str>) -> (axum::http::
 #[sqlx::test(migrations = "../db/migrations")]
 async fn swap_prices_and_faucetlist_and_status(pool: PgPool) {
     // price ticker is fail-open on empty cache
-    for (coin, price) in [("BTC", 100i64), ("LTC", 10), ("DOGE", 1), ("BCH", 20), ("POL", 1), ("DGB", 1), ("SOL", 50), ("USDT", 100), ("USDC", 100)] {
+    for (coin, price) in [("BTC", 100i64), ("LTC", 10), ("DOGE", 1), ("BCH", 20), ("POL", 1), ("DGB", 1), ("SOL", 50), ("USDT", 100), ("USDC", 100), ("ZER", 1), ("PEPE", 1)] {
         sqlx::query(
             "INSERT INTO price_cache (coin, price_scaled, price_decimals, fetched_at) \
              VALUES ($1::coin, $2, 8, now()) ON CONFLICT (coin) DO UPDATE SET price_scaled = EXCLUDED.price_scaled, fetched_at = now()",

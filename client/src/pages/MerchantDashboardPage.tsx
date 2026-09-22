@@ -4,7 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { api } from '../lib/api.js';
 import { useAuthStore } from '../stores/auth.js';
 import { coinLogo } from '../lib/coinAssets.js';
-import { COIN_CONFIG, COINS, formatAmount, isCoin, safeBigInt, type Coin, type WalletBalance } from '@/shared';
+import { COIN_CONFIG, COINS, formatAmount, formatLedgerAmount, getCoinUsdValue, isCoin, safeBigInt, type Coin, type WalletBalance } from '@/shared';
 import { clsx } from 'clsx';
 
 interface MerchantInvoice {
@@ -22,6 +22,34 @@ interface MerchantInvoice {
   webhookDelivered: boolean;
   createdAt: string;
   paidAt: string | null;
+  /** Unscaled USD from create (`amountUsd` on create response). */
+  amountUsd?: string | null;
+  /** Scaled USD ask — list payloads expose this instead of `amountUsd`. */
+  priceUsdScaled?: string | null;
+  priceDecimals?: number | null;
+}
+
+/** Invoice `amount` is ledger units (1e-8). Never multiply raw by USD price. */
+function invoiceHumanTokens(amount: string, coin: Coin): number {
+  const n = Number(formatLedgerAmount(amount, coin));
+  return Number.isFinite(n) ? n : 0;
+}
+
+function invoiceUsdValue(
+  inv: MerchantInvoice,
+  prices?: Record<string, string>,
+  priceDecimals = 8,
+): number {
+  if (inv.amountUsd != null && inv.amountUsd !== '') {
+    const n = Number(inv.amountUsd);
+    if (Number.isFinite(n) && n >= 0) return n;
+  }
+  if (inv.priceUsdScaled != null && inv.priceDecimals != null) {
+    const n = Number(inv.priceUsdScaled) / 10 ** Math.max(0, inv.priceDecimals);
+    if (Number.isFinite(n) && n > 0) return n;
+  }
+  if (!isCoin(inv.coin)) return 0;
+  return getCoinUsdValue(inv.amount, inv.coin, prices, priceDecimals);
 }
 
 interface PricesResp {
@@ -56,9 +84,9 @@ export function MerchantDashboardPage() {
   });
 
   const devWalletsQ = useQuery({
-    queryKey: ['wallets', 'DEVELOPER'],
+    queryKey: ['wallets', 'MERCHANT'],
     queryFn: async () => {
-      const res = await api<WalletBalance[] | WalletsPayload>('/wallet?kind=DEVELOPER');
+      const res = await api<WalletBalance[] | WalletsPayload>('/wallet?kind=MERCHANT');
       return Array.isArray(res) ? res : (res.wallets ?? []);
     },
     enabled: Boolean(user),
@@ -100,6 +128,8 @@ export function MerchantDashboardPage() {
       DOGE: 0.18,
       BCH: 480.0,
       DGB: 0.012,
+      ZER: 0.01,
+      PEPE: 0.000004,
     };
 
     if (pricesQ.data?.prices) {
@@ -132,17 +162,16 @@ export function MerchantDashboardPage() {
 
     const safeInvoices = Array.isArray(invoices) ? invoices : [];
     safeInvoices.forEach((inv) => {
-      if (!inv) return;
+      if (!inv || !isCoin(inv.coin)) return;
       const isPaid = inv.status === 'PAID' || inv.status === 'CONFIRMED';
-      const numAmount = Number(inv.amount) || 0;
-      const price = livePrices[inv.coin] || 1.0;
-      const volumeUsd = numAmount * price;
+      const humanTokens = invoiceHumanTokens(inv.amount, inv.coin);
+      const volumeUsd = invoiceUsdValue(inv, pricesQ.data?.prices, pricesQ.data?.priceDecimals ?? 8);
 
       if (isPaid) {
         totalPaidInvoicesCount++;
         totalDepositsReceivedUsd += volumeUsd;
         volumeUsdByCoin[inv.coin] = (volumeUsdByCoin[inv.coin] || 0) + volumeUsd;
-        volumeTokensByCoin[inv.coin] = (volumeTokensByCoin[inv.coin] || 0) + numAmount;
+        volumeTokensByCoin[inv.coin] = (volumeTokensByCoin[inv.coin] || 0) + humanTokens;
         countByCoin[inv.coin] = (countByCoin[inv.coin] || 0) + 1;
       } else if (inv.status === 'PENDING' || inv.status === 'DETECTED') {
         totalPendingInvoicesCount++;
@@ -171,9 +200,9 @@ export function MerchantDashboardPage() {
       devBalanceMap[c] = { balance: bal, tokens: humanBal, usd: usdVal };
     });
 
-    // Payouts estimate (withdrawals from developer account)
-    const totalPayoutsSentUsd = Math.max(0, totalDepositsReceivedUsd - totalCashInTreasuryUsd);
-    const netCashFlowUsd = totalDepositsReceivedUsd - totalPayoutsSentUsd;
+    // Cash the merchant can withdraw. Do not invent a payout from (volume − cash).
+    const totalPayoutsSentUsd = 0;
+    const netCashFlowUsd = totalCashInTreasuryUsd;
 
     return {
       totalDepositsReceivedUsd,
@@ -190,7 +219,7 @@ export function MerchantDashboardPage() {
       volumeTokensByCoin,
       countByCoin,
     };
-  }, [invoices, devWallets, livePrices]);
+  }, [invoices, devWallets, livePrices, pricesQ.data]);
 
   const filteredInvoices = useMemo(() => {
     if (filterCoin === 'ALL') return invoices;
@@ -212,6 +241,10 @@ export function MerchantDashboardPage() {
         </h1>
         <p className="text-xs text-ink-muted mt-1">
           Métricas consolidadas de depósitos recebidos via API, saques enviados e valores disponíveis em caixa com cotação em USD e tokens.
+        </p>
+        <p className="mt-2 text-xs text-ink rounded-xl border border-bitcoin/25 bg-bitcoin/5 px-3 py-2 max-w-2xl">
+          O cliente paga o valor integral. A taxa de 0,25% é descontada do que você recebe
+          (<span className="font-mono">feeAmount + netAmount = amount</span>).
         </p>
       </header>
 
@@ -237,16 +270,16 @@ export function MerchantDashboardPage() {
         {/* 2. Saques / Repasses Enviados (Outflows) */}
         <div className="rounded-3xl border border-border bg-paper p-4 sm:p-5 shadow-xs space-y-1">
           <div className="flex items-center justify-between text-[10px] sm:text-xs font-bold uppercase tracking-wider text-ink-muted">
-            <span>Saques & Repasses</span>
+            <span>Disponível para saque</span>
             <div className="flex h-6 w-6 items-center justify-center rounded-lg bg-rose-500/10 text-rose-600">
               <i className="bi bi-arrow-up-right" />
             </div>
           </div>
           <div className="text-xl sm:text-3xl font-black text-ink">
-            ${stats.totalPayoutsSentUsd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            ${stats.totalCashInTreasuryUsd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
           </div>
           <div className="text-[10px] text-ink-muted font-medium">
-            Liquidados e transferidos
+            Saque on-chain: origem Caixa do comerciante
           </div>
         </div>
 
@@ -596,9 +629,10 @@ export function MerchantDashboardPage() {
                 {filteredInvoices.slice(0, 10).map((inv) => {
                   const isPaid = inv.status === 'PAID' || inv.status === 'CONFIRMED';
                   const isPending = inv.status === 'PENDING' || inv.status === 'DETECTED';
-                  const numAmount = Number(inv.amount) || 0;
-                  const price = livePrices[inv.coin] || 1.0;
-                  const usdVal = numAmount * price;
+                  const usdVal = isCoin(inv.coin)
+                    ? invoiceUsdValue(inv, pricesQ.data?.prices, pricesQ.data?.priceDecimals ?? 8)
+                    : 0;
+                  const tokenDisplay = isCoin(inv.coin) ? formatLedgerAmount(inv.amount, inv.coin) : inv.amount;
 
                   return (
                     <tr key={inv.id} className="hover:bg-surface/50 transition-colors">
@@ -634,7 +668,7 @@ export function MerchantDashboardPage() {
                           ${usdVal.toFixed(2)} USD
                         </div>
                         <div className="text-[10px] text-ink-muted">
-                          {inv.amount} {inv.coin}
+                          {tokenDisplay} {inv.coin}
                         </div>
                       </td>
 

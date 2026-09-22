@@ -25,6 +25,7 @@ describe('isCoin', () => {
   it('narrows only configured tickers', () => {
     expect(isCoin('BTC')).toBe(true);
     expect(isCoin('USDC')).toBe(true);
+    expect(isCoin('ZER')).toBe(true);
     expect(isCoin('ETH')).toBe(false);
   });
 });

@@ -141,6 +141,7 @@ function explorerTx(coin: string, hash: string): string | null {
   if (c === 'BCH') return `https://blockchair.com/bitcoin-cash/transaction/${hash}`;
   if (c === 'SOL') return `https://solscan.io/tx/${hash}`;
   if (c === 'DGB') return `https://digiexplorer.info/tx/${hash}`;
+  if (c === 'ZER') return `https://zerochain.info/tx/${hash}`;
   return null;
 }
 

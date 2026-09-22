@@ -15,13 +15,27 @@ interface TreasuryWallet {
 
 interface TreasuryResponse {
   wallets: TreasuryWallet[];
+  bnbGasWei?: string | null;
+  bnbGasError?: string | null;
 }
 
 /** Compact solvency strip for admin overview — full detail lives on /admin/stake. */
+function formatBnbWei(wei: string): string {
+  try {
+    const v = BigInt(wei);
+    const base = 10n ** 18n;
+    const whole = v / base;
+    const frac = (v % base).toString().padStart(18, '0').slice(0, 6);
+    return `${whole}.${frac} BNB`;
+  } catch {
+    return `${wei} wei`;
+  }
+}
+
 export function AdminTreasuryMonitor() {
   const { data, isLoading, isError, refetch, isFetching } = useQuery<TreasuryResponse>({
-    queryKey: ['admin-treasury-wallets'],
-    queryFn: () => api<TreasuryResponse>('/admin/treasury-wallets'),
+    queryKey: ['admin-treasury-wallets', 'hot'],
+    queryFn: () => api<TreasuryResponse>('/admin/treasury-wallets?scope=hot'),
     refetchInterval: 30_000,
   });
 
@@ -68,6 +82,16 @@ export function AdminTreasuryMonitor() {
       {shortCount > 0 && (
         <p className="text-xs font-bold text-rose-600">
           {shortCount} moeda(s) sem caixa suficiente na hot.
+        </p>
+      )}
+
+      {(data?.bnbGasWei || data?.bnbGasError) && (
+        <p className="text-[11px] text-ink-muted">
+          Gas BNB (PEPE):{' '}
+          <strong className="font-mono text-ink">
+            {data.bnbGasWei ? formatBnbWei(data.bnbGasWei) : 'indisponível'}
+          </strong>
+          {data.bnbGasError ? ` — ${data.bnbGasError}` : ''}
         </p>
       )}
 

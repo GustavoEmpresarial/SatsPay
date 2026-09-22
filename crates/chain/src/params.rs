@@ -61,6 +61,8 @@ pub enum AddressKind {
     Evm,
     /// Solana base58 ed25519 pubkey (32 bytes).
     Solana,
+    /// Zcash-family transparent P2PKH (`t1` / `tm`). Two version bytes.
+    ZcashTransparent { version: [u8; 2] },
 }
 
 /// Mainnet params (backward-compatible alias for older call sites).
@@ -201,6 +203,38 @@ pub fn params_for(coin: Coin, network: ChainNetwork) -> CoinParams {
             address_kind: AddressKind::Evm,
             evm_chain_id: Some(80002),
             erc20_contract: Some("0x41E94Eb019C0762f9Bfcf9Fb1E58725BfB0e7582"),
+        },
+
+        // --- ZER (Zero, Zcash-family transparent t1) ---
+        // Mainnet P2PKH version 0x1CB8 (same as Zcash t1). Testnet 0x1D25 (`tm`).
+        (Coin::Zer, ChainNetwork::Mainnet) => CoinParams {
+            bitcore_chain: None,
+            address_kind: AddressKind::ZcashTransparent { version: crate::encoding::ZCASH_T1_MAINNET },
+            evm_chain_id: None,
+            erc20_contract: None,
+        },
+        (Coin::Zer, ChainNetwork::Testnet) => CoinParams {
+            bitcore_chain: None,
+            address_kind: AddressKind::ZcashTransparent { version: crate::encoding::ZCASH_T1_TESTNET },
+            evm_chain_id: None,
+            erc20_contract: None,
+        },
+
+        // --- PEPE on BNB Smart Chain (BEP-20, 18 decimals) ---
+        // Binance-Peg Pepe. Not the Ethereum contract 0x6982508145454Ce325dDbE47a25d4ec3d2311933.
+        // https://bscscan.com/token/0x25d887Ce7a35172C62FeBFD67a1856F20FaEbB00
+        // Testnet (Chapel, chain 97) has no official PEPE — fail closed.
+        (Coin::Pepe, ChainNetwork::Mainnet) => CoinParams {
+            bitcore_chain: None,
+            address_kind: AddressKind::Evm,
+            evm_chain_id: Some(56),
+            erc20_contract: Some("0x25d887Ce7a35172C62FeBFD67a1856F20FaEbB00"),
+        },
+        (Coin::Pepe, ChainNetwork::Testnet) => CoinParams {
+            bitcore_chain: None,
+            address_kind: AddressKind::Evm,
+            evm_chain_id: None,
+            erc20_contract: None,
         },
     }
 }

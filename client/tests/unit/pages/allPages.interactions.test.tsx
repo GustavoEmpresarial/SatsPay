@@ -141,19 +141,7 @@ describe('allPages interactions', () => {
     an.unmount();
 
     const lend = renderWithProviders(<LendPage />, { route: '/lend', loggedIn: true });
-    await waitFor(() => expect(lend.container.innerHTML).toMatch(/Fornecer|Tomar/i), { timeout: 5000 });
-    const supply = within(lend.container)
-      .getAllByRole('button')
-      .find((b) => /fornecer/i.test(b.textContent || ''));
-    if (supply) {
-      await user.click(supply);
-      const input = lend.container.querySelector('input[placeholder="0.00"]');
-      if (input) await user.type(input as HTMLElement, '5');
-      const confirm = within(lend.container)
-        .getAllByRole('button')
-        .find((b) => /fornecer usdt|fornecer/i.test(b.textContent || ''));
-      if (confirm && !(confirm as HTMLButtonElement).disabled) await user.click(confirm);
-    }
+    await waitFor(() => expect(lend.container.innerHTML).toMatch(/Manutenção|Empréstimos/i), { timeout: 5000 });
     lend.unmount();
   });
 

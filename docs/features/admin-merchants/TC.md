@@ -1,26 +1,39 @@
 # TC — Admin Merchants
 
-## Matriz específica
+> Casos de teste brutos (aceite + regressão). Marque ao executar.
+
+## Matriz
 
 | ID | Tipo | Caso | Status |
 |----|------|------|--------|
-| TC-admin-merchants-01 | smoke | `/admin/merchants` renderiza 3 abas | [ ] |
-| TC-admin-merchants-02 | ui-tab | Visão geral: economia + KPIs contas | [ ] |
-| TC-admin-merchants-03 | ui-tab | Estatísticas: período 24h/7d/30d/all troca KPIs | [ ] |
-| TC-admin-merchants-04 | ui-tab | Funil + série 14d (empty state ok) | [ ] |
-| TC-admin-merchants-05 | ui-tab | Volume por moeda + top + faturas recentes | [ ] |
-| TC-admin-merchants-06 | ui-tab | Comerciantes: filtro ALL/APPROVED/PENDING/REJECTED | [ ] |
-| TC-admin-merchants-07 | api | `GET /admin/merchants/stats` inclui series_14d + recent_invoices | [ ] |
-| TC-admin-merchants-08 | api | approve → status APPROVED; suspend → REJECTED | [ ] |
-| TC-admin-merchants-09 | auth | Não-admin → redirect login admin | [ ] |
-| TC-admin-merchants-10 | i18n | Zero labels EN (Invoices/Keys/all-time/Website) | [ ] |
-| TC-admin-merchants-11 | structure | `admin-merchants.structure.test.ts` verde | [ ] |
+| TC-admin-merchants-01 | smoke | Abrir rota(s) e renderizar sem crash | [ ] |
+| TC-admin-merchants-02 | auth | Gate admin: anônimo / usuário / admin conforme esperado | [ ] |
+| TC-admin-merchants-03 | api | Happy path das APIs listadas retorna 2xx com payload válido | [ ] |
+| TC-admin-merchants-04 | api-neg | 401/403/400 cobertos; mensagens via formatApiError | [ ] |
+| TC-admin-merchants-05 | i18n | Strings user-facing pt-BR (admin 100% pt-BR) | [ ] |
+| TC-admin-merchants-06 | obs | Erros inesperados reportados; ruído esperado filtrado | [ ] |
+| TC-admin-merchants-07 | security | Sem IDOR; sem vazar secrets em UI/logs | [ ] |
+| TC-admin-merchants-08 | structure | `client/tests/unit/pages/admin-merchants/` structure test se página SPA | [ ] |
+| TC-admin-merchants-09 | ui-tab | Aba/seção «Visão geral» carrega e exibe empty/loading/data | [ ] |
+| TC-admin-merchants-10 | ui-tab | Aba/seção «Estatísticas» carrega e exibe empty/loading/data | [ ] |
+| TC-admin-merchants-11 | ui-tab | Aba/seção «Comerciantes» carrega e exibe empty/loading/data | [ ] |
 
 ## Automatizado
 
 | Suite | Path |
 |-------|------|
-| Structure | `client/tests/unit/pages/admin-merchants/` |
-| HTTP | `crates/api-http/tests/admin_lists_http.rs` |
-| SQLx stats | `crates/db/tests/deposits_admin_dex_sqlx.rs` (`get_merchant_platform_stats`) |
-| Mock | `client/tests/helpers/apiMock.ts` → `/admin/merchants/stats` |
+| Structure (se SPA) | `client/tests/unit/pages/admin-merchants/` |
+| API HTTP (se admin/core) | `crates/api-http/tests/` |
+| SQLx | `crates/db/tests/` |
+
+## Dados / fixtures
+
+- Preferir `client/tests/helpers/apiMock.ts` para unit.
+- Integração: `DATABASE_URL` de teste + migrations.
+
+## Critérios de aceite
+
+- [ ] Rotas documentadas batem com `App.tsx`
+- [ ] APIs documentadas batem com chamadas `api()` / handlers Axum
+- [ ] Sem regressão de hooks (Rules of Hooks)
+- [ ] Docs FEATURE.md + TC.md atualizados nesta pasta

@@ -213,3 +213,41 @@ pub fn solana_address_decode(s: &str) -> Option<[u8; 32]> {
     let data = bs58::decode(s).into_vec().ok()?;
     data.try_into().ok()
 }
+
+/// Zcash-family transparent P2PKH (`t1…`): two version bytes + HASH160 + 4-byte checksum.
+pub const ZCASH_T1_MAINNET: [u8; 2] = [0x1c, 0xb8];
+pub const ZCASH_T1_TESTNET: [u8; 2] = [0x1d, 0x25];
+
+pub fn zcash_t1_encode(version: [u8; 2], payload: &[u8; 20]) -> String {
+    let mut buf = Vec::with_capacity(26);
+    buf.extend_from_slice(&version);
+    buf.extend_from_slice(payload);
+    let checksum = sha256d(&buf);
+    buf.extend_from_slice(&checksum[..4]);
+    bs58::encode(buf).into_string()
+}
+
+pub fn zcash_t1_decode(s: &str) -> Option<([u8; 2], [u8; 20])> {
+    if !s.starts_with('t') {
+        return None;
+    }
+    let data = bs58::decode(s).into_vec().ok()?;
+    if data.len() != 26 {
+        return None;
+    }
+    let (payload, checksum) = data.split_at(22);
+    let expected = sha256d(payload);
+    if &expected[..4] != checksum {
+        return None;
+    }
+    let mut version = [0u8; 2];
+    version.copy_from_slice(&payload[..2]);
+    let mut hash = [0u8; 20];
+    hash.copy_from_slice(&payload[2..]);
+    Some((version, hash))
+}
+
+/// Accept only mainnet/testnet transparent P2PKH (`t1` / `tm`). Reject `t3` and `z*`.
+pub fn zcash_t1_validate(s: &str, version: [u8; 2]) -> bool {
+    zcash_t1_decode(s).is_some_and(|(v, _)| v == version)
+}

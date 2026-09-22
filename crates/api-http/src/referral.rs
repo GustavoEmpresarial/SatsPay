@@ -1,7 +1,6 @@
 //! Módulo HTTP para gestão de Referrals / Programa de Afiliados.
 
 use axum::extract::State;
-use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{Json, Router};
@@ -25,11 +24,7 @@ async fn get_stats<R: AuthRepo>(
 ) -> Response {
     match db::referral::get_referral_stats(&state.pool, user.id).await {
         Ok(stats) => Json(stats).into_response(),
-        Err(e) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "error": e.to_string() })),
-        )
-            .into_response(),
+        Err(e) => crate::http_error::internal_error(&e),
     }
 }
 
@@ -39,11 +34,7 @@ async fn get_commissions<R: AuthRepo>(
 ) -> Response {
     match db::referral::list_user_commissions(&state.pool, user.id, 50).await {
         Ok(list) => Json(json!({ "commissions": list })).into_response(),
-        Err(e) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "error": e.to_string() })),
-        )
-            .into_response(),
+        Err(e) => crate::http_error::internal_error(&e),
     }
 }
 
@@ -53,11 +44,7 @@ async fn get_referred_users<R: AuthRepo>(
 ) -> Response {
     match db::referral::list_referred_users(&state.pool, user.id, 100).await {
         Ok(list) => Json(json!({ "referred_users": list })).into_response(),
-        Err(e) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "error": e.to_string() })),
-        )
-            .into_response(),
+        Err(e) => crate::http_error::internal_error(&e),
     }
 }
 

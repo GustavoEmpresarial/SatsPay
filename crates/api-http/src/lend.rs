@@ -1,12 +1,7 @@
-//! Thin axum routes for the lend/borrow money market — port of legacy
-//! `lend.controller.ts`. Reconstructed from the `db::lend` surface and the
-//! frontend calls in `client/src/pages/LendPage.tsx`
-//! (`GET /v1/lend/markets`, `GET /v1/lend/positions`,
-//! `POST /v1/lend/{supply,withdraw,borrow,repay}/{coin}` with `{ amount }`).
+//! Thin axum routes for the lend/borrow money market.
 //!
-//! NOTE: `db::lend::{MarketView, AccountLiquidityView}` serialize with their
-//! Rust (snake_case) field names; if the UI expects camelCase, wrap them in
-//! dedicated response structs like `swap.rs` does.
+//! **Manutenção:** todas as rotas respondem `503 LEND_MAINTENANCE` até a aba
+//! `/lend` reabrir. Posições/ledger existentes não são alteradas aqui.
 
 use crate::middleware::AuthUser;
 use crate::state::AppState;
@@ -29,85 +24,65 @@ pub fn routes<R: AuthRepo + 'static>() -> Router<AppState<R>> {
         .route("/v1/lend/repay/:coin", post(repay::<R>))
 }
 
-async fn markets<R: AuthRepo>(State(state): State<AppState<R>>, _user: AuthUser) -> Response {
-    match db::lend::get_markets(&state.pool).await {
-        Ok(markets) => Json(json!({ "markets": markets })).into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e.to_string() }))).into_response(),
-    }
+fn maintenance() -> Response {
+    (
+        StatusCode::SERVICE_UNAVAILABLE,
+        Json(json!({
+            "error": {
+                "code": "LEND_MAINTENANCE",
+                "message": "Empréstimos (Aave V3) em manutenção. Tente mais tarde."
+            }
+        })),
+    )
+        .into_response()
 }
 
-async fn positions<R: AuthRepo>(State(state): State<AppState<R>>, user: AuthUser) -> Response {
-    match db::lend::get_user_positions(&state.pool, user.id, state.settings.price_max_stale).await {
-        Ok(view) => Json(view).into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e.to_string() }))).into_response(),
-    }
+async fn markets<R: AuthRepo>(State(_state): State<AppState<R>>, _user: AuthUser) -> Response {
+    maintenance()
+}
+
+async fn positions<R: AuthRepo>(State(_state): State<AppState<R>>, _user: AuthUser) -> Response {
+    maintenance()
 }
 
 #[derive(Deserialize)]
 struct AmountBody {
+    #[allow(dead_code)]
     amount: String,
 }
 
-fn parse_coin_amount(coin: &str, amount: &str) -> Option<(shared::Coin, u128)> {
-    Some((coin.parse::<shared::Coin>().ok()?, amount.parse::<u128>().ok()?))
-}
-
 async fn supply<R: AuthRepo>(
-    State(state): State<AppState<R>>,
-    user: AuthUser,
-    Path(coin): Path<String>,
-    Json(body): Json<AmountBody>,
+    State(_state): State<AppState<R>>,
+    _user: AuthUser,
+    Path(_coin): Path<String>,
+    Json(_body): Json<AmountBody>,
 ) -> Response {
-    let Some((coin, amount)) = parse_coin_amount(&coin, &body.amount) else {
-        return (StatusCode::BAD_REQUEST, Json(json!({ "error": "invalid request" }))).into_response();
-    };
-    match db::lend::supply(&state.pool, user.id, coin, amount).await {
-        Ok(v) => Json(json!({ "amount": v.to_string() })).into_response(),
-        Err(e) => (StatusCode::BAD_REQUEST, Json(json!({ "error": e.to_string() }))).into_response(),
-    }
+    maintenance()
 }
 
 async fn withdraw<R: AuthRepo>(
-    State(state): State<AppState<R>>,
-    user: AuthUser,
-    Path(coin): Path<String>,
-    Json(body): Json<AmountBody>,
+    State(_state): State<AppState<R>>,
+    _user: AuthUser,
+    Path(_coin): Path<String>,
+    Json(_body): Json<AmountBody>,
 ) -> Response {
-    let Some((coin, amount)) = parse_coin_amount(&coin, &body.amount) else {
-        return (StatusCode::BAD_REQUEST, Json(json!({ "error": "invalid request" }))).into_response();
-    };
-    match db::lend::withdraw(&state.pool, user.id, coin, amount, state.settings.price_max_stale).await {
-        Ok(v) => Json(json!({ "amount": v.to_string() })).into_response(),
-        Err(e) => (StatusCode::BAD_REQUEST, Json(json!({ "error": e.to_string() }))).into_response(),
-    }
+    maintenance()
 }
 
 async fn borrow<R: AuthRepo>(
-    State(state): State<AppState<R>>,
-    user: AuthUser,
-    Path(coin): Path<String>,
-    Json(body): Json<AmountBody>,
+    State(_state): State<AppState<R>>,
+    _user: AuthUser,
+    Path(_coin): Path<String>,
+    Json(_body): Json<AmountBody>,
 ) -> Response {
-    let Some((coin, amount)) = parse_coin_amount(&coin, &body.amount) else {
-        return (StatusCode::BAD_REQUEST, Json(json!({ "error": "invalid request" }))).into_response();
-    };
-    match db::lend::borrow(&state.pool, user.id, coin, amount, state.settings.price_max_stale).await {
-        Ok(v) => Json(json!({ "amount": v.to_string() })).into_response(),
-        Err(e) => (StatusCode::BAD_REQUEST, Json(json!({ "error": e.to_string() }))).into_response(),
-    }
+    maintenance()
 }
 
 async fn repay<R: AuthRepo>(
-    State(state): State<AppState<R>>,
-    user: AuthUser,
-    Path(coin): Path<String>,
-    Json(body): Json<AmountBody>,
+    State(_state): State<AppState<R>>,
+    _user: AuthUser,
+    Path(_coin): Path<String>,
+    Json(_body): Json<AmountBody>,
 ) -> Response {
-    let Some((coin, amount)) = parse_coin_amount(&coin, &body.amount) else {
-        return (StatusCode::BAD_REQUEST, Json(json!({ "error": "invalid request" }))).into_response();
-    };
-    match db::lend::repay(&state.pool, user.id, coin, amount).await {
-        Ok(v) => Json(json!({ "amount": v.to_string() })).into_response(),
-        Err(e) => (StatusCode::BAD_REQUEST, Json(json!({ "error": e.to_string() }))).into_response(),
-    }
+    maintenance()
 }

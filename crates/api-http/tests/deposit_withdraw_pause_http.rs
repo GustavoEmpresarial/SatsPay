@@ -1,5 +1,5 @@
-//! Coin pause list: BTC/LTC/DOGE/DGB block personal deposit address, withdrawals,
-//! and merchant deposit gateway — but NOT `/v1/public/send`.
+//! Coin pause list: BTC/LTC/DOGE/BCH/DGB block personal deposit address,
+//! withdrawals, and merchant deposit gateway — but NOT `/v1/public/send`.
 
 mod common;
 
@@ -41,20 +41,24 @@ async fn oneshot(
 
 #[test]
 fn pause_list_matches_shared_constant() {
-    assert_eq!(DEPOSIT_WITHDRAW_PAUSED_COINS, [Coin::Btc, Coin::Ltc, Coin::Doge, Coin::Dgb]);
+    assert_eq!(
+        DEPOSIT_WITHDRAW_PAUSED_COINS,
+        [Coin::Btc, Coin::Ltc, Coin::Doge, Coin::Bch, Coin::Dgb]
+    );
     for c in DEPOSIT_WITHDRAW_PAUSED_COINS {
         assert!(is_deposit_withdraw_paused(c));
     }
+    assert!(!is_deposit_withdraw_paused(Coin::Zer));
     assert!(!is_deposit_withdraw_paused(Coin::Pol));
     assert!(!is_deposit_withdraw_paused(Coin::Usdt));
-    assert!(!is_deposit_withdraw_paused(Coin::Bch));
+    assert!(!is_deposit_withdraw_paused(Coin::Sol));
 }
 
 #[sqlx::test(migrations = "../db/migrations")]
 async fn personal_deposit_address_paused_coins_return_503(pool: PgPool) {
     let (state, token, _, _) = common::register_user(pool, "pause-dep").await;
 
-    for coin in ["BTC", "LTC", "DOGE", "DGB"] {
+    for coin in ["BTC", "LTC", "DOGE", "BCH", "DGB"] {
         let (st, body) = oneshot(
             state.clone(),
             "GET",
@@ -68,16 +72,25 @@ async fn personal_deposit_address_paused_coins_return_503(pool: PgPool) {
         assert_eq!(body["coin"], coin);
     }
 
-    let (st, body) = oneshot(state, "GET", "/v1/deposits/address/POL", Some(&token), None).await;
-    assert_eq!(st, axum::http::StatusCode::OK, "{body}");
-    assert!(!body["address"].as_str().unwrap_or("").is_empty());
+    for coin in ["POL", "SOL", "ZER"] {
+        let (st, body) = oneshot(
+            state.clone(),
+            "GET",
+            &format!("/v1/deposits/address/{coin}"),
+            Some(&token),
+            None,
+        )
+        .await;
+        assert_eq!(st, axum::http::StatusCode::OK, "{coin} {body}");
+        assert!(!body["address"].as_str().unwrap_or("").is_empty(), "{coin}");
+    }
 }
 
 #[sqlx::test(migrations = "../db/migrations")]
 async fn personal_withdrawal_paused_coins_return_503(pool: PgPool) {
     let (state, token, user_id, _) = common::register_user(pool.clone(), "pause-wd").await;
     let uid = Uuid::parse_str(&user_id).unwrap();
-    for coin in [Coin::Btc, Coin::Ltc, Coin::Doge, Coin::Dgb] {
+    for coin in [Coin::Btc, Coin::Ltc, Coin::Doge, Coin::Bch, Coin::Dgb] {
         common::credit_personal(&pool, uid, coin, 50_000_000).await;
     }
 
@@ -85,7 +98,8 @@ async fn personal_withdrawal_paused_coins_return_503(pool: PgPool) {
         ("BTC", "bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq"),
         ("LTC", "ltc1qabcdefghijklmnopqrstuvwxyz0123456789abcd"),
         ("DOGE", "DDogepartyxxxxxxxxxxxxxxxxxxxxxxxxx"),
-        ("DGB", "DLgB5vV3k2xPLACEHOLDER0000000000000"),
+        ("BCH", "bitcoincash:qpm2qsznhks23z7629mms6s4cwef74vcwvy22gdx6a"),
+        ("DGB", "DXYZabcdefghijklmnopqrstuvwxyz012345"),
     ] {
         let (st, body) = oneshot(
             state.clone(),
@@ -126,7 +140,7 @@ async fn merchant_gateway_paused_but_pol_ok(pool: PgPool) {
     assert_eq!(body["code"], "DEPOSIT_PAUSED");
 
     let (st, body) = oneshot(
-        state,
+        state.clone(),
         "POST",
         "/v1/merchant/deposits/create",
         Some(&token),
@@ -141,6 +155,23 @@ async fn merchant_gateway_paused_but_pol_ok(pool: PgPool) {
     .await;
     assert_eq!(st, axum::http::StatusCode::CREATED, "{body}");
     assert!(body["id"].as_str().is_some());
+
+    let (st, body) = oneshot(
+        state,
+        "POST",
+        "/v1/merchant/deposits/create",
+        Some(&token),
+        Some(json!({
+            "coin": "DGB",
+            "amount": "100000",
+            "orderId": format!("paused-dgb-{}", Uuid::new_v4()),
+            "callbackUrl": "https://merchant.example/hook",
+            "siteName": "Pause Shop DGB"
+        })),
+    )
+    .await;
+    assert_eq!(st, axum::http::StatusCode::SERVICE_UNAVAILABLE, "{body}");
+    assert_eq!(body["code"], "DEPOSIT_PAUSED");
 }
 
 #[sqlx::test(migrations = "../db/migrations")]

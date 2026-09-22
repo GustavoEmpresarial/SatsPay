@@ -24,7 +24,7 @@ pub fn routes<R: AuthRepo + 'static>() -> Router<AppState<R>> {
 }
 
 async fn status<R: AuthRepo>(State(state): State<AppState<R>>, user: AuthUser) -> Response {
-    match db::merchant::get_status(&state.pool, user.id).await {
+    match db::merchant::get_status(&state.pool, Some(&state.secrets), user.id).await {
         Ok(view) => Json(view).into_response(),
         Err(e) => (StatusCode::NOT_FOUND, Json(json!({ "error": e.to_string() }))).into_response(),
     }
@@ -39,7 +39,7 @@ struct ApplyRequest {
 }
 
 async fn apply<R: AuthRepo>(State(state): State<AppState<R>>, user: AuthUser, Json(body): Json<ApplyRequest>) -> Response {
-    match db::merchant::apply(&state.pool, user.id, &body.business_name, &body.website, &body.description).await {
+    match db::merchant::apply(&state.pool, Some(&state.secrets), user.id, &body.business_name, &body.website, &body.description).await {
         Ok(view) => Json(view).into_response(),
         Err(e) => (StatusCode::CONFLICT, Json(json!({ "error": e.to_string() }))).into_response(),
     }
@@ -49,9 +49,9 @@ async fn list_applications<R: AuthRepo>(State(state): State<AppState<R>>, user: 
     if let Err(r) = require_admin(&user) {
         return *r;
     }
-    match db::merchant::list_applications(&state.pool, None).await {
+    match db::merchant::list_applications(&state.pool, Some(&state.secrets), None).await {
         Ok(apps) => Json(apps).into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e.to_string() }))).into_response(),
+        Err(e) => crate::http_error::internal_error(&e),
     }
 }
 
@@ -61,7 +61,7 @@ async fn approve<R: AuthRepo>(State(state): State<AppState<R>>, user: AuthUser, 
     }
     match db::merchant::approve(&state.pool, id, user.id).await {
         Ok(()) => {
-            if let Some(to) = user_email(&state.pool, id).await {
+            if let Some(to) = user_email(&state.pool, Some(&state.secrets), id).await {
                 send_best_effort(
                     state.email.as_ref(),
                     &to,
@@ -87,7 +87,7 @@ async fn reject<R: AuthRepo>(State(state): State<AppState<R>>, user: AuthUser, P
     }
     match db::merchant::reject(&state.pool, id, user.id, &body.reason).await {
         Ok(()) => {
-            if let Some(to) = user_email(&state.pool, id).await {
+            if let Some(to) = user_email(&state.pool, Some(&state.secrets), id).await {
                 let body_text = format!("Your merchant application was rejected.\n\nReason: {}", body.reason);
                 send_best_effort(state.email.as_ref(), &to, "BitcoSats merchant application rejected", &body_text).await;
             }

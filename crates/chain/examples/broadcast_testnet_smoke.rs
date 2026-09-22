@@ -117,6 +117,7 @@ async fn run() -> Result<ExitCode, ExitCode> {
     let config = RealClientConfig {
         bitcore_base_url: bitcore_base_url.clone(),
         evm_rpc_url: evm_rpc_url.clone(),
+        bsc_rpc_url: "https://bsc-rpc.publicnode.com".into(),
         deposit_xpub,
         hot_wallet_wif: Some(wif.clone()),
         evm_deposit_lookback_blocks,
@@ -124,6 +125,10 @@ async fn run() -> Result<ExitCode, ExitCode> {
         network: ChainNetwork::Testnet,
         sol_rpc_url: "https://api.devnet.solana.com".to_string(),
         dgb_insight_url: "https://digiexplorer.info/api".to_string(),
+        dgb_rpc_url: None,
+        zer_explorer_url: "https://zerochain.info/api".to_string(),
+        zer_explorer_api_key: None,
+        zer_rpc_url: None,
         deposit_mnemonic: None,
         hot_mnemonic: None,
     };

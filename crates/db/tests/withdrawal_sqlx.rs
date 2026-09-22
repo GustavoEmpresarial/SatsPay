@@ -56,6 +56,7 @@ async fn withdrawal_request_debits_and_stub_broadcast_reverses(pool: PgPool) {
         client.as_ref(),
         "127.0.0.1",
         None,
+        None,
     )
     .await
     .expect("request_withdrawal");
@@ -74,7 +75,7 @@ async fn withdrawal_request_debits_and_stub_broadcast_reverses(pool: PgPool) {
     // principal 100_000 + network fee 1_000
     assert_eq!(balance_after_debit, BigDecimal::from(4_899_000u64));
 
-    db::withdrawals::process_broadcast(&pool, withdrawal.id, &registry)
+    db::withdrawals::process_broadcast(&pool, withdrawal.id, &registry, None)
         .await
         .expect("process_broadcast");
 
@@ -104,11 +105,11 @@ async fn withdrawal_request_debits_and_stub_broadcast_reverses(pool: PgPool) {
     .unwrap();
     assert_eq!(failed_events, 1);
 
-    let history = db::withdrawals::list_user_withdrawals(&pool, user_id, Some(Coin::Btc), 20)
+    let history = db::withdrawals::list_user_withdrawals(&pool, user_id, Some(Coin::Btc), 20, None)
         .await
         .unwrap();
     assert!(!history.is_empty());
-    let history_all = db::withdrawals::list_user_withdrawals(&pool, user_id, None, 20)
+    let history_all = db::withdrawals::list_user_withdrawals(&pool, user_id, None, 20, None)
         .await
         .unwrap();
     assert_eq!(history_all.len(), history.len());
@@ -122,6 +123,7 @@ async fn withdrawal_request_debits_and_stub_broadcast_reverses(pool: PgPool) {
         BigDecimal::from_str("50000").unwrap(),
         client.as_ref(),
         "127.0.0.1",
+        None,
         None,
     )
     .await

@@ -47,8 +47,6 @@
 
 Página React `AdminWithdrawalsPage`. Chama 3 endpoint(s) via `api()`. Abas/labels: Todos, Aprovar, Fila, Transmitindo, Transmitidos, Confirmados, Falhas, Cancelados. 2FA / fee / min withdrawal; status PENDING→BROADCAST→CONFIRMED. UI admin sempre pt-BR.
 
-`POST /v1/admin/withdrawals/:id/approve`: **sempre** exige `emailCode` (OTP `LOGIN`), independente de `SMTP_ENABLED` / 2FA. Sem código → `{ "codeSent": true }`. Reject sem step-up.
-
 ## Notas de overview legado
 
 # Admin Withdrawals — Overview

@@ -121,7 +121,8 @@ async fn binance_covers_all_mapped_symbols() {
                       {"symbol":"POLUSDT","price":"5"},
                       {"symbol":"DGBUSDT","price":"6"},
                       {"symbol":"SOLUSDT","price":"7"},
-                      {"symbol":"USDCUSDT","price":"8"}
+                      {"symbol":"USDCUSDT","price":"8"},
+                      {"symbol":"PEPEUSDT","price":"0.000004"}
                     ]"#,
                 )
                 .insert_header("content-type", "application/json"),
@@ -130,10 +131,10 @@ async fn binance_covers_all_mapped_symbols() {
         .await;
     let p = BinanceProvider::new(Some(server.uri()), Duration::from_secs(5));
     let coins = [
-        Coin::Btc, Coin::Ltc, Coin::Doge, Coin::Bch, Coin::Pol, Coin::Dgb, Coin::Sol, Coin::Usdc, Coin::Usdt,
+        Coin::Btc, Coin::Ltc, Coin::Doge, Coin::Bch, Coin::Pol, Coin::Dgb, Coin::Sol, Coin::Usdc, Coin::Usdt, Coin::Pepe,
     ];
     let map = p.fetch_prices(&coins).await.unwrap();
-    assert_eq!(map.len(), 9);
+    assert_eq!(map.len(), 10);
     assert_eq!(p.name(), "Binance");
 }
 
@@ -210,7 +211,9 @@ async fn coingecko_all_ids_and_fetch_usd_prices() {
                       "digibyte":{"usd":6.0},
                       "solana":{"usd":7.0},
                       "tether":{"usd":8.0},
-                      "usd-coin":{"usd":9.0}
+                      "usd-coin":{"usd":9.0},
+                      "zero":{"usd":0.01},
+                      "pepe":{"usd":0.000004}
                     }"#,
                 )
                 .insert_header("content-type", "application/json"),

@@ -27,8 +27,19 @@ pub fn routes<R: AuthRepo + 'static>() -> Router<AppState<R>> {
 }
 
 /// Path under `PUBLIC_BASE_URL` where the vendored coin icons are served.
+/// PEPE is PNG: browsers do not paint an image nested inside an SVG used as `<img>`.
+pub(crate) fn coin_logo_url(base: &str, symbol: &str) -> String {
+    let ext = if symbol.eq_ignore_ascii_case("pepe") { "png" } else { "svg" };
+    format!(
+        "{}/sdk/coins/{}.{}",
+        base.trim_end_matches('/'),
+        symbol.to_ascii_lowercase(),
+        ext
+    )
+}
+
 fn logo_url(base: &str, coin: shared::Coin) -> String {
-    format!("{base}/sdk/coins/{}.svg", coin.as_str().to_lowercase())
+    coin_logo_url(base, coin.as_str())
 }
 
 /// Coin catalogue: everything needed to render a payment UI — symbol, name,
@@ -92,8 +103,9 @@ fn demo_address(coin: shared::Coin) -> &'static str {
         shared::Coin::Doge => "D-DEMO-nao-envie-nada-para-este-endereco",
         shared::Coin::Bch => "bitcoincash:q-DEMO-nao-envie-nada-para-este-endereco",
         shared::Coin::Dgb => "dgb1q-DEMO-nao-envie-nada-para-este-endereco",
+        shared::Coin::Zer => "t1-DEMO-nao-envie-nada-para-este-endereco",
         shared::Coin::Sol => "DEMO-nao-envie-nada-para-este-endereco",
-        shared::Coin::Pol | shared::Coin::Usdt | shared::Coin::Usdc => {
+        shared::Coin::Pol | shared::Coin::Usdt | shared::Coin::Usdc | shared::Coin::Pepe => {
             "0x-DEMO-nao-envie-nada-para-este-endereco"
         }
     }
@@ -101,7 +113,6 @@ fn demo_address(coin: shared::Coin) -> &'static str {
 
 /// US$ 25, scaled the way the price cache scales everything.
 const DEMO_USD_SCALED: u64 = 25 * 100_000_000;
-const DEMO_PRICE_DECIMALS: i32 = 8;
 
 /// A fake invoice so `/pay/demo` renders the *real* checkout with no money, no
 /// database row and no webhook. `/demo` used to be a dead redirect to the
@@ -191,7 +202,7 @@ fn demo_payload<R: AuthRepo>(
 
     // No coin has a fresh price: show the invoice rather than an error page,
     // with nothing to pick.
-    let (coin, amount, display) = match selected {
+    let (coin, amount, display, amount_dec) = match selected {
         Some(o) => (
             o.coin,
             o.amount.to_string(),
@@ -199,11 +210,13 @@ fn demo_payload<R: AuthRepo>(
                 .to_u128()
                 .map(|u| shared::format_amount(u, o.coin))
                 .unwrap_or_else(|| o.amount.to_string()),
+            o.amount.clone(),
         ),
         None => (
             shared::Coin::Usdt,
             DEMO_USD_SCALED.to_string(),
             shared::format_amount(DEMO_USD_SCALED as u128, shared::Coin::Usdt),
+            BigDecimal::from(DEMO_USD_SCALED),
         ),
     };
     let address = demo_address(coin);
@@ -239,7 +252,7 @@ fn demo_payload<R: AuthRepo>(
         "customerEmail": serde_json::Value::Null,
         "successUrl": serde_json::Value::Null,
         "cancelUrl": serde_json::Value::Null,
-        "qrCode": format!("{}:{address}?amount={display}", coin.as_str().to_lowercase()),
+        "qrCode": crate::merchant_deposits::payment_uri(coin.as_str(), address, &amount_dec),
         "expiresAt": expires_at,
         "paidAt": serde_json::Value::Null,
         "txHash": serde_json::Value::Null,

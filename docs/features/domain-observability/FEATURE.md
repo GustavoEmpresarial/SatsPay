@@ -41,8 +41,6 @@
 ## Comportamento (bruto)
 
 Filtros de ruído: inventory faucet, login 400, React #311 legado, CDN icons.
-Fingerprint fino + rate-limit `telemetry-ingest` (60/min).
-Alerta opcional: `TELEMETRY_ALERT_WEBHOOK_URL` (CRITICAL/FATAL novos + spikes).
 
 ## Notas de overview legado
 
@@ -54,7 +52,6 @@ _sem overview em docs/pages_
 - Admin: `AdminLayout` labels em pt-BR; ignore language switch do app.
 - Erros esperados de produto (faucet inventory, login 400) não devem floodar telemetria.
 - Saldos: nunca confiar em coluna `balance` mutável — usar ledger.
-- Endpoint de ingest é público (auth opcional) — depende de rate-limit + filtros cliente.
 
 ## Links relacionados
 

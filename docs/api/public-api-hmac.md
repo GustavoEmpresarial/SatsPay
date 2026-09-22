@@ -22,7 +22,7 @@ sem sessão de usuário.
   {
     "label": "Bot de Pagamento Produção",
     "scopes": ["deposits", "send"],
-    "allowedIps": ["203.0.113.10", "198.51.100.25"],
+    "allowedIps": ["203.0.113.10", "198.51.100.0/24", "2001:db8::/32"],
     "expiresInDays": 90,
     "requireSignature": true
   }
@@ -39,6 +39,8 @@ sem sessão de usuário.
   `id` é o que vai no header `x-key-id` do modo assinado. `prefix` serve só para você
   reconhecer a chave na listagem.
 
+`allowedIps` aceita IP exato, CIDR IPv4/IPv6 (`198.51.100.0/24`), `*` (qualquer origem) e IPv4-mapped IPv6 (`::ffff:1.2.3.4` casa com `1.2.3.4`). Lista vazia = sem restrição de IP.
+
 ### Escopos
 
 Apenas três valores mudam alguma coisa hoje:
@@ -47,14 +49,10 @@ Apenas três valores mudam alguma coisa hoje:
 |---|---|
 | `deposits` | criar e consultar cobranças em `/v1/merchant/deposits` |
 | `send` | `POST /v1/public/send` |
+| `balance` | `GET /v1/public/balance` |
 | `*` | curinga: concede tudo |
 
-Qualquer outro texto é aceito e guardado, mas **não habilita nada** — a lista não é
-validada contra um catálogo. Escopo ausente → `403 MISSING_SCOPE`.
-
-> ⚠️ **`GET /v1/public/balance` não verifica escopo.** Qualquer chave válida lê o saldo
-> completo da conta, mesmo emitida só com `deposits`. Para integração de terceiro, use uma
-> conta separada em vez de confiar no escopo para conter o acesso.
+Qualquer outro texto é **recusado** na emissão (`400 INVALID_SCOPE`). Escopo ausente → `403 MISSING_SCOPE`.
 
 ### `GET /v1/api-keys`
 Lista as chaves do usuário: `id`, `label`, `keyPrefix`, `scopes`, `allowedIps`, `expiresAt`,
@@ -128,6 +126,20 @@ entre assinar e enviar muda a assinatura.
 ## 4. Endpoints
 
 ### `POST /v1/public/send` — transferência interna
+
+**`toEmail`** é o e-mail da conta que recebe. Os dois jeitos abaixo são válidos e caem no mesmo campo: o usuário digita o e-mail da conta SatsPay dele, ou entra com SatsPay e você usa o `email` de `GET /v1/oauth/userinfo` (`email_verified: true`). Não é endereço on-chain.
+
+Toda falha deste endpoint é `400` com `{ "error": "…", "code": "…" }`. Nada é debitado.
+
+| `code` | O que aconteceu |
+|---|---|
+| `TARGET_INELIGIBLE` | Não existe conta SatsPay com esse e-mail. |
+| `SEND_TO_SELF` | O e-mail é da conta que emitiu a chave. Não é falta de saldo. |
+| `DAILY_LIMIT_REACHED` | A chave estourou o limite diário. |
+| `WALLET_NOT_FOUND` | Remetente ou destinatário sem carteira nessa moeda. |
+
+Mostre `error` e `code` para quem chama. Não troque por “tente de novo” nem por “saldo insuficiente”.
+
 - **Escopo**: `send`.
 - **Body** — só estes quatro campos são lidos:
   ```json
@@ -297,8 +309,9 @@ integrou por ela, revise:
 | headers `X-Api-Key`, `X-Timestamp`, `X-Nonce`, `X-Signature` | modo assinado usa `x-key-id`, `x-timestamp`, `x-signature`; **não existe `X-Nonce`** |
 | string canônica `MÉTODO\nCAMINHO\nTS\nNONCE\nCORPO` | `TS\nMÉTODO\nCAMINHO\nSHA256(CORPO)` — outra ordem, e o **hash** do corpo |
 | chave emitida em `apiKey` | o campo é **`key`** |
-| escopos incluíam `balance` | `balance` não é verificado em lugar nenhum |
+| escopos incluíam `balance` mas a doc antiga não batia com o código | `GET /v1/public/balance` exige o escopo `balance` (`403 MISSING_SCOPE` se faltar). `*` concede tudo |
 | `send` aceitava `memo` | campo inexistente, ignorado |
 | `send` respondia `{success, transactionId, coin, amount}` | responde `{ "referenceId": "…" }` |
 | `balance` aceitava `?coin=BTC` e devolvia uma moeda | ignora a query e devolve **todas** as moedas |
+| `send` só devolvia `{ "error": "cannot send to self" }` | `400` `{ "error", "code": "SEND_TO_SELF" }`. A conta dona da chave não recebe o próprio envio. Checkout com saldo da mesma conta: `CANNOT_PAY_OWN_INVOICE` |
 | exemplo apontava para `http://127.0.0.1:4000` | `https://www.satspay.pro` |

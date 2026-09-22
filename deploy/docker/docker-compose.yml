@@ -44,6 +44,7 @@ services:
       JWT_ACCESS_TTL_SECS: "900"
       JWT_REFRESH_TTL_SECS: "2592000"
       ENCRYPTION_KEY: ${ENCRYPTION_KEY:?Set ENCRYPTION_KEY}
+      PII_BLANK_EMAIL: ${PII_BLANK_EMAIL:-false}
       OTP_CODE_TTL_SECS: "600"
       OTP_RESEND_COOLDOWN_SECS: "60"
       OTP_MAX_ATTEMPTS: "5"
@@ -68,6 +69,7 @@ services:
       HOT_WALLET_PRIVATE_KEY: ${HOT_WALLET_PRIVATE_KEY:-}
       POL_HOT_WALLET_KEY: ${POL_HOT_WALLET_KEY:-}
       EVM_RPC_URL: ${EVM_RPC_URL:-https://polygon-bor-rpc.publicnode.com}
+      BSC_RPC_URL: ${BSC_RPC_URL:-https://bsc-rpc.publicnode.com}
       CHAIN_DEPOSIT_XPUB: ${CHAIN_DEPOSIT_XPUB:-}
       DEPOSIT_MNEMONIC: ${DEPOSIT_MNEMONIC:-}
       # Dev: plaintext OK. Production (NODE_ENV=production): use HOT_MNEMONIC_ENC only.
@@ -76,13 +78,25 @@ services:
       SOL_RPC_URL: ${SOL_RPC_URL:-http://62.171.138.114:8899}
       SOLANA_PAY_URL: ${SOLANA_PAY_URL:-http://62.171.138.114:8090/healthz}
       DGB_INSIGHT_API: ${DGB_INSIGHT_API:-https://digiexplorer.info/api}
+      # Empty until a dedicated DGB host exists (node VM cannot run digibyted).
+      DGB_RPC_URL: ${DGB_RPC_URL:-}
+      # Empty until zerod has peers and has left IBD. Withdraw is fail-closed without it.
+      ZER_RPC_URL: ${ZER_RPC_URL:-}
+      ZER_EXPLORER_API: ${ZER_EXPLORER_API:-https://zerochain.info/api}
+      ZER_EXPLORER_API_KEY: ${ZER_EXPLORER_API_KEY:-}
       SWAPKIT_ENABLED: ${SWAPKIT_ENABLED:-false}
       SWAPKIT_API_KEY: ${SWAPKIT_API_KEY:-}
       SWAPKIT_BASE_URL: ${SWAPKIT_BASE_URL:-https://api.swapkit.dev}
       SWAP_PLATFORM_FEE_BPS_SAME: ${SWAP_PLATFORM_FEE_BPS_SAME:-25}
-      SWAP_PLATFORM_FEE_BPS_CROSS: ${SWAP_PLATFORM_FEE_BPS_CROSS:-50}
+      SWAP_PLATFORM_FEE_BPS_CROSS: ${SWAP_PLATFORM_FEE_BPS_CROSS:-25}
       SWAP_SLIPPAGE_PCT: ${SWAP_SLIPPAGE_PCT:-2}
       SWAPKIT_TIMEOUT_SECS: ${SWAPKIT_TIMEOUT_SECS:-20}
+      RELAY_ENABLED: ${RELAY_ENABLED:-false}
+      RELAY_API_KEY: ${RELAY_API_KEY:-}
+      RELAY_BASE_URL: ${RELAY_BASE_URL:-https://api.relay.link}
+      CHANGENOW_ENABLED: ${CHANGENOW_ENABLED:-false}
+      CHANGENOW_API_KEY: ${CHANGENOW_API_KEY:-}
+      CHANGENOW_BASE_URL: ${CHANGENOW_BASE_URL:-https://api.changenow.io/v2}
       SWAP_HOUSE_ENABLED: ${SWAP_HOUSE_ENABLED:-false}
       DEX_SWAP_INTERVAL_SECS: ${DEX_SWAP_INTERVAL_SECS:-15}
       # Optional overrides (smallest units). Empty → code defaults (~USD 1k).
@@ -95,6 +109,9 @@ services:
       WITHDRAWAL_APPROVAL_THRESHOLD_SOL: ${WITHDRAWAL_APPROVAL_THRESHOLD_SOL:-}
       WITHDRAWAL_APPROVAL_THRESHOLD_USDT: ${WITHDRAWAL_APPROVAL_THRESHOLD_USDT:-}
       WITHDRAWAL_APPROVAL_THRESHOLD_USDC: ${WITHDRAWAL_APPROVAL_THRESHOLD_USDC:-}
+      WITHDRAWAL_APPROVAL_THRESHOLD_ZER: ${WITHDRAWAL_APPROVAL_THRESHOLD_ZER:-}
+      # Unset or 1 blocks withdrawals when network cost exceeds fee revenue. 0 allows them.
+      FEE_MARGIN_HARD_BLOCK: ${FEE_MARGIN_HARD_BLOCK:-}
     ports:
       - "${API_HOST_BIND:-127.0.0.1}:${API_HOST_PORT:-4500}:4000"
     networks:

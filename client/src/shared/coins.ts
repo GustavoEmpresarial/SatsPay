@@ -1,28 +1,148 @@
-export const COINS = ['BTC', 'LTC', 'DOGE', 'BCH', 'POL', 'DGB', 'SOL', 'USDT', 'USDC'] as const;
+export const COINS = ['BTC', 'LTC', 'DOGE', 'BCH', 'POL', 'DGB', 'SOL', 'USDT', 'USDC', 'ZER', 'PEPE'] as const;
 export type Coin = (typeof COINS)[number];
 
-/** Polygon L2 assets allowed for DEX swap (temporary — no L1 / no HOUSE). */
-export const SWAP_L2_COINS = ['POL', 'USDT', 'USDC'] as const;
+/** Polygon L2 + SOL (Relay bridge) allowed for custodial DEX swap. */
+export const SWAP_L2_COINS = ['POL', 'USDT', 'USDC', 'SOL'] as const;
 export type SwapL2Coin = (typeof SWAP_L2_COINS)[number];
 
+/** L1 UTXO coins swapped via ChangeNOW. */
+export const SWAP_L1_COINS = ['BTC', 'LTC', 'DOGE', 'BCH', 'DGB'] as const;
+export type SwapL1Coin = (typeof SWAP_L1_COINS)[number];
+
+/** Full swap picker: L1 + L2/SOL (SOL perto do topo — fácil achar). */
+export const SWAP_COINS = [
+  'BTC',
+  'SOL',
+  'LTC',
+  'DOGE',
+  'BCH',
+  'DGB',
+  'POL',
+  'USDT',
+  'USDC',
+] as const;
+export type SwapCoin = (typeof SWAP_COINS)[number];
+
 /**
- * Temporary pause: coins stay visible in personal deposit/withdraw pickers,
- * but address generation, withdrawals, and merchant deposit gateway invoices
- * are blocked. `/v1/public/send` is NOT paused.
+ * Same-network DEX swap (aba Swap): só Polygon — POL ↔ USDT ↔ USDC.
+ * Bridge (cross-rede) usa o allowlist completo `SWAP_COINS`.
  */
-export const DEPOSIT_WITHDRAW_PAUSED_COINS = ['BTC', 'LTC', 'DOGE', 'DGB'] as const;
+export const DEX_SWAP_COINS = ['POL', 'USDT', 'USDC'] as const;
+export type DexSwapCoin = (typeof DEX_SWAP_COINS)[number];
+
+export type SwapMode = 'swap' | 'bridge';
+
+/**
+ * Custodial network for each coin on SatsPay (deposit / withdraw / swap legs).
+ * USDT/USDC/POL = Polygon PoS — not Ethereum, not BSC.
+ * PEPE = BNB Smart Chain BEP-20 — not Ethereum PEPE.
+ */
+export type CoinNetworkId =
+  | 'bitcoin'
+  | 'litecoin'
+  | 'dogecoin'
+  | 'bitcoincash'
+  | 'digibyte'
+  | 'polygon'
+  | 'solana'
+  | 'zero'
+  | 'bsc';
+
+export interface CoinNetwork {
+  id: CoinNetworkId;
+  /** Short badge in pickers (e.g. "Polygon", "BSC"). */
+  short: string;
+  /** Full label for tooltips / copy. */
+  label: string;
+}
+
+export const COIN_NETWORK: Record<Coin, CoinNetwork> = {
+  BTC: { id: 'bitcoin', short: 'Bitcoin', label: 'Bitcoin' },
+  LTC: { id: 'litecoin', short: 'Litecoin', label: 'Litecoin' },
+  DOGE: { id: 'dogecoin', short: 'Dogecoin', label: 'Dogecoin' },
+  BCH: { id: 'bitcoincash', short: 'Bitcoin Cash', label: 'Bitcoin Cash' },
+  DGB: { id: 'digibyte', short: 'DigiByte', label: 'DigiByte' },
+  POL: { id: 'polygon', short: 'Polygon', label: 'Polygon PoS' },
+  USDT: { id: 'polygon', short: 'Polygon', label: 'Polygon PoS (USDT bridged)' },
+  USDC: { id: 'polygon', short: 'Polygon', label: 'Polygon PoS (USDC native)' },
+  SOL: { id: 'solana', short: 'Solana', label: 'Solana' },
+  ZER: { id: 'zero', short: 'Zero', label: 'Zero (transparent t1)' },
+  PEPE: { id: 'bsc', short: 'BSC', label: 'BNB Smart Chain (BEP-20)' },
+};
+
+export function coinNetwork(coin: Coin): CoinNetwork {
+  return COIN_NETWORK[coin];
+}
+
+export function isDexSwapCoin(value: string): value is DexSwapCoin {
+  return (DEX_SWAP_COINS as readonly string[]).includes(value);
+}
+
+/** True when both coins share the same custodial network (e.g. POL+USDT). */
+export function isSameSwapNetwork(from: string, to: string): boolean {
+  if (!isCoin(from) || !isCoin(to)) return false;
+  return coinNetwork(from).id === coinNetwork(to).id;
+}
+
+/** Aba Swap: par DEX na mesma rede (hoje só Polygon). */
+export function isDexSwapPair(from: string, to: string): boolean {
+  return from !== to && isDexSwapCoin(from) && isDexSwapCoin(to);
+}
+
+/** Aba Bridge: par allowlisted em redes distintas. */
+export function isBridgePair(from: string, to: string): boolean {
+  return from !== to && isSwapCoin(from) && isSwapCoin(to) && !isSameSwapNetwork(from, to);
+}
+
+export function coinsForMode(mode: SwapMode): readonly Coin[] {
+  return mode === 'swap' ? DEX_SWAP_COINS : SWAP_COINS;
+}
+
+export function defaultPairForMode(mode: SwapMode): { from: Coin; to: Coin } {
+  return mode === 'swap' ? { from: 'POL', to: 'USDT' } : { from: 'SOL', to: 'USDT' };
+}
+
+/**
+ * Temporary pause: personal deposit/withdraw pickers still list paused networks,
+ * but those rows are disabled (not selectable). Address generation, withdrawals,
+ * and merchant deposit gateway invoices are blocked by the API.
+ * `/v1/public/send` is NOT paused. Custodial ChangeNOW swaps from balance ARE allowed.
+ */
+export const DEPOSIT_WITHDRAW_PAUSED_COINS = ['BTC', 'LTC', 'DOGE', 'BCH', 'DGB'] as const;
 export type DepositWithdrawPausedCoin = (typeof DEPOSIT_WITHDRAW_PAUSED_COINS)[number];
 
 export function isSwapL2Coin(value: string): value is SwapL2Coin {
   return (SWAP_L2_COINS as readonly string[]).includes(value);
 }
 
+export function isSwapL1Coin(value: string): value is SwapL1Coin {
+  return (SWAP_L1_COINS as readonly string[]).includes(value);
+}
+
+export function isSwapCoin(value: string): value is SwapCoin {
+  return (SWAP_COINS as readonly string[]).includes(value);
+}
+
 export function isSwapL2Pair(from: string, to: string): boolean {
   return from !== to && isSwapL2Coin(from) && isSwapL2Coin(to);
 }
 
+export function isSwapPair(from: string, to: string): boolean {
+  return from !== to && isSwapCoin(from) && isSwapCoin(to);
+}
+
 export function isDepositWithdrawPaused(value: string): boolean {
   return (DEPOSIT_WITHDRAW_PAUSED_COINS as readonly string[]).includes(value.toUpperCase());
+}
+
+/** Coins the user can pick for personal deposit / withdraw right now. */
+export function depositWithdrawActiveCoins(): Coin[] {
+  return COINS.filter((c) => !isDepositWithdrawPaused(c));
+}
+
+/** Paused networks — picker rows, disabled. */
+export function depositWithdrawPausedCoinList(): Coin[] {
+  return COINS.filter((c) => isDepositWithdrawPaused(c));
 }
 
 /** Prefer URL coin when active; otherwise first non-paused coin. */
@@ -34,7 +154,7 @@ export function defaultDepositWithdrawCoin(preferred?: string | null): Coin {
 
 /** Internal ledger scale — every coin is stored with 8 decimal places. */
 export const INTERNAL_AMOUNT_DECIMALS = 8;
-/** Default swap fee in basis points, matching `shared::swap` / API quotes. */
+/** Default swap fee in basis points — SatsPay diferencial (0.25%). */
 export const SWAP_DEFAULT_FEE_BPS = 25;
 
 export function isCoin(value: string): value is Coin {
@@ -166,6 +286,30 @@ export const COIN_CONFIG: Record<Coin, CoinConfig> = {
     displayColor: '#2775CA',
     approvalThreshold: 100_000_000_000n, // 1,000 USDC ($1,000 USD)
   },
+  ZER: {
+    symbol: 'ZER',
+    name: 'Zero',
+    decimals: 8,
+    minWithdrawal: 1n,
+    withdrawalFee: 100_000n, // 0.001 ZER
+    faucetPayFee: 100_000n,
+    minConfirmations: 10,
+    faucetReward: 1n,
+    displayColor: '#1a1a1a',
+    approvalThreshold: 10_000_000_000_000n, // 100,000 ZER ≈ $1,000
+  },
+  PEPE: {
+    symbol: 'PEPE',
+    name: 'Pepe',
+    decimals: 8,
+    minWithdrawal: 1n,
+    withdrawalFee: 5_000_000_000_000n, // 50,000 PEPE — gas on-chain is BNB
+    faucetPayFee: 5_000_000_000_000n,
+    minConfirmations: 15,
+    faucetReward: 1n,
+    displayColor: '#3CB43C',
+    approvalThreshold: 25_000_000_000_000_000n, // 250,000,000 PEPE ≈ $1,000
+  },
 };
 
 export interface SwapQuote {
@@ -287,6 +431,19 @@ export function formatAmount(amount: bigint | number | string | null | undefined
   return `${whole}.${fracStr}`;
 }
 
+/** Wallet display: always `decimals` fraction digits (ledger scale is 8). */
+export function formatAmountFixed(amount: bigint | number | string | null | undefined, coin: Coin): string {
+  const cfg = COIN_CONFIG[coin];
+  if (!cfg) return String(amount ?? 0);
+
+  const raw = safeBigInt(amount);
+  const places = cfg.decimals;
+  const factor = 10n ** BigInt(places);
+  const whole = raw / factor;
+  const frac = raw % factor;
+  return `${whole}.${frac.toString().padStart(places, '0')}`;
+}
+
 export function parseAmount(display: string, coin: Coin): bigint {
   const cfg = COIN_CONFIG[coin];
   if (!cfg) return 0n;
@@ -312,6 +469,8 @@ export const FALLBACK_PRICES: Record<Coin, number> = {
   SOL: 148.0,
   USDT: 1.0,
   USDC: 1.0,
+  ZER: 0.01,
+  PEPE: 0.000004,
 };
 
 export function getCoinUsdValue(
@@ -343,6 +502,9 @@ export function formatUsdValue(
   priceDecimals = 8,
 ): string {
   const usd = getCoinUsdValue(amount, coin, prices, priceDecimals);
+  const raw = safeBigInt(amount);
+  // Non-zero ledger dust must never look like a false $0.00 credit.
+  if (raw !== 0n && usd === 0) return '< $0.0001';
   if (usd === 0) return '$0.00';
   if (usd > 0 && usd < 0.0001) {
     return '< $0.0001';
@@ -367,6 +529,30 @@ export interface WalletBalance {
   address?: string | null;
 }
 
+/** Portfolio / KPI hero: never show bare `$0.00` when there is a non-zero balance. */
+export function formatPortfolioUsd(totalUsd: number, hasNonZeroBalance: boolean): string {
+  if (hasNonZeroBalance && (totalUsd <= 0 || totalUsd < 0.01)) {
+    return '< $0.01';
+  }
+  if (totalUsd > 0 && totalUsd < 0.01) {
+    return '< $0.01';
+  }
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(totalUsd);
+}
+
+/** API may return a bare array or `{ wallets }` — normalize like Dashboard/Checkout. */
+export function asWalletBalances(
+  data: WalletBalance[] | { wallets?: WalletBalance[] } | null | undefined,
+): WalletBalance[] {
+  if (!data) return [];
+  if (Array.isArray(data)) return data;
+  return Array.isArray(data.wallets) ? data.wallets : [];
+}
 
 /**
  * Renders a ledger amount as a quantity of coins.

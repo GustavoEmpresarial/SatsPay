@@ -57,7 +57,7 @@ describe('CheckoutPage — coin picker', () => {
       route: '/pay/inv-multi',
       routePath: '/pay/:id',
     });
-    await waitFor(() => expect(container.textContent).toMatch(/Escolha como pagar/i), { timeout: 5000 });
+    await waitFor(() => expect(container.textContent).toMatch(/Escolha a moeda|Choose a coin/i), { timeout: 5000 });
 
     // Each coin shows what it would actually cost, not one shared number.
     expect(container.textContent).toContain('55.55555556 POL');
@@ -72,11 +72,11 @@ describe('CheckoutPage — coin picker', () => {
       route: '/pay/inv-multi',
       routePath: '/pay/:id',
     });
-    await waitFor(() => expect(container.textContent).toMatch(/Escolha como pagar/i), { timeout: 5000 });
+    await waitFor(() => expect(container.textContent).toMatch(/Escolha a moeda|Choose a coin/i), { timeout: 5000 });
 
     const pol = within(container)
       .getAllByRole('button')
-      .find((b) => /POL/.test(b.textContent || ''))!;
+      .find((b) => /POL/.test(b.textContent || '') && !(b as HTMLButtonElement).disabled)!;
     await user.click(pol);
 
     await waitFor(() => expect(selectCalls).toHaveLength(1));
@@ -89,8 +89,8 @@ describe('CheckoutPage — coin picker', () => {
       route: '/pay/inv-multi',
       routePath: '/pay/:id',
     });
-    await waitFor(() => expect(container.textContent).toMatch(/Escolha como pagar/i), { timeout: 5000 });
-    expect(container.textContent).toMatch(/cotação é travada/i);
+    await waitFor(() => expect(container.textContent).toMatch(/Escolha a moeda|Choose a coin/i), { timeout: 5000 });
+    expect(container.textContent).toMatch(/cotação é travada|quote locks/i);
     unmount();
   });
 
@@ -102,8 +102,8 @@ describe('CheckoutPage — coin picker', () => {
       routePath: '/pay/:id',
     });
     await waitFor(() => expect(container.textContent).toContain('USDT'), { timeout: 5000 });
-    expect(container.textContent).not.toMatch(/Escolha como pagar/i);
-    expect(container.textContent).not.toMatch(/Pagar com outra moeda/i);
+    expect(container.textContent).not.toMatch(/Escolha a moeda|Choose a coin/i);
+    expect(container.textContent).not.toMatch(/Pagar com outra moeda|Pay with another coin/i);
     unmount();
   });
 
@@ -115,10 +115,9 @@ describe('CheckoutPage — coin picker', () => {
       route: '/pay/demo',
       routePath: '/pay/:id',
     });
-    await waitFor(() => expect(container.textContent).toMatch(/Escolha como pagar/i), { timeout: 5000 });
+    await waitFor(() => expect(container.textContent).toMatch(/Escolha a moeda|Choose a coin/i), { timeout: 5000 });
     expect(container.textContent).toMatch(/Demonstra/i);
-    // Still a demo: no real payment action.
-    expect(container.textContent).not.toMatch(/1-Clique/i);
+    expect(container.textContent).not.toMatch(/Pagar agora|Pay now/i);
     unmount();
   });
 
@@ -129,7 +128,7 @@ describe('CheckoutPage — coin picker', () => {
       routePath: '/pay/:id',
     });
     await waitFor(() => expect(container.textContent).toContain('USDT'), { timeout: 5000 });
-    expect(container.textContent).not.toMatch(/Escolha como pagar/i);
+    expect(container.textContent).not.toMatch(/Escolha a moeda|Choose a coin/i);
     expect(container.textContent).toContain('25 USDT');
     unmount();
   });

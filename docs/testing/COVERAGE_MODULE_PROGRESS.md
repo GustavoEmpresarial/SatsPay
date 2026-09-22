@@ -18,7 +18,7 @@ CI do monorepo continua fail-under **90**, não 100% global.
 | `rate_limit` | units (+ window reset) | ✅ ~86% lines (foco) |
 | `admin` rewards programs | `admin_rewards_http` | ✅ 1/1 |
 | `swap` quote validation | `swap_quote_validation_http` | ✅ 1/1 |
-| deposit/withdraw/merchant pause | `deposit_withdraw_pause_http` + client unit | ✅ BTC/LTC/DOGE 503; `/public/send` aberto |
+| deposit/withdraw/merchant pause | `deposit_withdraw_pause_http` + client unit | ✅ BTC/LTC/DOGE/BCH/DGB 503; POL/SOL/ZER ativos; `/public/send` aberto |
 
 ## Próximos
 

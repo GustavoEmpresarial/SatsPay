@@ -15,7 +15,7 @@
 
 ## Keywords (busca)
 
-`merchant deposits MerchantDepositsPage /merchant/deposits /merchant/deposits /merchant/deposits/:id/test-webhook  user`
+`merchant deposits MerchantDepositsPage /merchant/deposits /merchant/deposits /merchant/deposits/:id/test-webhook /merchant/settings Endereços de Depósito Chaves de API Ver Checkout (Demo) Documentação user`
 
 ## Rotas
 
@@ -23,12 +23,16 @@
 
 ## Abas / seções internas
 
-- (página sem abas internas)
+- Endereços de Depósito
+- Chaves de API
+- Ver Checkout (Demo)
+- Documentação
 
 ## APIs usadas (client → `/v1…`)
 
 - `/merchant/deposits` (prefixo `/v1` no servidor)
 - `/merchant/deposits/:id/test-webhook` (prefixo `/v1` no servidor)
+- `/merchant/settings` (prefixo `/v1` no servidor)
 
 ## Arquivos-chave
 
@@ -37,11 +41,7 @@
 
 ## Comportamento (bruto)
 
-Página React `MerchantDepositsPage`. Chama 2 endpoint(s) via `api()`. Endereço HD por coin; watcher no worker credita ledger.
-
-Confirmação de invoice **somente** via watcher on-chain ou `POST /v1/public/pay/:id/balance` (debita o pagador). Não existe sandbox público `simulate-payment`. HMAC do webhook é derivado por `merchant_id` (`GET /v1/merchant/webhook-signing-secret`).
-
-**Pausa temporária:** gateway `POST /v1/merchant/deposits` (e aliases `/deposits/create`, `/invoices`) para `BTC`/`LTC`/`DOGE`/`DGB` → `503` `DEPOSIT_PAUSED`. Envio ledger `/v1/public/send` **não** pausa.
+Página React `MerchantDepositsPage`. Chama 3 endpoint(s) via `api()`. Abas/labels: Endereços de Depósito, Chaves de API, Ver Checkout (Demo), Documentação. Endereço HD por coin; watcher no worker credita ledger. Gateway: `POST /v1/merchant/deposits` (aliases `/deposits/create`, `/invoices`) → 201 com `checkoutUrl`/`payUrl`. `amount` em unidades de ledger (1e-8). `orderId` idempotente por merchant. Confirmação via `worker::invoice_watcher` (on-chain) ou `POST /v1/public/pay/:id/balance` (saldo). Webhook `deposit.confirmed` assinado `sha256=<hex>`; segredo em `GET /v1/merchant/webhook-signing-secret`. Pausa BTC/LTC/DOGE/BCH/DGB → 503 DEPOSIT_PAUSED; `/v1/public/send` não pausa.
 
 ## Notas de overview legado
 

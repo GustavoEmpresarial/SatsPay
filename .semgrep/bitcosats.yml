@@ -81,6 +81,20 @@ rules:
         - "**/crates/api-http/src/admin.rs"
     pattern-regex: smtp_enabled\s*\|\|\s*account\.two_factor_enabled
 
+  - id: bitcosats.rust.http-5xx-leaks-debug
+    message: 5xx JSON includes e.to_string() — leaks sqlx/schema. Use http_error::internal_error ({code:INTERNAL, requestId}).
+    languages: [rust]
+    severity: ERROR
+    metadata:
+      category: security
+      cwe: "CWE-209"
+    paths:
+      include:
+        - "**/crates/api-http/src/**"
+      exclude:
+        - "**/tests.rs"
+    pattern-regex: INTERNAL_SERVER_ERROR[\s\S]{0,220}e\.to_string\(\)
+
   - id: bitcosats.rust.http-error-leaks-debug
     message: HTTP JSON error body includes e.to_string() — may leak sqlx/internal details. Map to stable codes instead.
     languages: [rust]

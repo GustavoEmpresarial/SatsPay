@@ -23,7 +23,8 @@
 
 ## Abas / seções internas
 
-- (página sem abas internas)
+- Swap — mesma rede (Polygon: POL ↔ USDT ↔ USDC)
+- Bridge — cross-rede (`?tab=bridge`: Relay / ChangeNOW)
 
 ## APIs usadas (client → `/v1…`)
 

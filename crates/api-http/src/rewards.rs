@@ -5,7 +5,6 @@
 use crate::middleware::AuthUser;
 use crate::state::AppState;
 use axum::extract::State;
-use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{Json, Router};
@@ -45,6 +44,6 @@ async fn get_user_rewards<R: AuthRepo>(State(state): State<AppState<R>>, user: A
                 .collect();
             Json(json!({ "rewards": payload })).into_response()
         }
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e.to_string() }))).into_response(),
+        Err(e) => crate::http_error::internal_error(&e),
     }
 }

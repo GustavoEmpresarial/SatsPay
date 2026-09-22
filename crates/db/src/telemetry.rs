@@ -331,9 +331,9 @@ pub async fn record_error(pool: &PgPool, payload: NewErrorPayload) -> Result<Rec
     .bind(&payload.method)
     .bind(payload.status_code)
     .bind(payload.user_id)
-    .bind(&payload.ip_address)
+    .bind(payload.ip_address.as_deref().map(|ip| crate::privacy::store_ip(None, ip)))
     .bind(&payload.request_payload)
-    .bind(&payload.user_agent)
+    .bind(payload.user_agent.as_deref().map(|ua| ua.chars().take(80).collect::<String>()))
     .fetch_one(pool)
     .await?;
 

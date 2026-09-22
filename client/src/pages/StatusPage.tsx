@@ -105,6 +105,13 @@ const PROBES: Probe[] = [
     badge: 'On-chain',
     description: 'Confirmações CashAddr e status da rede BCH.',
   },
+  {
+    key: 'zer_rpc',
+    category: 'blockchain',
+    name: 'Zero (ZER)',
+    badge: 'On-chain',
+    description: 'Depósitos e saques transparentes t1 via zerod. Endereços z / shielded não são aceitos.',
+  },
 ];
 
 const PILL: Record<Health, { label: string; dot: string; text: string; bg: string }> = {

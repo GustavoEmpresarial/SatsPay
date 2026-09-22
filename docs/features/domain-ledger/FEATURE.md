@@ -1,31 +1,58 @@
 # FEATURE — Ledger contábil (partidas dobradas)
 
-## Keywords
+> Doc bruta para busca por IA/humanos. Atualizar quando a feature mudar.
+> Gerado/atualizado por `scripts/generate_feature_docs.py`.
 
-`ledger wallet_entries double-entry balance HOUSE PERSONAL DEVELOPER FAUCET WITHDRAWAL DEPOSIT SWAP`
+## Identidade
 
-## Regra de ouro
+| Campo | Valor |
+|-------|-------|
+| Slug | `domain-ledger` |
+| Título | Ledger contábil (partidas dobradas) |
+| Componente | `—` |
+| Auth | **mixed** — pública ou autenticada conforme contexto |
+| UI pt-BR | Admin sempre pt-BR hardcoded; app usuário usa i18n |
 
-**Não existe coluna de saldo mutável confiável.** Saldo = `SUM(wallet_entries.amount)` por wallet.
+## Keywords (busca)
 
-## Onde
+`ledger balance wallet_entries double-entry HOUSE PERSONAL DEVELOPER saldo`
 
-- `crates/db/src/ledger.rs`  
-- `docs/architecture/ledger.md`  
-- `docs/security/BALANCE_SECURITY.md`  
-- `docs/database/ledger-invariants.md`  
-- ADR: `docs/decisions/0002-ledger-contabil-partidas-dobradas.md`  
+## Rotas
 
-## Concorrência
+- (sem rota SPA — domínio backend)
 
-Lock pessimista na linha `wallets` (não no aggregate do ledger).  
-Ver ADR `0006-lock-wallet-row-not-ledger-aggregate.md`.
+## Abas / seções internas
 
-## HOUSE
+- (página sem abas internas)
 
-Conta plataforma (`house::HOUSE_EMAIL`) — faucet debita HOUSE; fees creditam.  
+## APIs usadas (client → `/v1…`)
 
-## Testes
+- (sem chamadas `api()` na página / domínio)
 
-- Invariantes em `docs/database/ledger-invariants.md`  
-- SQLx suites em `crates/db/tests/`  
+## Arquivos-chave
+
+- `crates/db/src/ledger.rs`
+- `docs/architecture/ledger.md`
+- `docs/security/BALANCE_SECURITY.md`
+- `docs/database/ledger-invariants.md`
+
+## Comportamento (bruto)
+
+Saldos NÃO vivem em coluna mutável — sempre SUM(wallet_entries). Travas na linha wallets.
+
+## Notas de overview legado
+
+_sem overview em docs/pages_
+
+## Bugs / armadilhas conhecidas
+
+- Não short-circuit hooks (`useA() || useB()`) — React #311.
+- Admin: `AdminLayout` labels em pt-BR; ignore language switch do app.
+- Erros esperados de produto (faucet inventory, login 400) não devem floodar telemetria.
+- Saldos: nunca confiar em coluna `balance` mutável — usar ledger.
+
+## Links relacionados
+
+- Mapa geral: [`docs/README.md`](../../README.md)
+- Índice features: [`../README.md`](../README.md)
+- Testes: [`TC.md`](TC.md)

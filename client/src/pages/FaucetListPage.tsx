@@ -28,7 +28,7 @@ const CURATED_DEFAULT_FAUCETS: FaucetSite[] = [
     name: 'SatsPay Official Faucet',
     url: '/faucet',
     description: 'Torneira oficial e nativa da plataforma SatsPay. Créditos instantâneos sem intermediários.',
-    coins: ['BTC', 'LTC', 'DOGE', 'BCH', 'POL', 'DGB', 'SOL', 'USDT', 'USDC'],
+    coins: ['BTC', 'LTC', 'DOGE', 'BCH', 'POL', 'DGB', 'SOL', 'USDT', 'USDC', 'ZER'],
     rewardInfo: 'Micro-pagamentos instantâneos',
     timerInterval: 'A cada 11h',
     status: 'APPROVED',

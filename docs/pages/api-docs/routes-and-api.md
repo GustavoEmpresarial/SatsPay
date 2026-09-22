@@ -19,6 +19,8 @@ A página descreve, e os testes de contrato verificam contra o código Rust:
 - Webhook `deposit.confirmed` com `X-SatsPay-Signature: sha256=<hex>` (`crates/webhooks/src/lib.rs`)
 - Tabela de moedas renderizada de `client/src/shared/coins.ts` (pausadas marcadas)
 - Catálogo de erros = códigos realmente emitidos
+- `POST /v1/public/send`: `toEmail` digitado ou `email` do userinfo. `400` com `{ "error", "code" }`: `TARGET_INELIGIBLE`, `SEND_TO_SELF` (conta dona da chave, não é saldo), `DAILY_LIMIT_REACHED`, `WALLET_NOT_FOUND`. Nada debitado.
+- `POST /v1/public/pay/:id/balance`: dono da fatura recebe `400 CANNOT_PAY_OWN_INVOICE`. Nada debitado.
 
 ## Critérios mínimos
 

@@ -155,6 +155,15 @@ jobs:
           npm ci --no-audit --no-fund
           npm audit --audit-level=high
 
+  cargo-deny:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check
+          arguments: --all-features
+
   secrets-hygiene:
     runs-on: ubuntu-latest
     steps:
@@ -168,3 +177,11 @@ jobs:
           grep -q 'TURNSTILE_SECRET: \${TURNSTILE_SECRET' deploy/docker/docker-compose.yml
           grep -q 'NODE_ENV: \${NODE_ENV' deploy/docker/docker-compose.yml
           grep -q 'COOKIE_SECURE' deploy/docker/docker-compose.yml
+      - name: Deploy script must not embed an SSH password
+        run: |
+          if grep -nE '@Contaapp|DEPLOY_SSH_PASSWORD.+\bor\b' scripts/deploy_to_vm.py; then
+            echo "FAIL: deploy_to_vm.py still has a password fallback"
+            exit 1
+          fi
+          grep -q 'DEPLOY_SSH_KEY' scripts/deploy_to_vm.py
+          grep -q 'require_ssh_creds' scripts/deploy_to_vm.py

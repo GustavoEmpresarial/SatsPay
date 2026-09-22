@@ -36,6 +36,8 @@ pub fn routes<R: AuthRepo + 'static>() -> Router<AppState<R>> {
         .route("/v1/auth/me", get(me::<R>))
         .route("/v1/auth/username", patch(update_username::<R>))
         .route("/v1/auth/security-logs", get(security_logs::<R>))
+        .route("/v1/me/export", get(export_me::<R>))
+        .route("/v1/me/erase", post(erase_me::<R>))
 }
 
 #[derive(Deserialize)]
@@ -188,14 +190,7 @@ async fn register<R: AuthRepo>(
     let captcha_ok = match captcha_result {
         Ok(v) => v,
         Err(e) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({
-                    "code": "CAPTCHA_MISCONFIGURED",
-                    "message": e.to_string()
-                })),
-            )
-                .into_response();
+            return crate::http_error::internal_error(&e);
         }
     };
 
@@ -223,12 +218,15 @@ async fn register<R: AuthRepo>(
     {
         Ok((user, tokens)) => {
             if let Some(ref code) = body.referral_code {
-                let pool = state.pool.clone();
-                let ref_code = code.clone();
-                let user_id = user.id;
-                tokio::spawn(async move {
-                    let _ = db::referral::link_referred_user(&pool, &ref_code, user_id).await;
-                });
+                if let Err(e) =
+                    db::referral::link_referred_user(&state.pool, code, user.id).await
+                {
+                    tracing::warn!(
+                        user_id = %user.id,
+                        error = %e,
+                        "referral link on register failed"
+                    );
+                }
             }
             db::audit::record_log_spawned(
                 state.pool.clone(),
@@ -236,9 +234,8 @@ async fn register<R: AuthRepo>(
                 "AUTH_REGISTER".into(),
                 "User".into(),
                 Some(user.id),
-                Some(ip),
+                Some(state.secrets.ip_fingerprint(&ip)),
                 Some(serde_json::json!({
-                    "email": body.email,
                     "username": body.username,
                     "referralCode": body.referral_code,
                     "userAgent": ua
@@ -257,11 +254,9 @@ async fn register<R: AuthRepo>(
                 "AUTH_REGISTER_FAILED".into(),
                 "User".into(),
                 None,
-                Some(ip),
+                Some(state.secrets.ip_fingerprint(&ip)),
                 Some(serde_json::json!({
-                    "attemptedEmail": body.email,
                     "attemptedUsername": body.username,
-                    "reason": err.to_string(),
                     "userAgent": ua
                 })),
             );
@@ -305,14 +300,7 @@ async fn login<R: AuthRepo>(
     let captcha_ok = match captcha_result {
         Ok(v) => v,
         Err(e) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({
-                    "code": "CAPTCHA_MISCONFIGURED",
-                    "message": e.to_string()
-                })),
-            )
-                .into_response();
+            return crate::http_error::internal_error(&e);
         }
     };
 
@@ -334,9 +322,8 @@ async fn login<R: AuthRepo>(
                 "AUTH_LOGIN_SUCCESS".into(),
                 "User".into(),
                 Some(user.id),
-                Some(ip),
+                Some(state.secrets.ip_fingerprint(&ip)),
                 Some(serde_json::json!({
-                    "email": user.email,
                     "twoFactor": user.two_factor_enabled,
                     "userAgent": ua
                 })),
@@ -349,33 +336,30 @@ async fn login<R: AuthRepo>(
             json_with_refresh_cookie(StatusCode::OK, payload, &tokens.refresh_token)
         }
         Ok(LoginResult::CodeSent { email }) => {
-            let user_id = lookup_user_id_by_email(&state.pool, &body.email).await;
+            let user_id = lookup_user_id_by_email(&state, &body.email).await;
             db::audit::record_log_spawned(
                 state.pool.clone(),
                 user_id,
                 "AUTH_2FA_CODE_SENT".into(),
                 "User".into(),
                 user_id,
-                Some(ip),
+                Some(state.secrets.ip_fingerprint(&ip)),
                 Some(serde_json::json!({
-                    "email": body.email,
                     "userAgent": ua
                 })),
             );
             (StatusCode::OK, Json(serde_json::json!({ "kind": "code_sent", "email": email }))).into_response()
         }
         Err(err) => {
-            let user_id = lookup_user_id_by_email(&state.pool, &body.email).await;
+            let user_id = lookup_user_id_by_email(&state, &body.email).await;
             db::audit::record_log_spawned(
                 state.pool.clone(),
                 user_id,
                 "AUTH_LOGIN_FAILED".into(),
                 "User".into(),
                 user_id,
-                Some(ip),
+                Some(state.secrets.ip_fingerprint(&ip)),
                 Some(serde_json::json!({
-                    "attemptedEmail": body.email,
-                    "reason": err.to_string(),
                     "userAgent": ua
                 })),
             );
@@ -384,10 +368,8 @@ async fn login<R: AuthRepo>(
     }
 }
 
-async fn lookup_user_id_by_email(pool: &sqlx::PgPool, email: &str) -> Option<uuid::Uuid> {
-    sqlx::query_scalar("SELECT id FROM users WHERE lower(email) = lower($1)")
-        .bind(email)
-        .fetch_optional(pool)
+async fn lookup_user_id_by_email(state: &AppState<impl AuthRepo>, email: &str) -> Option<uuid::Uuid> {
+    db::privacy::find_user_id_by_email(&state.pool, &state.secrets, email)
         .await
         .ok()
         .flatten()
@@ -417,14 +399,7 @@ async fn admin_login<R: AuthRepo>(
     let captcha_ok = match captcha_result {
         Ok(v) => v,
         Err(e) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({
-                    "code": "CAPTCHA_MISCONFIGURED",
-                    "message": e.to_string()
-                })),
-            )
-                .into_response();
+            return crate::http_error::internal_error(&e);
         }
     };
 
@@ -447,9 +422,8 @@ async fn admin_login<R: AuthRepo>(
                 "AUTH_ADMIN_LOGIN_SUCCESS".into(),
                 "Admin".into(),
                 Some(user.id),
-                Some(ip),
+                Some(state.secrets.ip_fingerprint(&ip)),
                 Some(serde_json::json!({
-                    "email": user.email,
                     "role": user.role,
                     "userAgent": ua
                 })),
@@ -471,9 +445,8 @@ async fn admin_login<R: AuthRepo>(
                 "AUTH_ADMIN_2FA_CODE_SENT".into(),
                 "Admin".into(),
                 None,
-                Some(ip),
+                Some(state.secrets.ip_fingerprint(&ip)),
                 Some(serde_json::json!({
-                    "email": body.email,
                     "userAgent": ua
                 })),
             );
@@ -486,10 +459,8 @@ async fn admin_login<R: AuthRepo>(
                 "AUTH_ADMIN_LOGIN_FAILED".into(),
                 "Admin".into(),
                 None,
-                Some(ip),
+                Some(state.secrets.ip_fingerprint(&ip)),
                 Some(serde_json::json!({
-                    "attemptedEmail": body.email,
-                    "reason": err.to_string(),
                     "userAgent": ua
                 })),
             );
@@ -585,7 +556,7 @@ async fn update_username<R: AuthRepo>(
                 "AUTH_UPDATE_USERNAME".into(),
                 "User".into(),
                 Some(user.id),
-                Some(ip),
+                Some(state.secrets.ip_fingerprint(&ip)),
                 Some(serde_json::json!({
                     "newUsername": body.username,
                     "userAgent": ua
@@ -603,7 +574,73 @@ async fn security_logs<R: AuthRepo>(
 ) -> Response {
     match db::audit::list_user_logs(&state.pool, user.id, 50).await {
         Ok(logs) => Json(serde_json::json!({ "logs": logs })).into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "error": e.to_string() }))).into_response(),
+        Err(e) => crate::http_error::internal_error(&e),
+    }
+}
+
+async fn export_me<R: AuthRepo>(State(state): State<AppState<R>>, user: AuthUser) -> Response {
+    match db::privacy::export_user_data(&state.pool, &state.secrets, user.id).await {
+        Ok(payload) => Json(payload).into_response(),
+        Err(db::privacy::PrivacyError::NotFound) => {
+            (StatusCode::NOT_FOUND, Json(serde_json::json!({ "error": "user not found", "code": "NOT_FOUND" }))).into_response()
+        }
+        Err(e) => crate::http_error::internal_error(&e),
+    }
+}
+
+#[derive(Deserialize)]
+struct EraseRequest {
+    #[serde(rename = "confirmEmail")]
+    confirm_email: String,
+    confirm: String,
+}
+
+async fn erase_me<R: AuthRepo>(
+    State(state): State<AppState<R>>,
+    user: AuthUser,
+    Json(body): Json<EraseRequest>,
+) -> Response {
+    let Ok(Some(u)) = state.auth.get_user_by_id(user.id).await else {
+        return (StatusCode::NOT_FOUND, Json(serde_json::json!({ "error": "user not found", "code": "NOT_FOUND" }))).into_response();
+    };
+    let email_ok = crypto::SecretsService::normalize_email(&body.confirm_email)
+        == crypto::SecretsService::normalize_email(&u.email);
+    let phrase_ok = body.confirm.trim().eq_ignore_ascii_case("APAGAR");
+    if !email_ok || !phrase_ok {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "error": "confirmEmail must match the account and confirm must be APAGAR",
+                "code": "ERASE_CONFIRM_REQUIRED"
+            })),
+        )
+            .into_response();
+    }
+    match db::privacy::erase_user(&state.pool, &state.secrets, user.id).await {
+        Ok(()) => {
+            db::audit::record_log_spawned(
+                state.pool.clone(),
+                Some(user.id),
+                "AUTH_ACCOUNT_ERASED".into(),
+                "User".into(),
+                Some(user.id),
+                None,
+                None,
+            );
+            let mut res = (
+                StatusCode::OK,
+                Json(serde_json::json!({ "erased": true, "code": "ACCOUNT_ERASED" })),
+            )
+                .into_response();
+            append_clear_refresh_cookies(&mut res);
+            res
+        }
+        Err(db::privacy::PrivacyError::AlreadyErased) => (
+            StatusCode::CONFLICT,
+            Json(serde_json::json!({ "error": "already erased", "code": "ALREADY_ERASED" })),
+        )
+            .into_response(),
+        Err(e) => crate::http_error::internal_error(&e),
     }
 }
 
@@ -631,7 +668,7 @@ pub(crate) fn auth_error_response(err: AuthError) -> Response {
         AuthError::Unauthorized | AuthError::RefreshReuseDetected => ("UNAUTHORIZED", err.to_string()),
         AuthError::RateLimited => ("RATE_LIMITED", err.to_string()),
         AuthError::NotFound => ("NOT_FOUND", err.to_string()),
-        AuthError::Repo(_) => ("INTERNAL", err.to_string()),
+        AuthError::Repo(_) => ("INTERNAL", "internal error".into()),
     };
     (
         status,

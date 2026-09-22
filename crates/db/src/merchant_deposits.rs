@@ -22,6 +22,11 @@ pub enum MerchantDepositError {
     MerchantWalletNotFound,
     #[error("payer wallet not found")]
     PayerWalletNotFound,
+    /// The logged-in payer is the merchant who owns the invoice. Checkout is
+    /// for a different customer. Moving your own funds is the wallet transfer,
+    /// not this path.
+    #[error("cannot pay your own invoice")]
+    PayerIsMerchant,
     #[error("orderId already used for a different invoice")]
     DuplicateOrderId,
 }
@@ -111,6 +116,42 @@ pub struct CreateDepositInvoiceInput {
     pub price_decimals: Option<i32>,
     /// Coin price used for the initial selection.
     pub quote_price_scaled: Option<BigDecimal>,
+}
+
+pub fn invoice_pii_key(merchant_id: Uuid, order_id: &str) -> String {
+    crypto::SecretsService::invoice_row_key(&merchant_id.to_string(), order_id)
+}
+
+pub fn seal_invoice_pii(secrets: &crypto::SecretsService, input: &mut CreateDepositInvoiceInput) {
+    let key = invoice_pii_key(input.merchant_id, &input.order_id);
+    input.callback_url = secrets.seal_pii("invoice.callback", &key, &input.callback_url);
+    if let Some(v) = input.success_url.take() {
+        input.success_url = Some(secrets.seal_pii("invoice.success", &key, &v));
+    }
+    if let Some(v) = input.cancel_url.take() {
+        input.cancel_url = Some(secrets.seal_pii("invoice.cancel", &key, &v));
+    }
+    if let Some(v) = input.customer_email.take() {
+        input.customer_email = Some(secrets.seal_pii("invoice.customer_email", &key, &v));
+    }
+    if let Some(v) = input.customer_name.take() {
+        input.customer_name = Some(secrets.seal_pii("invoice.customer_name", &key, &v));
+    }
+    if let Some(v) = input.site_user_id.take() {
+        input.site_user_id = Some(secrets.seal_pii("invoice.site_user", &key, &v));
+    }
+}
+
+pub fn reveal_invoice_pii(secrets: &crypto::SecretsService, inv: &MerchantDepositInvoice) -> MerchantDepositInvoice {
+    let key = invoice_pii_key(inv.merchant_id, &inv.order_id);
+    let mut out = inv.clone();
+    out.callback_url = secrets.open_pii("invoice.callback", &key, &inv.callback_url);
+    out.success_url = secrets.open_pii_opt("invoice.success", &key, inv.success_url.as_deref());
+    out.cancel_url = secrets.open_pii_opt("invoice.cancel", &key, inv.cancel_url.as_deref());
+    out.customer_email = secrets.open_pii_opt("invoice.customer_email", &key, inv.customer_email.as_deref());
+    out.customer_name = secrets.open_pii_opt("invoice.customer_name", &key, inv.customer_name.as_deref());
+    out.site_user_id = secrets.open_pii_opt("invoice.site_user", &key, inv.site_user_id.as_deref());
+    out
 }
 
 /// Every column [`row_to_invoice`] reads, in one place — the three read
@@ -350,6 +391,15 @@ pub async fn confirm_invoice(
 
     let _coin: shared::Coin = inv.coin.parse().map_err(|_| MerchantDepositError::NotFound)?;
 
+    sqlx::query(
+        "INSERT INTO wallets (user_id, coin, kind) VALUES ($1, $2::coin, 'MERCHANT') \
+         ON CONFLICT (user_id, coin, kind) DO NOTHING",
+    )
+    .bind(inv.merchant_id)
+    .bind(inv.coin.as_str())
+    .execute(&mut *tx)
+    .await?;
+
     // 1. Locate or ensure merchant wallet exists
     let merchant_wallet_id: Option<Uuid> = sqlx::query_scalar(
         "SELECT id FROM wallets WHERE user_id = $1 AND coin = $2::coin AND kind = 'MERCHANT'"
@@ -427,6 +477,9 @@ pub async fn pay_invoice_with_balance(
     if inv.expires_at < Utc::now() {
         return Err(MerchantDepositError::InvalidStatus);
     }
+    if payer_user_id == inv.merchant_id {
+        return Err(MerchantDepositError::PayerIsMerchant);
+    }
 
     // 1. Get payer wallet
     let payer_wallet_id: Option<Uuid> = sqlx::query_scalar(
@@ -464,6 +517,14 @@ pub async fn pay_invoice_with_balance(
     .await?;
 
     // 4. Locate merchant wallet
+    sqlx::query(
+        "INSERT INTO wallets (user_id, coin, kind) VALUES ($1, $2::coin, 'MERCHANT') \
+         ON CONFLICT (user_id, coin, kind) DO NOTHING",
+    )
+    .bind(inv.merchant_id)
+    .bind(inv.coin.as_str())
+    .execute(&mut *tx)
+    .await?;
     let merchant_wallet_id: Option<Uuid> = sqlx::query_scalar(
         "SELECT id FROM wallets WHERE user_id = $1 AND coin = $2::coin AND kind = 'MERCHANT'"
     )

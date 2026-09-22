@@ -16,6 +16,8 @@ pub async fn seed_price_cache(pool: &PgPool) {
         (Coin::Sol, 15_000_000_000),
         (Coin::Usdt, 100_000_000),
         (Coin::Usdc, 100_000_000),
+        (Coin::Zer, 1_000_000),
+        (Coin::Pepe, 400),
     ] {
         sqlx::query(
             "INSERT INTO price_cache (coin, price_scaled, price_decimals, fetched_at) \

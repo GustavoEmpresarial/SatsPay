@@ -37,9 +37,11 @@ impl MultiChainRpcClient {
             Coin::Bch => self.fetch_bch_with_fallbacks(address).await,
             Coin::Pol => self.fetch_evm_with_fallbacks(address).await,
             Coin::Dgb => self.fetch_dgb_with_fallbacks(address).await,
+            Coin::Zer => self.fetch_zer_with_fallbacks(address).await,
             Coin::Sol => self.fetch_sol_with_fallbacks(address).await,
             Coin::Usdt => self.fetch_erc20_with_fallbacks(address, "0xc2132D05D31c914a87C6611C10748AEb04B58e8F", Coin::Usdt).await,
             Coin::Usdc => self.fetch_erc20_with_fallbacks(address, "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359", Coin::Usdc).await,
+            Coin::Pepe => self.fetch_pepe_bsc(address).await,
         }
     }
 
@@ -176,7 +178,17 @@ impl MultiChainRpcClient {
     }
 
     async fn fetch_dgb_with_fallbacks(&self, address: &str) -> Result<Vec<OnchainTx>, ChainError> {
-        let client = crate::dgb_client::DgbClient::new("https://digiexplorer.info/api");
+        let insight = std::env::var("DGB_INSIGHT_API").unwrap_or_else(|_| "https://digiexplorer.info/api".to_string());
+        let rpc = std::env::var("DGB_RPC_URL").ok();
+        let client = crate::dgb_client::DgbClient::with_rpc(&insight, rpc.as_deref());
+        client.fetch_deposits(address).await
+    }
+
+    async fn fetch_zer_with_fallbacks(&self, address: &str) -> Result<Vec<OnchainTx>, ChainError> {
+        let explorer = std::env::var("ZER_EXPLORER_API").unwrap_or_else(|_| "https://zerochain.info/api".to_string());
+        let key = std::env::var("ZER_EXPLORER_API_KEY").ok();
+        let rpc = std::env::var("ZER_RPC_URL").ok();
+        let client = crate::zer_client::ZerClient::with_rpc(&explorer, key.as_deref(), rpc.as_deref());
         client.fetch_deposits(address).await
     }
 
@@ -185,6 +197,59 @@ impl MultiChainRpcClient {
         let rpc = std::env::var("SOL_RPC_URL").unwrap_or_else(|_| crate::sol_client::DEFAULT_SOL_RPC.to_string());
         let client = crate::sol_client::SolClient::new(&rpc);
         client.fetch_deposits(address).await
+    }
+
+    /// PEPE is BEP-20 on BNB Smart Chain only. Polygon indexers must not be queried.
+    async fn fetch_pepe_bsc(&self, address: &str) -> Result<Vec<OnchainTx>, ChainError> {
+        let network = match std::env::var("CHAIN_NETWORK").as_deref() {
+            Ok("testnet") => crate::params::ChainNetwork::Testnet,
+            _ => crate::params::ChainNetwork::Mainnet,
+        };
+        let params = crate::params::params_for(Coin::Pepe, network);
+        let Some(token) = params.erc20_contract else {
+            return Err(ChainError {
+                message: "PEPE só existe na BNB Smart Chain mainnet (BEP-20). Testnet recusado.".into(),
+            });
+        };
+        if params.evm_chain_id != Some(56) {
+            return Err(ChainError { message: "PEPE chain id ausente — recusado fora da BNB mainnet".into() });
+        }
+        let lookback: u64 = std::env::var("BSC_DEPOSIT_LOOKBACK_BLOCKS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(2_000);
+        let configured = std::env::var("BSC_RPC_URL")
+            .ok()
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or_else(|| "https://bsc-rpc.publicnode.com".to_string());
+        let mut rpcs = vec![configured];
+        for extra in ["https://bsc-dataseed.binance.org", "https://bsc-rpc.publicnode.com", "https://1rpc.io/bnb"] {
+            if !rpcs.iter().any(|r| r == extra) {
+                rpcs.push(extra.to_string());
+            }
+        }
+        let mut last = String::new();
+        for rpc in &rpcs {
+            let evm = crate::evm_client::EvmClient::new(rpc);
+            match evm.fetch_erc20_received(token, address, lookback).await {
+                Ok(raw) => {
+                    let txs: Vec<OnchainTx> = raw
+                        .into_iter()
+                        .map(|mut t| {
+                            t.amount = shared::from_onchain_amount(Coin::Pepe, t.amount);
+                            t
+                        })
+                        .filter(|t| t.amount > 0)
+                        .collect();
+                    return Ok(txs);
+                }
+                Err(e) => {
+                    last = format!("{rpc}: {e}");
+                    warn!(rpc = %rpc, error = %e, "BSC PEPE eth_getLogs failed, cascading");
+                }
+            }
+        }
+        Err(ChainError { message: format!("PEPE deposit scan failed on every BSC RPC: {last}") })
     }
 
     async fn fetch_erc20_with_fallbacks(&self, address: &str, token: &str, coin: Coin) -> Result<Vec<OnchainTx>, ChainError> {

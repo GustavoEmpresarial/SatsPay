@@ -2,7 +2,7 @@
 # Also published at /ai.txt
 
 SatsPay is a multi-coin micropayments wallet & developer platform (BTC, LTC, DOGE, BCH,
-POL, SOL, USDT, USDC, DGB) with a public API and a hosted crypto checkout for merchants.
+POL, SOL, USDT, USDC, DGB, ZER, PEPE) with a public API and a hosted crypto checkout for merchants.
 
 Primary docs: https://www.satspay.pro/documentation
 API docs: https://www.satspay.pro/docs
@@ -18,7 +18,9 @@ Security: https://www.satspay.pro/security
 #   closed until the merchant account is APPROVED.
 # - POST /v1/api-keys issues the server credential. The plaintext secret is returned
 #   in the `key` field and is shown ONCE. Scopes that are actually enforced:
-#   `deposits`, `send`, `*`.
+#   `deposits`, `send`, `*`. GET /v1/public/balance checks none of them: any valid
+#   key reads the full account balance (a deposits-only key included). For a
+#   third-party integration, use a separate account instead of trusting scope.
 # - Then POST /v1/merchant/deposits to create the first invoice.
 
 # Integration facts that are easy to get wrong:
@@ -34,7 +36,16 @@ Security: https://www.satspay.pro/security
 #   feeAmount + netAmount == amount exactly.
 # - Webhook event is `deposit.confirmed`, signed as
 #   `X-SatsPay-Signature: sha256=<hex HMAC-SHA256 of the raw body>`.
-# - BTC, LTC, DOGE and DGB deposits are temporarily paused (503 DEPOSIT_PAUSED).
+# - POST /v1/public/send field `toEmail` is the SatsPay account that receives.
+#   Two sources, same field: the user types their account email, or they use
+#   Login with SatsPay and you send the verified `email` from GET /v1/oauth/userinfo.
+#   Not an on-chain address. Failures are HTTP 400 `{ "error", "code" }` and debit nothing:
+#   TARGET_INELIGIBLE (no account), SEND_TO_SELF (toEmail is the account that owns
+#   the API key — not an insufficient-balance error), DAILY_LIMIT_REACHED, WALLET_NOT_FOUND.
+#   Show `error` and `code`. Do not replace them with a generic "try again".
+# - POST /v1/public/pay/:id/balance cannot be paid by the merchant who owns the invoice.
+#   Same account → 400 CANNOT_PAY_OWN_INVOICE, nothing debited. Use POST /v1/wallet/transfer
+#   to move your own funds between personal and merchant wallets.
 
 # Multi-coin invoices (the merchant picks what to accept, the customer picks what to pay):
 # - Price the invoice either with `coin` + `amount` (single coin, locked at creation)

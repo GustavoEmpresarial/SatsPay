@@ -10,8 +10,10 @@
 //! Never reverse a withdrawal after a successful or ambiguous on-chain send.
 
 use crate::ledger::{apply_ledger_entry, LedgerCreditInput};
+use crate::privacy::{self, KIND_WD_TO};
 use bigdecimal::BigDecimal;
 use chain::{BroadcastError, ChainClient};
+use crypto::SecretsService;
 use events::domain::{WithdrawalBroadcasted, WithdrawalConfirmed, WithdrawalFailed};
 use events::{DomainEvent, OutboxWriter};
 use shared::{coin_config, Coin};
@@ -91,14 +93,8 @@ pub struct WithdrawalRow {
     pub requires_approval: bool,
 }
 
-/// Validates the address/amount, debits the wallet immediately (holding
-/// funds tagged with the withdrawal id — reversed later if broadcast fails
-/// safely), and creates the withdrawal row. Idempotent per
-/// `(user_id, idempotency_key)`: a retried request with the same key returns
-/// the original row instead of debiting twice. Caller is responsible for the
-/// OTP/2FA check (see `domain::auth::AuthService::verify_withdrawal_otp`)
-/// before calling this — this function only owns the ledger/state-machine
-/// invariants, not the auth gate.
+/// Debits PERSONAL. Invoice net credits live on MERCHANT — pass that kind to
+/// [`request_withdrawal_from`].
 #[allow(clippy::too_many_arguments)]
 pub async fn request_withdrawal(
     pool: &PgPool,
@@ -109,7 +105,39 @@ pub async fn request_withdrawal(
     chain: &dyn ChainClient,
     requested_ip: &str,
     idempotency_key: Option<&str>,
+    secrets: Option<&SecretsService>,
 ) -> Result<(WithdrawalRow, bool), WithdrawalsError> {
+    request_withdrawal_from(
+        pool,
+        user_id,
+        coin,
+        to_address,
+        amount,
+        chain,
+        requested_ip,
+        idempotency_key,
+        secrets,
+        "PERSONAL",
+    )
+    .await
+}
+
+/// Same as [`request_withdrawal`], but debits `wallet_kind` (`PERSONAL` or
+/// `MERCHANT` only; anything else is treated as PERSONAL).
+#[allow(clippy::too_many_arguments)]
+pub async fn request_withdrawal_from(
+    pool: &PgPool,
+    user_id: Uuid,
+    coin: Coin,
+    to_address: &str,
+    amount: BigDecimal,
+    chain: &dyn ChainClient,
+    requested_ip: &str,
+    idempotency_key: Option<&str>,
+    secrets: Option<&SecretsService>,
+    wallet_kind: &str,
+) -> Result<(WithdrawalRow, bool), WithdrawalsError> {
+    let wallet_kind = if wallet_kind == "MERCHANT" { "MERCHANT" } else { "PERSONAL" };
     if !chain.validate_address(to_address) {
         return Err(WithdrawalsError::InvalidAddress);
     }
@@ -124,7 +152,7 @@ pub async fn request_withdrawal(
     let scoped_key = idempotency_key.map(|k| format!("{user_id}:{k}"));
 
     if let Some(key) = &scoped_key {
-        if let Some(existing) = find_by_idempotency_key(pool, key).await? {
+        if let Some(existing) = find_by_idempotency_key(pool, key, secrets).await? {
             return Ok((existing, false));
         }
     }
@@ -136,47 +164,52 @@ pub async fn request_withdrawal(
     let mut tx = pool.begin().await?;
 
     if let Some(key) = &scoped_key {
-        if let Some(existing) = find_by_idempotency_key(&mut *tx, key).await? {
+        if let Some(existing) = find_by_idempotency_key(&mut *tx, key, secrets).await? {
             tx.commit().await?;
             return Ok((existing, false));
         }
     }
 
-    let wallet_id: Option<Uuid> =
-        sqlx::query_scalar("SELECT id FROM wallets WHERE user_id = $1 AND coin = $2::coin AND kind = 'PERSONAL'")
-            .bind(user_id)
-            .bind(coin.as_str())
-            .fetch_optional(&mut *tx)
-            .await?;
+    let wallet_id: Option<Uuid> = sqlx::query_scalar(
+        "SELECT id FROM wallets WHERE user_id = $1 AND coin = $2::coin AND kind = $3::wallet_kind",
+    )
+    .bind(user_id)
+    .bind(coin.as_str())
+    .bind(wallet_kind)
+    .fetch_optional(&mut *tx)
+    .await?;
     let wallet_id = wallet_id.ok_or(WithdrawalsError::NotFound)?;
 
     let status = if requires_approval { "PENDING" } else { "QUEUED" };
+    let withdrawal_id = Uuid::new_v4();
+    let stored_addr = privacy::seal_opt(secrets, KIND_WD_TO, &withdrawal_id.to_string(), to_address);
+    let stored_ip = privacy::store_ip(secrets, requested_ip);
     let insert_result = sqlx::query(
         r#"
-        INSERT INTO withdrawals (wallet_id, to_address, amount, fee_amount, status, requires_approval, requested_ip, idempotency_key)
-        VALUES ($1, $2, $3, $4, $5::withdrawal_status, $6, $7, $8)
-        RETURNING id
+        INSERT INTO withdrawals (id, wallet_id, to_address, amount, fee_amount, status, requires_approval, requested_ip, idempotency_key)
+        VALUES ($1, $2, $3, $4, $5, $6::withdrawal_status, $7, $8, $9)
         "#,
     )
+    .bind(withdrawal_id)
     .bind(wallet_id)
-    .bind(to_address)
+    .bind(&stored_addr)
     .bind(&amount)
     .bind(&fee_amount)
     .bind(status)
     .bind(requires_approval)
-    .bind(requested_ip)
+    .bind(&stored_ip)
     .bind(&scoped_key)
-    .fetch_one(&mut *tx)
+    .execute(&mut *tx)
     .await;
 
-    let withdrawal_id: Uuid = match insert_result {
-        Ok(row) => row.get("id"),
+    match insert_result {
+        Ok(_) => {}
         Err(sqlx::Error::Database(db_err)) if db_err.is_unique_violation() => {
             // True concurrent race on the idempotency key: the transaction
             // rolls back (no debit performed here), resolve to the winner.
             drop(tx);
             if let Some(key) = &scoped_key {
-                if let Some(existing) = find_by_idempotency_key(pool, key).await? {
+                if let Some(existing) = find_by_idempotency_key(pool, key, secrets).await? {
                     return Ok((existing, false));
                 }
             }
@@ -195,7 +228,7 @@ pub async fn request_withdrawal(
             ledger_type: "WITHDRAWAL",
             reference_id: Some(withdrawal_id),
             reference_type: Some("Withdrawal"),
-            memo: Some(&format!("Withdraw to {}…", &to_address[..to_address.len().min(16)])),
+            memo: Some(&format!("withdrawal:{withdrawal_id}")),
         },
     )
     .await
@@ -226,7 +259,7 @@ pub async fn request_withdrawal(
 /// withdrawal for broadcast (only one worker replica can flip
 /// `QUEUED|APPROVED` → `BROADCASTING`), calls the chain client, and advances
 /// the state machine per the module docs.
-pub async fn process_broadcast(pool: &PgPool, withdrawal_id: Uuid, registry: &chain::ChainRegistry) -> Result<(), WithdrawalsError> {
+pub async fn process_broadcast(pool: &PgPool, withdrawal_id: Uuid, registry: &chain::ChainRegistry, secrets: Option<&SecretsService>) -> Result<(), WithdrawalsError> {
     let claimed = sqlx::query(
         "UPDATE withdrawals SET status = 'BROADCASTING'::withdrawal_status, updated_at = now() \
          WHERE id = $1 AND status IN ('QUEUED', 'APPROVED') RETURNING id",
@@ -255,7 +288,7 @@ pub async fn process_broadcast(pool: &PgPool, withdrawal_id: Uuid, registry: &ch
     let Some(row) = row else { return Ok(()) };
     let wallet_id: Uuid = row.get("wallet_id");
     let owner_id: Uuid = row.get("user_id");
-    let to_address: String = row.get("to_address");
+    let to_address = privacy::open_opt(secrets, KIND_WD_TO, &withdrawal_id.to_string(), &row.get::<String, _>("to_address"));
     let amount: BigDecimal = row.get("amount");
     let fee_amount: BigDecimal = row.get("fee_amount");
     let coin_str: String = row.get("coin");
@@ -414,6 +447,7 @@ pub async fn list_user_withdrawals(
     user_id: Uuid,
     coin_filter: Option<shared::Coin>,
     limit: i64,
+    secrets: Option<&SecretsService>,
 ) -> Result<Vec<WithdrawalHistoryRecord>, sqlx::Error> {
     let rows = if let Some(c) = coin_filter {
         sqlx::query(
@@ -457,10 +491,11 @@ pub async fn list_user_withdrawals(
         .map(|r| {
             let amount: BigDecimal = r.get("amount");
             let fee_amount: BigDecimal = r.get("fee_amount");
+            let id: Uuid = r.get("id");
             WithdrawalHistoryRecord {
-                id: r.get("id"),
+                id,
                 coin: r.get("coin"),
-                to_address: r.get("to_address"),
+                to_address: privacy::open_opt(secrets, KIND_WD_TO, &id.to_string(), &r.get::<String, _>("to_address")),
                 amount: amount.to_string(),
                 fee_amount: fee_amount.to_string(),
                 status: r.get("status"),
@@ -473,7 +508,7 @@ pub async fn list_user_withdrawals(
         .collect())
 }
 
-async fn find_by_idempotency_key<'e, E>(executor: E, key: &str) -> Result<Option<WithdrawalRow>, WithdrawalsError>
+async fn find_by_idempotency_key<'e, E>(executor: E, key: &str, secrets: Option<&SecretsService>) -> Result<Option<WithdrawalRow>, WithdrawalsError>
 where
     E: sqlx::Executor<'e, Database = sqlx::Postgres>,
 {
@@ -483,14 +518,17 @@ where
     .bind(key)
     .fetch_optional(executor)
     .await?;
-    Ok(row.map(|r| WithdrawalRow {
-        id: r.get("id"),
-        wallet_id: r.get("wallet_id"),
-        to_address: r.get("to_address"),
-        amount: r.get("amount"),
-        fee_amount: r.get("fee_amount"),
-        status: r.get("status"),
-        requires_approval: r.get("requires_approval"),
+    Ok(row.map(|r| {
+        let id: Uuid = r.get("id");
+        WithdrawalRow {
+            id,
+            wallet_id: r.get("wallet_id"),
+            to_address: privacy::open_opt(secrets, KIND_WD_TO, &id.to_string(), &r.get::<String, _>("to_address")),
+            amount: r.get("amount"),
+            fee_amount: r.get("fee_amount"),
+            status: r.get("status"),
+            requires_approval: r.get("requires_approval"),
+        }
     }))
 }
 
@@ -499,6 +537,81 @@ fn sqlx_from_ledger(e: crate::ledger::LedgerError) -> sqlx::Error {
         crate::ledger::LedgerError::Db(db_err) => db_err,
         other => sqlx::Error::Protocol(other.to_string()),
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct AddressBookEntry {
+    pub id: Uuid,
+    pub coin: String,
+    pub label: String,
+    pub address: String,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+}
+
+pub async fn list_address_book(pool: &PgPool, user_id: Uuid) -> Result<Vec<AddressBookEntry>, sqlx::Error> {
+    let rows = sqlx::query(
+        "SELECT id, coin::text AS coin, label, address, created_at
+         FROM withdrawal_address_book WHERE user_id = $1
+         ORDER BY created_at DESC LIMIT 100",
+    )
+    .bind(user_id)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|r| AddressBookEntry {
+            id: r.get("id"),
+            coin: r.get("coin"),
+            label: r.get("label"),
+            address: r.get("address"),
+            created_at: r.get("created_at"),
+        })
+        .collect())
+}
+
+pub async fn add_address_book(
+    pool: &PgPool,
+    user_id: Uuid,
+    coin: Coin,
+    label: &str,
+    address: &str,
+) -> Result<AddressBookEntry, WithdrawalsError> {
+    let label = label.trim();
+    let address = address.trim();
+    if label.is_empty() || label.len() > 64 {
+        return Err(WithdrawalsError::InvalidAddress);
+    }
+    if address.len() < 8 || address.len() > 256 {
+        return Err(WithdrawalsError::InvalidAddress);
+    }
+    let row = sqlx::query(
+        "INSERT INTO withdrawal_address_book (user_id, coin, label, address)
+         VALUES ($1, $2::coin, $3, $4)
+         ON CONFLICT (user_id, coin, address) DO UPDATE SET label = EXCLUDED.label
+         RETURNING id, coin::text AS coin, label, address, created_at",
+    )
+    .bind(user_id)
+    .bind(coin.as_str())
+    .bind(label)
+    .bind(address)
+    .fetch_one(pool)
+    .await?;
+    Ok(AddressBookEntry {
+        id: row.get("id"),
+        coin: row.get("coin"),
+        label: row.get("label"),
+        address: row.get("address"),
+        created_at: row.get("created_at"),
+    })
+}
+
+pub async fn delete_address_book(pool: &PgPool, user_id: Uuid, id: Uuid) -> Result<bool, sqlx::Error> {
+    let res = sqlx::query("DELETE FROM withdrawal_address_book WHERE id = $1 AND user_id = $2")
+        .bind(id)
+        .bind(user_id)
+        .execute(pool)
+        .await?;
+    Ok(res.rows_affected() > 0)
 }
 
 #[cfg(test)]

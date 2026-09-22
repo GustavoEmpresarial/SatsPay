@@ -119,7 +119,7 @@ async fn create_ticket<R: AuthRepo>(
     user: AuthUser,
     Json(body): Json<CreateTicketBody>,
 ) -> Response {
-    match db::support::create_ticket(&state.pool, user.id, &body.topic, &body.message).await {
+    match db::support::create_ticket(&state.pool, Some(&state.secrets), user.id, &body.topic, &body.message).await {
         Ok(detail) => (StatusCode::CREATED, Json(detail)).into_response(),
         Err(e) => map_err(e),
     }
@@ -129,7 +129,7 @@ async fn list_tickets<R: AuthRepo>(
     State(state): State<AppState<R>>,
     user: AuthUser,
 ) -> Response {
-    match db::support::list_tickets_for_user(&state.pool, user.id).await {
+    match db::support::list_tickets_for_user(&state.pool, Some(&state.secrets), user.id).await {
         Ok(tickets) => Json(json!({ "tickets": tickets })).into_response(),
         Err(e) => map_err(e),
     }
@@ -140,7 +140,7 @@ async fn get_ticket<R: AuthRepo>(
     user: AuthUser,
     Path(id): Path<Uuid>,
 ) -> Response {
-    match db::support::get_ticket_for_user(&state.pool, user.id, id).await {
+    match db::support::get_ticket_for_user(&state.pool, Some(&state.secrets), user.id, id).await {
         Ok(detail) => Json(detail).into_response(),
         Err(e) => map_err(e),
     }
@@ -152,7 +152,7 @@ async fn reply_ticket<R: AuthRepo>(
     Path(id): Path<Uuid>,
     Json(body): Json<MessageBody>,
 ) -> Response {
-    match db::support::add_user_message(&state.pool, user.id, id, &body.message).await {
+    match db::support::add_user_message(&state.pool, Some(&state.secrets), user.id, id, &body.message).await {
         Ok(detail) => Json(detail).into_response(),
         Err(e) => map_err(e),
     }
@@ -167,7 +167,7 @@ async fn admin_list_tickets<R: AuthRepo>(
         return *r;
     }
     let filter = q.status.as_deref().filter(|s| *s != "ALL" && !s.is_empty());
-    match db::support::list_tickets_admin(&state.pool, filter).await {
+    match db::support::list_tickets_admin(&state.pool, Some(&state.secrets), filter).await {
         Ok(tickets) => Json(json!({ "tickets": tickets })).into_response(),
         Err(e) => map_err(e),
     }
@@ -181,7 +181,7 @@ async fn admin_get_ticket<R: AuthRepo>(
     if let Err(r) = require_admin(&user) {
         return *r;
     }
-    match db::support::get_ticket_admin(&state.pool, id).await {
+    match db::support::get_ticket_admin(&state.pool, Some(&state.secrets), id).await {
         Ok(detail) => Json(detail).into_response(),
         Err(e) => map_err(e),
     }
@@ -196,7 +196,7 @@ async fn admin_reply_ticket<R: AuthRepo>(
     if let Err(r) = require_admin(&user) {
         return *r;
     }
-    match db::support::add_staff_message(&state.pool, user.id, id, &body.message).await {
+    match db::support::add_staff_message(&state.pool, Some(&state.secrets), user.id, id, &body.message).await {
         Ok(detail) => Json(detail).into_response(),
         Err(e) => map_err(e),
     }
@@ -211,7 +211,7 @@ async fn admin_set_status<R: AuthRepo>(
     if let Err(r) = require_admin(&user) {
         return *r;
     }
-    match db::support::set_ticket_status(&state.pool, id, &body.status).await {
+    match db::support::set_ticket_status(&state.pool, Some(&state.secrets), id, &body.status).await {
         Ok(detail) => Json(detail).into_response(),
         Err(e) => map_err(e),
     }

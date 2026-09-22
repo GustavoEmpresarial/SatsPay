@@ -260,10 +260,7 @@ async fn authorize_submit<R: AuthRepo + 'static>(
     )
     .await
     .map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({ "error": "server_error", "message": e.to_string() })),
-        )
+            crate::http_error::internal_error_parts(&e)
     })?;
 
     let redirect_url = format!(
@@ -415,10 +412,7 @@ async fn list_apps<R: AuthRepo + 'static>(
     let apps = db::oauth::list_user_applications(&state.pool, auth.id)
         .await
         .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({ "error": e.to_string() })),
-            )
+            crate::http_error::internal_error_parts(&e)
         })?;
     Ok(Json(apps))
 }
@@ -464,12 +458,7 @@ async fn create_app<R: AuthRepo + 'static>(
         redirect_uris,
     )
     .await
-    .map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({ "error": e.to_string() })),
-        )
-    })?;
+    .map_err(|e| crate::http_error::internal_error_parts(&e))?;
 
     Ok(Json(created))
 }
@@ -509,12 +498,7 @@ async fn update_app<R: AuthRepo + 'static>(
         redirect_uris,
     )
     .await
-    .map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({ "error": e.to_string() })),
-        )
-    })?;
+    .map_err(|e| crate::http_error::internal_error_parts(&e))?;
 
     Ok(Json(updated))
 }
@@ -527,10 +511,7 @@ async fn delete_app<R: AuthRepo + 'static>(
     db::oauth::delete_application(&state.pool, auth.id, id)
         .await
         .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({ "error": e.to_string() })),
-            )
+            crate::http_error::internal_error_parts(&e)
         })?;
 
     Ok(StatusCode::NO_CONTENT)
@@ -548,12 +529,7 @@ async fn rotate_secret<R: AuthRepo + 'static>(
         id,
     )
     .await
-    .map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({ "error": e.to_string() })),
-        )
-    })?;
+    .map_err(|e| crate::http_error::internal_error_parts(&e))?;
 
     Ok(Json(rotated))
 }
@@ -569,10 +545,7 @@ async fn list_authorized_apps<R: AuthRepo + 'static>(
     let list = db::oauth::list_user_consents(&state.pool, auth.id)
         .await
         .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({ "error": e.to_string() })),
-            )
+            crate::http_error::internal_error_parts(&e)
         })?;
 
     Ok(Json(list))
@@ -586,10 +559,7 @@ async fn revoke_authorized_app<R: AuthRepo + 'static>(
     db::oauth::revoke_user_consent(&state.pool, auth.id, app_id)
         .await
         .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({ "error": e.to_string() })),
-            )
+            crate::http_error::internal_error_parts(&e)
         })?;
 
     Ok(StatusCode::NO_CONTENT)

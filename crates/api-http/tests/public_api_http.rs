@@ -66,7 +66,7 @@ async fn api_keys_balance_send_and_hmac(pool: PgPool) {
                 .body(Body::from(
                     serde_json::json!({
                         "label": "oneshot",
-                        "scopes": ["send", "balance", "*"],
+                        "scopes": ["send", "*"],
                         "allowedIps": [],
                         "requireSignature": false
                     })
@@ -141,6 +141,43 @@ async fn api_keys_balance_send_and_hmac(pool: PgPool) {
         "send={} body={}",
         st,
         String::from_utf8_lossy(&bytes)
+    );
+
+    // Same account that owns the key cannot be toEmail. Not a balance problem.
+    let self_body = serde_json::json!({
+        "coin": "BTC",
+        "toEmail": email,
+        "amount": "100000",
+        "idempotencyKey": format!("self-{}", Uuid::new_v4())
+    })
+    .to_string();
+    let self_send = api_http::app_without_metrics(state.clone())
+        .oneshot(
+            axum::http::Request::builder()
+                .method("POST")
+                .uri("/v1/public/send")
+                .header("content-type", "application/json")
+                .header("x-api-key", raw_key)
+                .header("x-real-ip", "203.0.113.50")
+                .body(Body::from(self_body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let self_st = self_send.status();
+    let self_bytes = self_send.into_body().collect().await.unwrap().to_bytes();
+    assert_eq!(
+        self_st,
+        axum::http::StatusCode::BAD_REQUEST,
+        "self-send={}",
+        String::from_utf8_lossy(&self_bytes)
+    );
+    let self_json: serde_json::Value = serde_json::from_slice(&self_bytes).unwrap();
+    assert_eq!(self_json["code"], "SEND_TO_SELF");
+    assert!(
+        self_json["error"].as_str().unwrap_or("").contains("owns this API key"),
+        "error={}",
+        self_json
     );
 
     // Missing key → 401
@@ -234,4 +271,54 @@ async fn api_keys_balance_send_and_hmac(pool: PgPool) {
         dis.status() == axum::http::StatusCode::NO_CONTENT || dis.status().is_success()
     );
     let _ = (email, Coin::Btc);
+}
+
+#[sqlx::test(migrations = "../db/migrations")]
+async fn issue_key_rejects_unknown_scope_and_balance_needs_scope(pool: PgPool) {
+    let (state, token, _user_id, _email) = common::register_user(pool, "sc").await;
+    let bad = api_http::app_without_metrics(state.clone())
+        .oneshot(
+            axum::http::Request::builder()
+                .method("POST")
+                .uri("/v1/api-keys")
+                .header("content-type", "application/json")
+                .header("authorization", format!("Bearer {token}"))
+                .body(Body::from(
+                    serde_json::json!({ "label": "x", "scopes": ["nfts"] }).to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(bad.status(), axum::http::StatusCode::BAD_REQUEST);
+
+    let issue = api_http::app_without_metrics(state.clone())
+        .oneshot(
+            axum::http::Request::builder()
+                .method("POST")
+                .uri("/v1/api-keys")
+                .header("content-type", "application/json")
+                .header("authorization", format!("Bearer {token}"))
+                .body(Body::from(
+                    serde_json::json!({ "label": "dep", "scopes": ["deposits"] }).to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let bytes = issue.into_body().collect().await.unwrap().to_bytes();
+    let issued: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    let raw_key = issued["key"].as_str().expect("key");
+
+    let bal = api_http::app_without_metrics(state)
+        .oneshot(
+            axum::http::Request::builder()
+                .uri("/v1/public/balance")
+                .header("x-api-key", raw_key)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(bal.status(), axum::http::StatusCode::FORBIDDEN);
 }

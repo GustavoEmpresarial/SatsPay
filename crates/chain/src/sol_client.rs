@@ -220,6 +220,245 @@ impl SolClient {
             .to_string();
         Ok(BroadcastResult { tx_hash: sig, fee_amount: 5000 })
     }
+
+    /// Sign + broadcast a Relay Solana step (`instructions` + optional ALTs).
+    pub async fn broadcast_relay_tx(
+        &self,
+        from_secret: &[u8; 32],
+        solana_tx: &serde_json::Value,
+    ) -> Result<BroadcastResult, BroadcastError> {
+        use solana_sdk::{
+            address_lookup_table::AddressLookupTableAccount,
+            hash::Hash,
+            instruction::{AccountMeta, Instruction},
+            message::{v0, VersionedMessage},
+            signature::{Keypair, Signer},
+            transaction::VersionedTransaction,
+        };
+
+        let instructions_json = solana_tx
+            .get("instructions")
+            .and_then(|v| v.as_array())
+            .ok_or_else(|| BroadcastError {
+                message: "relay solanaTx missing instructions".into(),
+                safe_to_reverse: true,
+            })?;
+
+        let mut instructions: Vec<Instruction> = Vec::with_capacity(instructions_json.len());
+        for ix in instructions_json {
+            let program_id = parse_pubkey(
+                ix.get("programId")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| BroadcastError {
+                        message: "instruction missing programId".into(),
+                        safe_to_reverse: true,
+                    })?,
+            )?;
+            let keys = ix
+                .get("keys")
+                .and_then(|v| v.as_array())
+                .ok_or_else(|| BroadcastError {
+                    message: "instruction missing keys".into(),
+                    safe_to_reverse: true,
+                })?;
+            let mut accounts = Vec::with_capacity(keys.len());
+            for k in keys {
+                let pubkey = parse_pubkey(
+                    k.get("pubkey")
+                        .and_then(|v| v.as_str())
+                        .ok_or_else(|| BroadcastError {
+                            message: "account key missing pubkey".into(),
+                            safe_to_reverse: true,
+                        })?,
+                )?;
+                let is_signer = k.get("isSigner").and_then(|v| v.as_bool()).unwrap_or(false);
+                let is_writable = k.get("isWritable").and_then(|v| v.as_bool()).unwrap_or(false);
+                accounts.push(AccountMeta {
+                    pubkey,
+                    is_signer,
+                    is_writable,
+                });
+            }
+            let data = parse_ix_data(ix.get("data"))?;
+            instructions.push(Instruction {
+                program_id,
+                accounts,
+                data,
+            });
+        }
+
+        let alt_addrs: Vec<String> = solana_tx
+            .get("addressLookupTableAddresses")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(str::to_string))
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        let mut alts: Vec<AddressLookupTableAccount> = Vec::new();
+        for addr in &alt_addrs {
+            let pk = parse_pubkey(addr)?;
+            match self.fetch_address_lookup_table(&pk).await {
+                Ok(Some(alt)) => alts.push(alt),
+                Ok(None) => {
+                    return Err(BroadcastError {
+                        message: format!("ALT not found: {addr}"),
+                        safe_to_reverse: true,
+                    })
+                }
+                Err(e) => {
+                    return Err(BroadcastError {
+                        message: format!("ALT fetch {addr}: {e}"),
+                        safe_to_reverse: true,
+                    })
+                }
+            }
+        }
+
+        let bh = self
+            .call("getLatestBlockhash", json!([{ "commitment": "finalized" }]))
+            .await
+            .map_err(|e| BroadcastError {
+                message: e.to_string(),
+                safe_to_reverse: true,
+            })?;
+        let hash_b58 = bh
+            .pointer("/value/blockhash")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| BroadcastError {
+                message: "missing blockhash".into(),
+                safe_to_reverse: true,
+            })?;
+        let recent_blockhash: Hash = hash_b58.parse().map_err(|e| BroadcastError {
+            message: format!("bad blockhash: {e}"),
+            safe_to_reverse: true,
+        })?;
+
+        let payer = Keypair::new_from_array(*from_secret);
+        let msg = v0::Message::try_compile(&payer.pubkey(), &instructions, &alts, recent_blockhash)
+            .map_err(|e| BroadcastError {
+                message: format!("compile v0 message: {e}"),
+                safe_to_reverse: true,
+            })?;
+        let tx = VersionedTransaction::try_new(VersionedMessage::V0(msg), &[&payer]).map_err(|e| {
+            BroadcastError {
+                message: format!("sign versioned tx: {e}"),
+                safe_to_reverse: true,
+            }
+        })?;
+        let raw = bincode::serialize(&tx).map_err(|e| BroadcastError {
+            message: format!("serialize tx: {e}"),
+            safe_to_reverse: true,
+        })?;
+        let b64 = base64::engine::general_purpose::STANDARD.encode(&raw);
+        let result = self
+            .call(
+                "sendTransaction",
+                json!([b64, { "encoding": "base64", "skipPreflight": false }]),
+            )
+            .await
+            .map_err(|e| BroadcastError {
+                message: e.to_string(),
+                safe_to_reverse: true,
+            })?;
+        let sig = result
+            .as_str()
+            .ok_or_else(|| BroadcastError {
+                message: result.to_string(),
+                safe_to_reverse: false,
+            })?
+            .to_string();
+        Ok(BroadcastResult {
+            tx_hash: sig,
+            fee_amount: 5_000,
+        })
+    }
+
+    async fn fetch_address_lookup_table(
+        &self,
+        address: &solana_sdk::pubkey::Pubkey,
+    ) -> Result<Option<solana_sdk::address_lookup_table::AddressLookupTableAccount>, ChainError> {
+        use solana_sdk::address_lookup_table::{state::AddressLookupTable, AddressLookupTableAccount};
+
+        let result = self
+            .call(
+                "getAccountInfo",
+                json!([address.to_string(), { "encoding": "base64" }]),
+            )
+            .await?;
+        let Some(value) = result.get("value") else {
+            return Ok(None);
+        };
+        if value.is_null() {
+            return Ok(None);
+        }
+        let data_arr = value
+            .get("data")
+            .and_then(|d| d.as_array())
+            .ok_or_else(|| ChainError {
+                message: "ALT account missing data".into(),
+            })?;
+        let b64 = data_arr
+            .first()
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| ChainError {
+                message: "ALT data not base64".into(),
+            })?;
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(b64)
+            .map_err(|e| ChainError {
+                message: format!("ALT decode: {e}"),
+            })?;
+        let table = AddressLookupTable::deserialize(&bytes).map_err(|e| ChainError {
+            message: format!("ALT deserialize: {e}"),
+        })?;
+        Ok(Some(AddressLookupTableAccount {
+            key: *address,
+            addresses: table.addresses.to_vec(),
+        }))
+    }
+}
+
+fn parse_pubkey(s: &str) -> Result<solana_sdk::pubkey::Pubkey, BroadcastError> {
+    s.parse().map_err(|e| BroadcastError {
+        message: format!("bad pubkey {s}: {e}"),
+        safe_to_reverse: true,
+    })
+}
+
+fn parse_ix_data(v: Option<&Value>) -> Result<Vec<u8>, BroadcastError> {
+    let Some(v) = v else {
+        return Ok(vec![]);
+    };
+    if let Some(arr) = v.as_array() {
+        return Ok(arr.iter().filter_map(|x| x.as_u64().map(|n| n as u8)).collect());
+    }
+    if let Some(s) = v.as_str() {
+        let s = s.trim();
+        if let Ok(bytes) = hex::decode(s.strip_prefix("0x").unwrap_or(s)) {
+            return Ok(bytes);
+        }
+        if let Ok(bytes) = bs58::decode(s).into_vec() {
+            return Ok(bytes);
+        }
+        // Relay often returns hex without 0x
+        if s.chars().all(|c| c.is_ascii_hexdigit()) && s.len() % 2 == 0 {
+            return hex::decode(s).map_err(|e| BroadcastError {
+                message: format!("ix data hex: {e}"),
+                safe_to_reverse: true,
+            });
+        }
+        return Err(BroadcastError {
+            message: format!("unsupported ix data encoding: {}", &s[..s.len().min(32)]),
+            safe_to_reverse: true,
+        });
+    }
+    Err(BroadcastError {
+        message: "unsupported ix data type".into(),
+        safe_to_reverse: true,
+    })
 }
 
 fn compact_u16(n: u16, out: &mut Vec<u8>) {

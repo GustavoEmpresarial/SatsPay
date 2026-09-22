@@ -4,7 +4,6 @@ use crypto::SecretsService;
 use base64::Engine;
 use sha2::{Digest, Sha256};
 use sqlx::PgPool;
-use uuid::Uuid;
 
 fn pkce_pair() -> (String, String) {
     let verifier = "a".repeat(64);
@@ -104,6 +103,21 @@ async fn referral_link_and_stats(pool: PgPool) {
         .unwrap();
     assert_eq!(linked, Some(referrer));
 
+    let referrer_logs = db::airdrop::list_user_point_logs(&pool, referrer, 10)
+        .await
+        .unwrap();
+    assert!(
+        referrer_logs.iter().any(|l| l.activity_type == "REFERRAL_SIGNUP"),
+        "referrer must receive REFERRAL_SIGNUP points"
+    );
+    let child_logs = db::airdrop::list_user_point_logs(&pool, child, 10)
+        .await
+        .unwrap();
+    assert!(
+        child_logs.iter().any(|l| l.activity_type == "REFERRAL_WELCOME"),
+        "referred user must receive REFERRAL_WELCOME points"
+    );
+
     let stats = db::referral::get_referral_stats(&pool, referrer).await.unwrap();
     assert!(stats.total_referred >= 1);
 
@@ -119,6 +133,13 @@ async fn referral_link_and_stats(pool: PgPool) {
     let commissions = db::referral::list_user_commissions(&pool, referrer, 10)
         .await
         .unwrap();
+    assert!(
+        commissions.iter().any(|c| {
+            c.activity_type == "FAUCET_CLAIM"
+                && c.amount_usd.parse::<f64>().unwrap_or(0.0) > 0.0
+        }),
+        "commission amount_usd must be > 0 when provided"
+    );
     let referred = db::referral::list_referred_users(&pool, referrer, 10)
         .await
         .unwrap();
@@ -138,13 +159,37 @@ async fn airdrop_season_award_and_profile(pool: PgPool) {
     assert!(active.is_some());
 
     let user = common::insert_user(&pool, "airdrop").await;
-    db::airdrop::award_airdrop_points(&pool, user, 100, 10, "FAUCET")
+    let awarded = db::airdrop::award_airdrop_points(&pool, user, 100, 10, "FAUCET_CLAIM")
         .await
         .unwrap();
+    assert_eq!(awarded, db::airdrop::AwardResult::Awarded);
     let profile = db::airdrop::get_user_airdrop_profile(&pool, user).await.unwrap();
+    assert!(profile.season_active);
     assert!(profile.total_points >= 100);
     let board = db::airdrop::get_airdrop_leaderboard(&pool, 10).await.unwrap();
     assert!(!board.is_empty());
     let logs = db::airdrop::list_user_point_logs(&pool, user, 10).await.unwrap();
     assert!(!logs.is_empty());
+    assert!(logs.iter().any(|l| l.activity_type == "FAUCET_CLAIM"));
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn airdrop_award_without_active_season_is_observable(pool: PgPool) {
+    sqlx::query("UPDATE airdrop_seasons SET status = 'ENDED'")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let user = common::insert_user(&pool, "airdrop-off").await;
+    let result = db::airdrop::award_airdrop_points(&pool, user, 50, 0, "FAUCET_CLAIM")
+        .await
+        .unwrap();
+    assert_eq!(result, db::airdrop::AwardResult::NoActiveSeason);
+
+    let profile = db::airdrop::get_user_airdrop_profile(&pool, user).await.unwrap();
+    assert!(!profile.season_active);
+    assert_eq!(profile.total_points, 0);
+
+    let logs = db::airdrop::list_user_point_logs(&pool, user, 10).await.unwrap();
+    assert!(logs.is_empty());
 }

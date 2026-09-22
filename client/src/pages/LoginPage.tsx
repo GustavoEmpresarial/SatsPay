@@ -48,6 +48,8 @@ export function LoginPage() {
       if (res.codeSent) {
         setNeedsCode(true);
         setInfo(res.message || t('auth.login.codeSent'));
+        setCaptchaToken(null);
+        turnstileRef.current?.reset();
       } else if (res.user && res.accessToken) {
         setSession(res);
         navigate(returnTo);
@@ -141,14 +143,12 @@ export function LoginPage() {
           </div>
         )}
 
-        {!needsCode && (
-          <Turnstile
-            ref={turnstileRef}
-            action={LOGIN_CAPTCHA_ACTION}
-            onVerify={(token) => setCaptchaToken(token)}
-            onReset={() => setCaptchaToken(null)}
-          />
-        )}
+        <Turnstile
+          ref={turnstileRef}
+          action={LOGIN_CAPTCHA_ACTION}
+          onVerify={(token) => setCaptchaToken(token)}
+          onReset={() => setCaptchaToken(null)}
+        />
 
         <button type="submit" disabled={loading} className="btn-primary w-full py-2.5 mt-2">
           {loading ? t('common.loading') : needsCode ? t('auth.login.verify') : t('common.signIn')}

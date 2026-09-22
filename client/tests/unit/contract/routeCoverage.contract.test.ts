@@ -49,7 +49,7 @@ const NOT_DOCUMENTED = new Set(['/healthz', '/metrics']);
  * Routes that exist for the app's own screens rather than for integrators.
  * They belong in the internal reference, not on the public docs page.
  */
-const INTERNAL_ONLY = /^\/v1\/(admin|auth|telemetry|wallet|deposits|withdrawals|faucet|faucetlist|stake|lend|swap|rewards|referral|airdrop|support|status|notify)/;
+const INTERNAL_ONLY = /^\/v1\/(admin|auth|me|telemetry|wallet|deposits|withdrawals|faucet|faucetlist|stake|lend|swap|rewards|referral|airdrop|support|status|notify)/;
 
 describe('contract: every route is documented', () => {
   const routes = declaredRoutes().map(canonical);

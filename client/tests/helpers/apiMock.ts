@@ -776,6 +776,9 @@ export async function mockApi(path: string): Promise<unknown> {
       ],
     };
   }
+  if (p.includes('/withdrawals/addresses')) {
+    return { addresses: [] };
+  }
   if (p.includes('/withdrawals/history')) {
     return {
       withdrawals: [
@@ -855,8 +858,9 @@ export async function mockApi(path: string): Promise<unknown> {
     };
   }
   if (p.includes('wallets') || p.includes('/wallet')) {
-    const isDev = path.includes('DEVELOPER');
-    const kind = isDev ? 'DEVELOPER' : 'PERSONAL';
+    const isMerchant = path.includes('MERCHANT');
+    const isDev = path.includes('DEVELOPER') || isMerchant;
+    const kind = isMerchant ? 'MERCHANT' : isDev ? 'DEVELOPER' : 'PERSONAL';
     const btcBal = isDev ? '50000000' : '100000000';
     const ltcBal = isDev ? '250000000' : '500000000';
     return {
@@ -932,13 +936,13 @@ export async function mockApi(path: string): Promise<unknown> {
           fees: {
             network: [],
             platform: {
-              bps: 25,
+              bps: 50,
               amount: '200000',
               amountHuman: '0.002',
               asset: 'LTC',
               label: 'SatsPay',
             },
-            totalPlatformBps: 25,
+            totalPlatformBps: 50,
           },
           etaSeconds: { total: 30 },
           txHint: null,
@@ -955,13 +959,13 @@ export async function mockApi(path: string): Promise<unknown> {
           fees: {
             network: [{ type: 'outbound', amount: '1000', asset: 'LTC' }],
             platform: {
-              bps: 25,
+              bps: 50,
               amount: '200000',
               amountHuman: '0.002',
               asset: 'LTC',
               label: 'SatsPay',
             },
-            totalPlatformBps: 25,
+            totalPlatformBps: 50,
           },
           etaSeconds: { total: 120 },
           txHint: null,
@@ -985,6 +989,9 @@ export async function mockApi(path: string): Promise<unknown> {
         SOL: '15000000000',
       },
     };
+  }
+  if (p.includes('/faucet/status')) {
+    return { cooldownMinutes: 660, coins: [] };
   }
   if (p.includes('/status')) {
     return {
@@ -1108,7 +1115,7 @@ export async function mockApi(path: string): Promise<unknown> {
           id: 'key1',
           label: 'Production',
           keyPrefix: 'sats_live_abc',
-          scopes: ['deposits', 'send', 'balance'],
+          scopes: ['deposits', 'send'],
           allowedIps: ['1.2.3.4'],
           expiresAt: null,
           requireSignature: false,
@@ -1120,7 +1127,7 @@ export async function mockApi(path: string): Promise<unknown> {
           id: 'key2',
           label: 'Staging',
           keyPrefix: 'sats_test_xyz',
-          scopes: ['balance', 'history'],
+          scopes: ['deposits', 'history'],
           allowedIps: [],
           expiresAt: '2025-01-01T00:00:00.000Z',
           requireSignature: true,

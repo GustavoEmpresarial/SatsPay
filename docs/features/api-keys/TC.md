@@ -17,7 +17,6 @@
 | TC-api-keys-09 | ui-tab | Aba/seção «Gateway de Depósitos (Invoicing)» carrega e exibe empty/loading/data | [ ] |
 | TC-api-keys-10 | ui-tab | Aba/seção «Envios & Payouts (Saques)» carrega e exibe empty/loading/data | [ ] |
 | TC-api-keys-11 | ui-tab | Aba/seção «Consulta de Saldos» carrega e exibe empty/loading/data | [ ] |
-| TC-api-keys-12 | ui-tab | Aba/seção «Histórico & Extratos» carrega e exibe empty/loading/data | [ ] |
 
 ## Automatizado
 

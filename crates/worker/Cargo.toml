@@ -18,6 +18,8 @@ queue.workspace = true
 chain = { path = "../chain" }
 pricing.workspace = true
 swapkit = { path = "../swapkit" }
+relay = { path = "../relay" }
+changenow = { path = "../changenow" }
 shared.workspace = true
 chrono.workspace = true
 sqlx.workspace = true

@@ -73,7 +73,7 @@ async fn list_deposits<R: AuthRepo>(
                 .collect();
             Json(serde_json::json!({ "deposits": items })).into_response()
         }
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "error": e.to_string() }))).into_response(),
+        Err(e) => crate::http_error::internal_error(&e),
     }
 }
 
@@ -95,6 +95,6 @@ async fn get_or_create_address<R: AuthRepo>(State(state): State<AppState<R>>, us
     let client = state.chain_registry.get(coin);
     match db::deposits::get_or_create_address(&state.pool, user.id, coin, client.as_ref()).await {
         Ok(address) => Json(AddressResponse { address }).into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "error": e.to_string() }))).into_response(),
+        Err(e) => crate::http_error::internal_error(&e),
     }
 }

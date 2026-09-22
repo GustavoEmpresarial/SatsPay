@@ -65,6 +65,8 @@ async fn seed_demo_prices(pool: &PgPool) {
         (shared::Coin::Pol, 45_000_000),
         (shared::Coin::Sol, 15_000_000_000),
         (shared::Coin::Bch, 45_000_000_000),
+        (shared::Coin::Zer, 1_000_000),
+        (shared::Coin::Pepe, 400),
     ] {
         sqlx::query(
             "INSERT INTO price_cache (coin, price_scaled, price_decimals, fetched_at) \

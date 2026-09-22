@@ -99,8 +99,8 @@ describe('CheckoutPage — what the customer reads', () => {
     });
 
     await waitFor(() => expect(container.textContent).toMatch(/Demonstra/i), { timeout: 5000 });
-    expect(container.textContent).toMatch(/nenhum pagamento é processado/i);
-    expect(container.textContent).not.toMatch(/1-Clique/i);
+    expect(container.textContent).toMatch(/nenhum pagamento é processado|no payment is processed/i);
+    expect(container.textContent).toMatch(/vitrine|preview|nesta demo/i);
     unmount();
   });
 });

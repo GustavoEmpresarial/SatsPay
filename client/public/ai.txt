@@ -2,7 +2,7 @@
 # Full brief, kept in sync: https://www.satspay.pro/llm.txt
 
 SatsPay is a multi-coin micropayments wallet & developer platform (BTC, LTC, DOGE, BCH,
-POL, SOL, USDT, USDC, DGB) with a public API and a hosted crypto checkout for merchants.
+POL, SOL, USDT, USDC, DGB, ZER, PEPE) with a public API and a hosted crypto checkout for merchants.
 
 Primary docs: https://www.satspay.pro/documentation
 API docs: https://www.satspay.pro/docs
@@ -20,3 +20,10 @@ Cookies: https://www.satspay.pro/cookies
 #   (POST /v1/public/pay/:id/select-coin), which locks the quote.
 # - The API key belongs on the server. The payment button only receives the
 #   `checkoutUrl` the merchant's backend already created.
+# - GET /v1/public/balance does not check scope: any valid key reads the full
+#   account balance. For a third-party integration, use a separate account.
+# - POST /v1/public/send `toEmail` is the receiving SatsPay account. Typed email
+#   and the verified email from GET /v1/oauth/userinfo are the same field.
+#   400 TARGET_INELIGIBLE = no account. 400 SEND_TO_SELF = that email owns the
+#   API key (not a low balance). 400 CANNOT_PAY_OWN_INVOICE = checkout balance
+#   pay by the invoice owner. All debit nothing. Body is `{ "error", "code" }`.

@@ -12,7 +12,8 @@ describe('coinLogo', () => {
     // Icons used to come from a third-party CDN, so the hosted checkout could
     // not render its coin without someone else's uptime.
     for (const c of COINS) {
-      expect(coinLogo(c)).toBe(`/sdk/coins/${c.toLowerCase()}.svg`);
+      const ext = c === 'PEPE' ? 'png' : 'svg';
+      expect(coinLogo(c)).toBe(`/sdk/coins/${c.toLowerCase()}.${ext}`);
     }
   });
 
@@ -20,6 +21,10 @@ describe('coinLogo', () => {
     for (const c of [...COINS, 'XYZ']) {
       const file = path.join(publicDir, coinLogo(c));
       expect(existsSync(file), `missing icon file for ${c}: ${coinLogo(c)}`).toBe(true);
+      if (file.endsWith('.png')) {
+        expect(readFileSync(file).subarray(0, 8).toString('hex')).toBe('89504e470d0a1a0a');
+        continue;
+      }
       expect(readFileSync(file, 'utf8').slice(0, 5)).toMatch(/<svg|<\?xml/);
     }
   });

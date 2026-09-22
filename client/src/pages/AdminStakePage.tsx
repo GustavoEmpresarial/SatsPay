@@ -19,6 +19,8 @@ interface TreasuryWallet {
 interface TreasuryResponse {
   wallets: TreasuryWallet[];
   explorers: Record<string, string>;
+  bnbGasWei?: string | null;
+  bnbGasError?: string | null;
 }
 
 interface EconCoinFlow {
@@ -185,6 +187,18 @@ function MiniStat({
       {hint ? <p className="text-[10px] text-ink-muted mt-0.5">{hint}</p> : null}
     </div>
   );
+}
+
+function formatBnbWei(wei: string): string {
+  try {
+    const v = BigInt(wei);
+    const base = 10n ** 18n;
+    const whole = v / base;
+    const frac = (v % base).toString().padStart(18, '0').slice(0, 6);
+    return `${whole}.${frac} BNB`;
+  } catch {
+    return `${wei} wei`;
+  }
 }
 
 export function AdminStakePage() {
@@ -429,6 +443,15 @@ export function AdminStakePage() {
       </div>
 
       <div className="rounded-2xl border border-border bg-paper overflow-hidden shadow-xs">
+        {(treasuryQ.data?.bnbGasWei || treasuryQ.data?.bnbGasError) && (
+          <p className="border-b border-border px-3 py-2 text-xs text-ink-muted">
+            Gas BNB na hot (saques e sweeps de PEPE):{' '}
+            <strong className="font-mono text-ink">
+              {treasuryQ.data.bnbGasWei ? formatBnbWei(treasuryQ.data.bnbGasWei) : 'indisponível'}
+            </strong>
+            {treasuryQ.data.bnbGasError ? ` — ${treasuryQ.data.bnbGasError}` : '. Sem BNB a hot não assina.'}
+          </p>
+        )}
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs">
             <thead className="border-b border-border text-[10px] uppercase tracking-wider text-ink-muted font-bold bg-surface/60">

@@ -15,7 +15,7 @@
 
 ## Keywords (busca)
 
-`deposit DepositPage /deposit /deposits/address/:id /deposits/history DEPOSIT_PAUSED DEPOSIT_WITHDRAW_PAUSED_COINS user`
+`deposit DepositPage /deposit /deposits/address/:id /deposits/history  user`
 
 ## Rotas
 
@@ -38,8 +38,6 @@
 ## Comportamento (bruto)
 
 Página React `DepositPage`. Chama 2 endpoint(s) via `api()`. Endereço HD por coin; watcher no worker credita ledger.
-
-**Pausa temporária:** `BTC` / `LTC` / `DOGE` / `DGB` — UI lista com badge «Pausado»; `GET /v1/deposits/address/:coin` → `503` `DEPOSIT_PAUSED`. Lista: `shared::DEPOSIT_WITHDRAW_PAUSED_COINS` / `client/src/shared/coins.ts`. `/v1/public/send` **não** pausa.
 
 ## Notas de overview legado
 

@@ -29,6 +29,7 @@ import { FaucetListPage } from './pages/FaucetListPage.js';
 import { MerchantSitesPage } from './pages/MerchantSitesPage.js';
 import { AdminLoginPage } from './pages/AdminLoginPage.js';
 import { AdminOverviewPage } from './pages/AdminOverviewPage.js';
+import { AdminUsersPage } from './pages/AdminUsersPage.js';
 import { AdminWithdrawalsPage } from './pages/AdminWithdrawalsPage.js';
 import { AdminMerchantsPage } from './pages/AdminMerchantsPage.js';
 import { AdminFaucetSitesPage } from './pages/AdminFaucetSitesPage.js';
@@ -248,6 +249,7 @@ export function App() {
           }
         >
           <Route index element={<AdminOverviewPage />} />
+          <Route path="users" element={<AdminUsersPage />} />
           <Route path="telemetry" element={<AdminTelemetryPage />} />
           <Route path="withdrawals" element={<AdminWithdrawalsPage />} />
           <Route path="merchants" element={<AdminMerchantsPage />} />

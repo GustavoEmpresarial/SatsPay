@@ -3,18 +3,25 @@
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
+use crypto::SecretsService;
 use domain::auth::{AuthRepo, EmailOtpRow, RefreshTokenRow, RepoError, UserRow};
 use shared::Coin;
 use sqlx::{PgPool, Row};
+use std::sync::Arc;
 use uuid::Uuid;
 
 pub struct PgAuthRepo {
     pool: PgPool,
+    secrets: Option<Arc<SecretsService>>,
 }
 
 impl PgAuthRepo {
     pub fn new(pool: PgPool) -> Self {
-        Self { pool }
+        Self { pool, secrets: None }
+    }
+
+    pub fn with_secrets(pool: PgPool, secrets: Arc<SecretsService>) -> Self {
+        Self { pool, secrets: Some(secrets) }
     }
 }
 
@@ -22,10 +29,13 @@ fn map_err(e: sqlx::Error) -> RepoError {
     RepoError(e.to_string())
 }
 
-fn row_to_user(row: &sqlx::postgres::PgRow) -> UserRow {
+fn row_to_user(row: &sqlx::postgres::PgRow, secrets: Option<&SecretsService>) -> UserRow {
+    let id: Uuid = row.get("id");
+    let email: String = row.get("email");
+    let email_enc: Option<String> = row.get("email_enc");
     UserRow {
-        id: row.get("id"),
-        email: row.get("email"),
+        id,
+        email: crate::privacy::reveal_stored_email(secrets, id, &email, email_enc.as_deref()),
         username: row.get("username"),
         password_hash: row.get("password_hash"),
         role: row.get("role"),
@@ -35,35 +45,47 @@ fn row_to_user(row: &sqlx::postgres::PgRow) -> UserRow {
     }
 }
 
-const USER_COLUMNS: &str = "id, email, username, password_hash, role::text as role, two_factor_enabled, merchant_status::text as merchant_status, created_at";
+const USER_COLUMNS: &str = "id, email, email_enc, username, password_hash, role::text as role, two_factor_enabled, merchant_status::text as merchant_status, created_at";
 
 #[async_trait]
 impl AuthRepo for PgAuthRepo {
     async fn find_user_by_email(&self, email: &str) -> Result<Option<UserRow>, RepoError> {
-        let row = sqlx::query(&format!("SELECT {USER_COLUMNS} FROM users WHERE email = $1"))
+        let row = if let Some(secrets) = &self.secrets {
+            let hmac = secrets.email_index(email);
+            sqlx::query(&format!(
+                "SELECT {USER_COLUMNS} FROM users WHERE erased_at IS NULL AND (email_hmac = $1 OR lower(email) = lower($2)) LIMIT 1"
+            ))
+            .bind(&hmac)
             .bind(email)
             .fetch_optional(&self.pool)
             .await
-            .map_err(map_err)?;
-        Ok(row.as_ref().map(row_to_user))
+            .map_err(map_err)?
+        } else {
+            sqlx::query(&format!("SELECT {USER_COLUMNS} FROM users WHERE erased_at IS NULL AND lower(email) = lower($1)"))
+                .bind(email)
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(map_err)?
+        };
+        Ok(row.as_ref().map(|r| row_to_user(r, self.secrets.as_deref())))
     }
 
     async fn find_user_by_id(&self, user_id: Uuid) -> Result<Option<UserRow>, RepoError> {
-        let row = sqlx::query(&format!("SELECT {USER_COLUMNS} FROM users WHERE id = $1"))
+        let row = sqlx::query(&format!("SELECT {USER_COLUMNS} FROM users WHERE id = $1 AND erased_at IS NULL"))
             .bind(user_id)
             .fetch_optional(&self.pool)
             .await
             .map_err(map_err)?;
-        Ok(row.as_ref().map(row_to_user))
+        Ok(row.as_ref().map(|r| row_to_user(r, self.secrets.as_deref())))
     }
 
     async fn find_user_by_username(&self, username: &str) -> Result<Option<UserRow>, RepoError> {
-        let row = sqlx::query(&format!("SELECT {USER_COLUMNS} FROM users WHERE lower(username) = lower($1)"))
+        let row = sqlx::query(&format!("SELECT {USER_COLUMNS} FROM users WHERE erased_at IS NULL AND lower(username) = lower($1)"))
             .bind(username)
             .fetch_optional(&self.pool)
             .await
             .map_err(map_err)?;
-        Ok(row.as_ref().map(row_to_user))
+        Ok(row.as_ref().map(|r| row_to_user(r, self.secrets.as_deref())))
     }
 
     async fn create_user_with_wallets(
@@ -75,16 +97,35 @@ impl AuthRepo for PgAuthRepo {
     ) -> Result<UserRow, RepoError> {
         let mut tx = self.pool.begin().await.map_err(map_err)?;
 
+        let user_id = Uuid::new_v4();
+        let (email_hmac, email_enc) = if let Some(secrets) = &self.secrets {
+            (
+                Some(secrets.email_index(email)),
+                Some(secrets.seal_pii("user.email", &user_id.to_string(), &SecretsService::normalize_email(email))),
+            )
+        } else {
+            (None, None)
+        };
+        let stored_email = if email_enc.is_some() && std::env::var("PII_BLANK_EMAIL").ok().as_deref() == Some("true") {
+            format!("sealed+{user_id}@invalid.local")
+        } else {
+            email.to_string()
+        };
+
         let row = sqlx::query(&format!(
-            "INSERT INTO users (email, username, password_hash) VALUES ($1, $2, $3) RETURNING {USER_COLUMNS}"
+            "INSERT INTO users (id, email, username, password_hash, email_hmac, email_enc) \
+             VALUES ($1, $2, $3, $4, $5, $6) RETURNING {USER_COLUMNS}"
         ))
-        .bind(email)
+        .bind(user_id)
+        .bind(&stored_email)
         .bind(username)
         .bind(password_hash)
+        .bind(email_hmac.as_deref())
+        .bind(email_enc.as_deref())
         .fetch_one(&mut *tx)
         .await
         .map_err(map_err)?;
-        let user = row_to_user(&row);
+        let user = row_to_user(&row, self.secrets.as_deref());
 
         for coin in coins {
             for kind in ["PERSONAL", "DEVELOPER"] {
@@ -140,7 +181,7 @@ impl AuthRepo for PgAuthRepo {
         .fetch_one(&self.pool)
         .await
         .map_err(map_err)?;
-        Ok(row_to_user(&row))
+        Ok(row_to_user(&row, self.secrets.as_deref()))
     }
 
     async fn create_refresh_token(&self, user_id: Uuid, token_hash: &str, expires_at: DateTime<Utc>) -> Result<(), RepoError> {
@@ -169,7 +210,7 @@ impl AuthRepo for PgAuthRepo {
     async fn find_refresh_token_with_user(&self, token_hash: &str) -> Result<Option<(RefreshTokenRow, UserRow)>, RepoError> {
         let row = sqlx::query(
             "SELECT rt.id, rt.user_id, rt.token_hash, rt.expires_at, rt.revoked_at,
-                    u.id as user_row_id, u.email, u.username, u.password_hash, u.role::text as role,
+                    u.id as user_row_id, u.email, u.email_enc, u.username, u.password_hash, u.role::text as role,
                     u.two_factor_enabled, u.merchant_status::text as merchant_status, u.created_at as user_created_at
              FROM refresh_tokens rt JOIN users u ON u.id = rt.user_id
              WHERE rt.token_hash = $1",
@@ -187,9 +228,12 @@ impl AuthRepo for PgAuthRepo {
             expires_at: row.get("expires_at"),
             revoked_at: row.get("revoked_at"),
         };
+        let user_id: Uuid = row.get("user_row_id");
+        let email: String = row.get("email");
+        let email_enc: Option<String> = row.get("email_enc");
         let user = UserRow {
-            id: row.get("user_row_id"),
-            email: row.get("email"),
+            id: user_id,
+            email: crate::privacy::reveal_stored_email(self.secrets.as_deref(), user_id, &email, email_enc.as_deref()),
             username: row.get("username"),
             password_hash: row.get("password_hash"),
             role: row.get("role"),

@@ -655,38 +655,13 @@ describe('ApiKeysPage', () => {
 
 describe('LendPage + MerchantDeposits + Checkout + AdminMerchants', () => {
   it(
-    'lend supply submit and merchant deposit generator',
+    'lend maintenance landing and merchant deposit generator',
     async () => {
       const user = userEvent.setup();
       const lend = renderWithProviders(<LendPage />, { route: '/lend', loggedIn: true });
-      await waitFor(() => expect(lend.container.innerHTML).toMatch(/USDT|Fornecer|Supply/i), {
+      await waitFor(() => expect(lend.container.innerHTML).toMatch(/Manutenção|Empréstimos|Aave/i), {
         timeout: 5000,
       });
-
-      const supply = within(lend.container)
-        .queryAllByRole('button')
-        .find((b) => /fornecer|supply/i.test(b.textContent || ''));
-      if (supply) await user.click(supply);
-
-      const modalInput =
-        document.body.querySelector('[role="dialog"] input') ||
-        lend.container.querySelector('input[placeholder="0.00"]');
-      if (modalInput) {
-        await user.type(modalInput as HTMLElement, '10');
-        const pct = within(document.body as HTMLElement)
-          .queryAllByRole('button')
-          .find((b) => /^50%$/i.test((b.textContent || '').trim()));
-        if (pct) await user.click(pct);
-        const confirm = within(document.body as HTMLElement)
-          .queryAllByRole('button')
-          .find((b) => /fornecer|supply|tomar|pagar/i.test(b.textContent || ''));
-        if (confirm && !(confirm as HTMLButtonElement).disabled) await user.click(confirm);
-      }
-
-      const borrow = within(lend.container)
-        .queryAllByRole('button')
-        .find((b) => /^tomar$/i.test((b.textContent || '').trim()));
-      if (borrow) await user.click(borrow);
       lend.unmount();
 
       const merch = renderWithProviders(<MerchantDepositsPage />, {

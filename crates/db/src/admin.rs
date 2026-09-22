@@ -4,8 +4,10 @@
 
 use crate::house::HouseError;
 use crate::ledger::{apply_ledger_entry, LedgerCreditInput};
+use crate::privacy::{self, KIND_MERCHANT_DESC, KIND_MERCHANT_NAME, KIND_MERCHANT_WEB, KIND_WD_TO};
 use bigdecimal::BigDecimal;
 use chrono::{DateTime, Utc};
+use crypto::SecretsService;
 use serde::Serialize;
 use shared::Coin;
 use sqlx::{PgPool, Row};
@@ -70,6 +72,19 @@ pub struct AdminMerchantItem {
     pub fees_paid: String,
     pub api_keys_count: i64,
     pub last_invoice_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Serialize, Clone)]
+pub struct AdminUserItem {
+    pub id: Uuid,
+    pub email: String,
+    pub username: Option<String>,
+    pub role: String,
+    pub merchant_status: String,
+    pub two_factor_enabled: bool,
+    pub created_at: DateTime<Utc>,
+    pub last_login_at: Option<DateTime<Utc>>,
+    pub erased_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -284,7 +299,7 @@ pub fn get_server_resources(pool: &PgPool) -> ServerResourceStats {
     }
 }
 
-pub async fn get_dashboard_stats(pool: &PgPool) -> Result<AdminDashboardStats, AdminError> {
+pub async fn get_dashboard_stats(pool: &PgPool, secrets: Option<&SecretsService>) -> Result<AdminDashboardStats, AdminError> {
     let total_users: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM users WHERE email <> $1",
     )
@@ -401,7 +416,7 @@ pub async fn get_dashboard_stats(pool: &PgPool) -> Result<AdminDashboardStats, A
 
     // Recent 6 deposits (skip zero-amount wipe stubs)
     let recent_deposits_rows = sqlx::query(
-        "SELECT d.id, u.email, wa.coin::text as coin, d.amount, d.tx_hash, d.status::text as status, d.confirmations, d.detected_at \
+        "SELECT d.id, u.id as user_id, u.email, u.email_enc, wa.coin::text as coin, d.amount, d.tx_hash, d.status::text as status, d.confirmations, d.detected_at \
          FROM deposits d JOIN wallets wa ON wa.id = d.wallet_id JOIN users u ON u.id = wa.user_id \
          WHERE d.amount > 0 \
          ORDER BY d.detected_at DESC LIMIT 6"
@@ -412,20 +427,25 @@ pub async fn get_dashboard_stats(pool: &PgPool) -> Result<AdminDashboardStats, A
 
     let recent_deposits: Vec<RecentDepositItem> = recent_deposits_rows
         .into_iter()
-        .map(|r| RecentDepositItem {
+        .map(|r| {
+            let uid: Uuid = r.get("user_id");
+            let email: String = r.get("email");
+            let enc: Option<String> = r.get("email_enc");
+            RecentDepositItem {
             id: r.get("id"),
-            email: r.get("email"),
+            email: privacy::reveal_stored_email(secrets, uid, &email, enc.as_deref()),
             coin: r.get("coin"),
             amount: r.get::<BigDecimal, _>("amount").to_string(),
             tx_hash: r.get("tx_hash"),
             status: r.get("status"),
             confirmations: r.get("confirmations"),
             created_at: r.get("detected_at"),
+        }
         })
         .collect();
 
     // Recent 6 withdrawals
-    let recent_withdrawals = list_all_withdrawals(pool, None, 6).await.unwrap_or_default();
+    let recent_withdrawals = list_all_withdrawals(pool, None, 6, secrets).await.unwrap_or_default();
 
     let server = get_server_resources(pool);
 
@@ -449,26 +469,39 @@ pub async fn get_dashboard_stats(pool: &PgPool) -> Result<AdminDashboardStats, A
     })
 }
 
-pub async fn list_pending_withdrawals(pool: &PgPool) -> Result<Vec<PendingWithdrawal>, AdminError> {
+pub async fn list_pending_withdrawals(pool: &PgPool, secrets: Option<&SecretsService>) -> Result<Vec<PendingWithdrawal>, AdminError> {
     let rows = sqlx::query(
-        "SELECT w.id, u.email, wa.coin::text as coin, w.to_address, w.amount, w.created_at \
+        "SELECT w.id, u.id as user_id, u.email, u.email_enc, wa.coin::text as coin, w.to_address, w.amount, w.created_at \
          FROM withdrawals w JOIN wallets wa ON wa.id = w.wallet_id JOIN users u ON u.id = wa.user_id \
          WHERE w.status = 'PENDING' AND w.requires_approval = true ORDER BY w.created_at ASC",
     )
     .fetch_all(pool)
     .await?;
-    Ok(rows.into_iter().map(|r| PendingWithdrawal { id: r.get("id"), email: r.get("email"), coin: r.get("coin"), to_address: r.get("to_address"), amount: r.get::<BigDecimal, _>("amount").to_string(), created_at: r.get("created_at") }).collect())
+    Ok(rows.into_iter().map(|r| {
+        let id: Uuid = r.get("id");
+        let uid: Uuid = r.get("user_id");
+        let email: String = r.get("email");
+        let enc: Option<String> = r.get("email_enc");
+        PendingWithdrawal {
+            id,
+            email: privacy::reveal_stored_email(secrets, uid, &email, enc.as_deref()),
+            coin: r.get("coin"),
+            to_address: privacy::open_opt(secrets, KIND_WD_TO, &id.to_string(), &r.get::<String, _>("to_address")),
+            amount: r.get::<BigDecimal, _>("amount").to_string(),
+            created_at: r.get("created_at"),
+        }
+    }).collect())
 }
 
 const WITHDRAWAL_STATUSES: &[&str] = &[
     "PENDING", "APPROVED", "QUEUED", "BROADCASTING", "BROADCASTED", "CONFIRMED", "FAILED", "CANCELED",
 ];
 
-pub async fn list_all_withdrawals(pool: &PgPool, status: Option<&str>, limit: i64) -> Result<Vec<AdminWithdrawalItem>, AdminError> {
+pub async fn list_all_withdrawals(pool: &PgPool, status: Option<&str>, limit: i64, secrets: Option<&SecretsService>) -> Result<Vec<AdminWithdrawalItem>, AdminError> {
     let limit = limit.clamp(1, 200);
     let filter = status.filter(|s| WITHDRAWAL_STATUSES.contains(s));
     let sql = if filter.is_some() {
-        "SELECT w.id, u.id as user_id, u.email, wa.coin::text as coin, w.to_address, w.amount, w.fee_amount, \
+        "SELECT w.id, u.id as user_id, u.email, u.email_enc, wa.coin::text as coin, w.to_address, w.amount, w.fee_amount, \
                 w.status::text as status, w.tx_hash, w.requires_approval, w.created_at \
          FROM withdrawals w \
          JOIN wallets wa ON wa.id = w.wallet_id \
@@ -476,7 +509,7 @@ pub async fn list_all_withdrawals(pool: &PgPool, status: Option<&str>, limit: i6
          WHERE w.status = $1::withdrawal_status \
          ORDER BY w.created_at DESC LIMIT $2"
     } else {
-        "SELECT w.id, u.id as user_id, u.email, wa.coin::text as coin, w.to_address, w.amount, w.fee_amount, \
+        "SELECT w.id, u.id as user_id, u.email, u.email_enc, wa.coin::text as coin, w.to_address, w.amount, w.fee_amount, \
                 w.status::text as status, w.tx_hash, w.requires_approval, w.created_at \
          FROM withdrawals w \
          JOIN wallets wa ON wa.id = w.wallet_id \
@@ -489,25 +522,95 @@ pub async fn list_all_withdrawals(pool: &PgPool, status: Option<&str>, limit: i6
     } else {
         sqlx::query(sql).bind(limit).fetch_all(pool).await?
     };
-    Ok(rows.into_iter().map(|r| AdminWithdrawalItem {
-        id: r.get("id"),
-        user_id: r.get("user_id"),
-        email: r.get("email"),
+    Ok(rows.into_iter().map(|r| {
+        let id: Uuid = r.get("id");
+        let user_id: Uuid = r.get("user_id");
+        let email: String = r.get("email");
+        let enc: Option<String> = r.get("email_enc");
+        AdminWithdrawalItem {
+        id,
+        user_id,
+        email: privacy::reveal_stored_email(secrets, user_id, &email, enc.as_deref()),
         coin: r.get("coin"),
-        to_address: r.get("to_address"),
+        to_address: privacy::open_opt(secrets, KIND_WD_TO, &id.to_string(), &r.get::<String, _>("to_address")),
         amount: r.get::<BigDecimal, _>("amount").to_string(),
         fee: r.get::<BigDecimal, _>("fee_amount").to_string(),
         status: r.get("status"),
         tx_hash: r.get("tx_hash"),
         requires_approval: r.get("requires_approval"),
         created_at: r.get("created_at"),
+    }
     }).collect())
 }
 
-pub async fn list_all_merchants(pool: &PgPool) -> Result<Vec<AdminMerchantItem>, AdminError> {
+pub async fn list_all_users(
+    pool: &PgPool,
+    secrets: Option<&SecretsService>,
+    role: Option<&str>,
+    q: Option<&str>,
+    include_erased: bool,
+    limit: i64,
+) -> Result<Vec<AdminUserItem>, AdminError> {
+    let limit = limit.clamp(1, 500);
+    let role = role
+        .map(str::trim)
+        .filter(|s| !s.is_empty() && *s != "ALL")
+        .map(|s| s.to_ascii_uppercase());
+    let q = q.map(str::trim).filter(|s| !s.is_empty()).map(|s| s.to_string());
+    let q_like = q.as_ref().map(|s| format!("%{}%", s.to_lowercase()));
+    let q_uuid = q.as_ref().and_then(|s| Uuid::parse_str(s).ok());
+
     let rows = sqlx::query(
-        "SELECT u.id, u.id as user_id, u.email, \
-                COALESCE(NULLIF(u.merchant_business_name, ''), u.email) as name, \
+        "SELECT u.id, u.email, u.email_enc, u.username, u.role::text as role, \
+                u.merchant_status::text as merchant_status, u.two_factor_enabled, \
+                u.created_at, u.last_login_at, u.erased_at \
+         FROM users u \
+         WHERE u.email <> $1 \
+           AND ($2::text IS NULL OR u.role::text = $2) \
+           AND ($3::bool OR u.erased_at IS NULL) \
+           AND ( \
+             $4::text IS NULL \
+             OR u.id = $5 \
+             OR lower(coalesce(u.username, '')) LIKE $4 \
+             OR lower(u.email) LIKE $4 \
+           ) \
+         ORDER BY u.created_at DESC \
+         LIMIT $6",
+    )
+    .bind(crate::house::HOUSE_EMAIL)
+    .bind(role.as_deref())
+    .bind(include_erased)
+    .bind(q_like.as_deref())
+    .bind(q_uuid)
+    .bind(limit)
+    .fetch_all(pool)
+    .await?;
+
+    Ok(rows
+        .into_iter()
+        .map(|r| {
+            let id: Uuid = r.get("id");
+            let email: String = r.get("email");
+            let enc: Option<String> = r.get("email_enc");
+            AdminUserItem {
+                id,
+                email: privacy::reveal_stored_email(secrets, id, &email, enc.as_deref()),
+                username: r.get("username"),
+                role: r.get("role"),
+                merchant_status: r.get("merchant_status"),
+                two_factor_enabled: r.get("two_factor_enabled"),
+                created_at: r.get("created_at"),
+                last_login_at: r.get("last_login_at"),
+                erased_at: r.get("erased_at"),
+            }
+        })
+        .collect())
+}
+
+pub async fn list_all_merchants(pool: &PgPool, secrets: Option<&SecretsService>) -> Result<Vec<AdminMerchantItem>, AdminError> {
+    let rows = sqlx::query(
+        "SELECT u.id, u.id as user_id, u.email, u.email_enc, \
+                u.merchant_business_name, \
                 u.merchant_website as website_url, \
                 NULL::text as webhook_url, \
                 u.merchant_description as description, \
@@ -546,14 +649,23 @@ pub async fn list_all_merchants(pool: &PgPool) -> Result<Vec<AdminMerchantItem>,
 
     Ok(rows
         .into_iter()
-        .map(|r| AdminMerchantItem {
+        .map(|r| {
+            let user_id: Uuid = r.get("user_id");
+            let key = user_id.to_string();
+            let email: String = r.get("email");
+            let enc: Option<String> = r.get("email_enc");
+            let email = privacy::reveal_stored_email(secrets, user_id, &email, enc.as_deref());
+            let name = privacy::open_opt_option(secrets, KIND_MERCHANT_NAME, &key, r.get::<Option<String>, _>("merchant_business_name").as_deref())
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| email.clone());
+            AdminMerchantItem {
             id: r.get("id"),
-            user_id: r.get("user_id"),
-            email: r.get("email"),
-            name: r.get("name"),
-            website_url: r.get("website_url"),
+            user_id,
+            email,
+            name,
+            website_url: privacy::open_opt_option(secrets, KIND_MERCHANT_WEB, &key, r.get::<Option<String>, _>("website_url").as_deref()),
             webhook_url: r.get("webhook_url"),
-            description: r.get("description"),
+            description: privacy::open_opt_option(secrets, KIND_MERCHANT_DESC, &key, r.get::<Option<String>, _>("description").as_deref()),
             status: r.get("status"),
             is_verified: r.get("is_verified"),
             created_at: r.get("created_at"),
@@ -563,6 +675,7 @@ pub async fn list_all_merchants(pool: &PgPool) -> Result<Vec<AdminMerchantItem>,
             fees_paid: r.get("fees_paid"),
             api_keys_count: r.get("api_keys_count"),
             last_invoice_at: r.get("last_invoice_at"),
+        }
         })
         .collect())
 }
@@ -646,7 +759,7 @@ async fn volume_by_coin_since(
     Ok(map_coin_volume_rows(rows))
 }
 
-pub async fn get_merchant_platform_stats(pool: &PgPool) -> Result<MerchantPlatformStats, AdminError> {
+pub async fn get_merchant_platform_stats(pool: &PgPool, secrets: Option<&SecretsService>) -> Result<MerchantPlatformStats, AdminError> {
     let accounts = sqlx::query(
         "SELECT \
             COUNT(*) FILTER (WHERE merchant_status != 'NONE')::bigint as total, \
@@ -766,15 +879,14 @@ pub async fn get_merchant_platform_stats(pool: &PgPool) -> Result<MerchantPlatfo
     .unwrap_or_default();
 
     let top_rows = sqlx::query(
-        "SELECT u.id as merchant_id, u.email, \
-                COALESCE(NULLIF(u.merchant_business_name, ''), u.email) as name, \
+        "SELECT u.id as merchant_id, u.email, u.email_enc, u.merchant_business_name, \
                 COUNT(*)::bigint as paid_count, \
                 COALESCE(SUM(i.amount), 0)::text as volume_paid, \
                 COALESCE(SUM(i.fee_amount), 0)::text as fees_paid \
          FROM merchant_deposit_invoices i \
          JOIN users u ON u.id = i.merchant_id \
          WHERE i.status = 'CONFIRMED' AND u.email <> $1 \
-         GROUP BY u.id, u.email, u.merchant_business_name \
+         GROUP BY u.id, u.email, u.email_enc, u.merchant_business_name \
          ORDER BY SUM(i.amount) DESC \
          LIMIT 10",
     )
@@ -784,8 +896,8 @@ pub async fn get_merchant_platform_stats(pool: &PgPool) -> Result<MerchantPlatfo
     .unwrap_or_default();
 
     let recent_rows = sqlx::query(
-        "SELECT i.id, i.merchant_id, u.email as merchant_email, \
-                COALESCE(NULLIF(u.merchant_business_name, ''), u.email) as merchant_name, \
+        "SELECT i.id, i.merchant_id, u.email as merchant_email, u.email_enc, \
+                u.merchant_business_name, \
                 i.coin::text as coin, \
                 i.amount::text as amount, \
                 i.fee_amount::text as fee_amount, \
@@ -831,13 +943,22 @@ pub async fn get_merchant_platform_stats(pool: &PgPool) -> Result<MerchantPlatfo
         webhooks_failed: failed,
         top_merchants: top_rows
             .into_iter()
-            .map(|r| MerchantTopItem {
-                merchant_id: r.get("merchant_id"),
-                email: r.get("email"),
-                name: r.get("name"),
+            .map(|r| {
+                let merchant_id: Uuid = r.get("merchant_id");
+                let email: String = r.get("email");
+                let enc: Option<String> = r.get("email_enc");
+                let email = privacy::reveal_stored_email(secrets, merchant_id, &email, enc.as_deref());
+                let name = privacy::open_opt_option(secrets, KIND_MERCHANT_NAME, &merchant_id.to_string(), r.get::<Option<String>, _>("merchant_business_name").as_deref())
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or_else(|| email.clone());
+                MerchantTopItem {
+                merchant_id,
+                email,
+                name,
                 paid_count: r.get("paid_count"),
                 volume_paid: r.get("volume_paid"),
                 fees_paid: r.get("fees_paid"),
+                }
             })
             .collect(),
         series_14d: series_rows
@@ -851,11 +972,19 @@ pub async fn get_merchant_platform_stats(pool: &PgPool) -> Result<MerchantPlatfo
             .collect(),
         recent_invoices: recent_rows
             .into_iter()
-            .map(|r| MerchantRecentInvoice {
+            .map(|r| {
+                let merchant_id: Uuid = r.get("merchant_id");
+                let email: String = r.get("merchant_email");
+                let enc: Option<String> = r.get("email_enc");
+                let merchant_email = privacy::reveal_stored_email(secrets, merchant_id, &email, enc.as_deref());
+                let merchant_name = privacy::open_opt_option(secrets, KIND_MERCHANT_NAME, &merchant_id.to_string(), r.get::<Option<String>, _>("merchant_business_name").as_deref())
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or_else(|| merchant_email.clone());
+                MerchantRecentInvoice {
                 id: r.get("id"),
-                merchant_id: r.get("merchant_id"),
-                merchant_email: r.get("merchant_email"),
-                merchant_name: r.get("merchant_name"),
+                merchant_id,
+                merchant_email,
+                merchant_name,
                 coin: r.get("coin"),
                 amount: r.get("amount"),
                 fee_amount: r.get("fee_amount"),
@@ -865,6 +994,7 @@ pub async fn get_merchant_platform_stats(pool: &PgPool) -> Result<MerchantPlatfo
                 webhook_delivered: r.get("webhook_delivered"),
                 created_at: r.get("created_at"),
                 paid_at: r.get("paid_at"),
+                }
             })
             .collect(),
     })
@@ -1241,9 +1371,9 @@ pub async fn suspend_merchant(pool: &PgPool, merchant_id: Uuid, admin_id: Uuid) 
     Ok(())
 }
 
-pub async fn list_all_faucet_sites(pool: &PgPool) -> Result<Vec<AdminFaucetItem>, AdminError> {
+pub async fn list_all_faucet_sites(pool: &PgPool, secrets: Option<&SecretsService>) -> Result<Vec<AdminFaucetItem>, AdminError> {
     let rows = sqlx::query(
-        "SELECT fs.id, fs.owner_id, u.email as owner_email, fs.name, fs.url, \
+        "SELECT fs.id, fs.owner_id, u.email as owner_email, u.email_enc, fs.name, fs.url, \
                 fs.description, fs.coins::text[] as coins, fs.reward_info, \
                 fs.status::text as status, fs.rejection_reason, fs.clicks, fs.created_at \
          FROM faucet_sites fs \
@@ -1253,10 +1383,15 @@ pub async fn list_all_faucet_sites(pool: &PgPool) -> Result<Vec<AdminFaucetItem>
     .fetch_all(pool)
     .await?;
 
-    Ok(rows.into_iter().map(|r| AdminFaucetItem {
+    Ok(rows.into_iter().map(|r| {
+        let owner_id: Uuid = r.get("owner_id");
+        let email: Option<String> = r.get("owner_email");
+        let enc: Option<String> = r.get("email_enc");
+        let owner_email = email.map(|e| privacy::reveal_stored_email(secrets, owner_id, &e, enc.as_deref()));
+        AdminFaucetItem {
         id: r.get("id"),
-        owner_id: r.get("owner_id"),
-        owner_email: r.get("owner_email"),
+        owner_id,
+        owner_email,
         name: r.get("name"),
         url: r.get("url"),
         description: r.get("description"),
@@ -1266,6 +1401,7 @@ pub async fn list_all_faucet_sites(pool: &PgPool) -> Result<Vec<AdminFaucetItem>
         rejection_reason: r.get("rejection_reason"),
         clicks: r.get("clicks"),
         created_at: r.get("created_at"),
+    }
     }).collect())
 }
 
