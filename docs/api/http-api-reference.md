@@ -269,6 +269,11 @@ Integre contra o `code`, nunca contra o texto.
 ### `GET /v1/swap/history`
 - **Autenticação**: Bearer JWT
 - **Descrição**: Conversões do usuário, com par, quantias de entrada e saída e taxa aplicada.
+- **Campo `error`**: presente quando `status` é `FAILED` ou `REFUNDED`. Vem direto de
+  `dex_swaps.error` — texto interno (status do provedor, erro de RPC), não uma mensagem
+  pronta para usuário final; o client mapeia para um motivo curto antes de exibir.
+  Reembolso sempre devolve o valor ao ledger do usuário automaticamente; `error` é só
+  contexto de diagnóstico.
 
 ### `GET /v1/swap/orders/:id`
 - **Autenticação**: Bearer JWT. Ordem de outro usuário → `403`.

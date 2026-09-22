@@ -273,8 +273,23 @@ impl RelayIntentStatus {
     pub fn is_failed(&self) -> bool {
         matches!(
             self.status.to_ascii_lowercase().as_str(),
-            "failure" | "failed" | "refunded" | "cancelled" | "canceled" | "error"
+            // Real /intents/status/v3 terminal values (docs.relay.link): a
+            // refund settles as "refund", not "refunded" — a swap stuck on the
+            // 8-letter spelling would sit in IN_FLIGHT forever, silently.
+            "failure" | "refund" |
+            "failed" | "refunded" | "cancelled" | "canceled" | "error"
         )
+    }
+
+    /// Relay's own reason for a failure/refund, e.g. `SOLVER_BALANCE_TOO_LOW`,
+    /// `ORDER_EXPIRED`. Without this, diagnosing why a swap was refunded means
+    /// re-querying Relay's API by hand with the stored requestId.
+    pub fn fail_reason(&self) -> Option<String> {
+        self.raw
+            .get("failReason")
+            .or_else(|| self.raw.get("refundFailReason"))
+            .and_then(|v| v.as_str())
+            .map(str::to_string)
     }
 }
 
@@ -838,6 +853,37 @@ mod tests {
         assert_eq!(s.outbound_tx.as_deref(), Some("b"));
         let f = RelayIntentStatus::from_value(&json!({"status":"failed"}));
         assert!(f.is_failed());
+    }
+
+    /// The real /intents/status/v3 terminal value for a refund is "refund",
+    /// not "refunded" — a SOL → PEPE bridge on 2026-09-22 settled with this
+    /// exact status and needs to be recognized as terminal, not left IN_FLIGHT.
+    #[test]
+    fn is_failed_recognizes_real_relay_refund_status() {
+        let r = RelayIntentStatus::from_value(&json!({"status":"refund"}));
+        assert!(r.is_failed());
+        assert!(!r.is_success());
+
+        let f = RelayIntentStatus::from_value(&json!({"status":"failure"}));
+        assert!(f.is_failed());
+
+        for pending in ["waiting", "depositing", "pending", "submitted", "delayed"] {
+            let s = RelayIntentStatus::from_value(&json!({"status": pending}));
+            assert!(!s.is_failed(), "{pending} must not be terminal-failed");
+            assert!(!s.is_success(), "{pending} must not be terminal-success");
+        }
+    }
+
+    #[test]
+    fn fail_reason_reads_failreason_and_refundfailreason() {
+        let f = RelayIntentStatus::from_value(&json!({"status":"failure","failReason":"SOLVER_BALANCE_TOO_LOW"}));
+        assert_eq!(f.fail_reason().as_deref(), Some("SOLVER_BALANCE_TOO_LOW"));
+
+        let r = RelayIntentStatus::from_value(&json!({"status":"refund","refundFailReason":"ORDER_EXPIRED"}));
+        assert_eq!(r.fail_reason().as_deref(), Some("ORDER_EXPIRED"));
+
+        let none = RelayIntentStatus::from_value(&json!({"status":"success"}));
+        assert_eq!(none.fail_reason(), None);
     }
 
     #[test]

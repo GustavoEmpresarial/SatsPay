@@ -53,6 +53,13 @@ describe('Swap — structure', () => {
     expect(src).toContain('isNoRoutesError');
   });
 
+  it('explains a refund/failure in history instead of a bare status pill', () => {
+    const src = readFileSync(pagePath, 'utf8');
+    expect(src).toContain('explainSwapError');
+    // Raw provider/RPC text belongs in support tooling, not the user-facing list.
+    expect(src).not.toMatch(/\{s\.error\}/);
+  });
+
   it('warns when route costs eat a large share of the value', () => {
     const src = readFileSync(pagePath, 'utf8');
     expect(src).toContain('valueLossWarning');

@@ -119,6 +119,7 @@ struct SwapHistoryItemResp {
     inbound_tx: Option<String>,
     outbound_tx: Option<String>,
     source: String,
+    error: Option<String>,
 }
 
 async fn history<R: AuthRepo>(State(state): State<AppState<R>>, user: AuthUser) -> Response {
@@ -140,6 +141,7 @@ async fn history<R: AuthRepo>(State(state): State<AppState<R>>, user: AuthUser) 
                 inbound_tx: s.inbound_tx,
                 outbound_tx: s.outbound_tx,
                 source: "dex".into(),
+                error: s.error,
             });
         }
     }
@@ -160,6 +162,7 @@ async fn history<R: AuthRepo>(State(state): State<AppState<R>>, user: AuthUser) 
                 inbound_tx: None,
                 outbound_tx: None,
                 source: "house".into(),
+                error: None,
             });
         }
     }

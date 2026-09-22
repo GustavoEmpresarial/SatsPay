@@ -457,7 +457,11 @@ async fn try_credit_relay(pool: &PgPool, relay: &RelayClient, id: Uuid) -> Resul
         .map_err(|e| e.to_string())?;
 
     if status.is_failed() {
-        let _ = db::dex_swap::mark_failed(pool, id, &format!("relay status: {}", status.status)).await;
+        let msg = match status.fail_reason() {
+            Some(reason) => format!("relay status: {} ({reason})", status.status),
+            None => format!("relay status: {}", status.status),
+        };
+        let _ = db::dex_swap::mark_failed(pool, id, &msg).await;
         return Err(format!("relay failed: {}", status.status));
     }
     if !status.is_success() {

@@ -8,6 +8,68 @@ use sqlx::PgPool;
 use tower::ServiceExt;
 use uuid::Uuid;
 
+/// A refund/failure without a reason reads as a black box — this is the exact
+/// shape of the SOL → PEPE bridge refunded on 2026-09-22 (Solana rejected the
+/// deposit tx: hot wallet balance too low to stay rent-exempt after sending).
+#[sqlx::test(migrations = "../db/migrations")]
+async fn swap_history_exposes_refund_reason(pool: PgPool) {
+    let (state, token, user_id, _) = common::register_user(pool.clone(), "swaprefund").await;
+    let uid = Uuid::parse_str(&user_id).unwrap();
+    common::credit_personal(&pool, uid, shared::Coin::Sol, 10_000_000).await;
+
+    let (row, _) = db::dex_swap::lock_and_create(
+        &pool,
+        db::dex_swap::LockDexSwapInput {
+            user_id: uid,
+            from_coin: shared::Coin::Sol,
+            to_coin: shared::Coin::Pepe,
+            from_amount: 1_414_270,
+            expected_to_amount: 11_771_701_903_040,
+            min_to_amount: None,
+            provider: "RELAY",
+            providers: &["RELAY".to_string()],
+            route_id: Some("relay:0xabc"),
+            quote_id: None,
+            platform_fee_bps: 25,
+            platform_fee_amount: 3_500,
+            fees_json: serde_json::json!([]),
+            eta_seconds: Some(120),
+            tx_hint: Some("solanaRelay"),
+            destination_address: None,
+            source_address: None,
+            swap_payload: None,
+            idempotency_key: "swap-refund-test-1",
+        },
+    )
+    .await
+    .unwrap();
+    let reason = "broadcast failed: insufficient funds for rent";
+    db::dex_swap::mark_failed(&pool, row.id, reason).await.unwrap();
+    db::dex_swap::refund(&pool, row.id, reason).await.unwrap();
+
+    let response = api_http::app_without_metrics(state)
+        .oneshot(
+            axum::http::Request::builder()
+                .uri("/v1/swap/history")
+                .header("authorization", format!("Bearer {token}"))
+                .header("x-real-ip", "203.0.113.62")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let status = response.status();
+    let bytes = response.into_body().collect().await.unwrap().to_bytes();
+    assert_eq!(status, axum::http::StatusCode::OK, "history={}", String::from_utf8_lossy(&bytes));
+    let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    let item = body["swaps"]
+        .as_array()
+        .and_then(|a| a.iter().find(|s| s["id"] == row.id.to_string()))
+        .expect("refunded swap present in history");
+    assert_eq!(item["status"], "REFUNDED");
+    assert_eq!(item["error"], reason);
+}
+
 #[sqlx::test(migrations = "../db/migrations")]
 async fn swap_quote_get_with_price_cache(pool: PgPool) {
     std::env::set_var("SWAP_HOUSE_ENABLED", "true");

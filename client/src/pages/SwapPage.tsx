@@ -88,6 +88,7 @@ interface SwapHistoryItem {
   inboundTx?: string | null;
   outboundTx?: string | null;
   source: string;
+  error?: string | null;
 }
 
 interface ExecuteResp {
@@ -206,6 +207,26 @@ function statusLabel(status: string): { text: string; cls: string } {
     default:
       return { text: status, cls: 'bg-surface text-ink-muted' };
   }
+}
+
+/// `dex_swaps.error` carries raw provider/RPC text (relay status codes,
+/// JSON-RPC error bodies) meant for support, not for the history list — same
+/// principle as not showing the raw AMOUNT_TOO_LOW body on execute. This
+/// buckets it into a short reason so a refund/failure never reads as a bare
+/// status pill with zero context.
+function explainSwapError(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const lower = raw.toLowerCase();
+  if (lower.startsWith('slippage')) {
+    return 'O preço mudou durante a confirmação e ficou fora do mínimo combinado.';
+  }
+  if (lower.startsWith('broadcast failed')) {
+    return 'Falha ao enviar a transação na rede de origem.';
+  }
+  if (lower.includes('relay status') || lower.includes('changenow status')) {
+    return 'O provedor da rota não conseguiu concluir a operação.';
+  }
+  return 'A operação não pôde ser concluída.';
 }
 
 export function SwapPage() {
@@ -989,6 +1010,7 @@ export function SwapPage() {
               <ul className="max-h-[520px] divide-y divide-border overflow-y-auto [scrollbar-width:none]">
                 {historyItems.map((s) => {
                   const st = statusLabel(s.status);
+                  const errorReason = (s.status === 'REFUNDED' || s.status === 'FAILED') ? explainSwapError(s.error) : null;
                   return (
                     <li key={s.id} className="p-4 hover:bg-surface/50 transition-colors space-y-1.5">
                       <div className="flex items-center justify-between gap-2">
@@ -1014,6 +1036,12 @@ export function SwapPage() {
                           {s.feeBps / 100}%
                         </span>
                       </div>
+                      {errorReason && (
+                        <div className="text-[10px] text-amber-800/80">
+                          {errorReason}
+                          {s.status === 'REFUNDED' && ' Valor devolvido à sua carteira.'}
+                        </div>
+                      )}
                     </li>
                   );
                 })}
