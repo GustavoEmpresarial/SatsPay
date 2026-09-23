@@ -5,7 +5,25 @@
 use chain::ChainRegistry;
 use shared::Coin;
 use sqlx::{PgPool, Row};
+use std::collections::{HashMap, HashSet};
+use std::sync::{Mutex, OnceLock};
 use uuid::Uuid;
+
+static FAILURE_STREAKS: OnceLock<Mutex<HashMap<String, u32>>> = OnceLock::new();
+
+fn streak(key: &str, failed: bool) -> u32 {
+    let mut all = FAILURE_STREAKS
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let value = all.entry(key.to_owned()).or_default();
+    if failed {
+        *value = value.saturating_add(1);
+    } else {
+        *value = 0;
+    }
+    *value
+}
 
 pub async fn run_once(pool: &PgPool, registry: &ChainRegistry) {
     let rows = match sqlx::query("SELECT id, user_id, coin::text as coin, address, hd_index FROM wallets WHERE kind = 'PERSONAL' AND address IS NOT NULL")
@@ -19,11 +37,17 @@ pub async fn run_once(pool: &PgPool, registry: &ChainRegistry) {
         }
     };
 
+    let mut provider_failures = HashSet::new();
+    let mut sweep_failures = HashSet::new();
+    let mut seen_coins = HashSet::new();
     for row in rows {
         let wallet_id: Uuid = row.get("id");
         let coin_str: String = row.get("coin");
         let address: String = row.get("address");
-        let Some(coin) = parse_coin(&coin_str) else { continue };
+        let Some(coin) = parse_coin(&coin_str) else {
+            continue;
+        };
+        seen_coins.insert(coin_str.clone());
         let client = registry.get(coin);
 
         // A failed history lookup must not skip the sweep. USDT often fails
@@ -32,6 +56,7 @@ pub async fn run_once(pool: &PgPool, registry: &ChainRegistry) {
             Ok(d) => d,
             Err(e) => {
                 tracing::warn!(wallet_id = %wallet_id, error = %e, "deposit_watcher: fetch_deposits failed; still attempting sweep");
+                provider_failures.insert(coin_str.clone());
                 Vec::new()
             }
         };
@@ -102,10 +127,41 @@ pub async fn run_once(pool: &PgPool, registry: &ChainRegistry) {
                 Ok(None) => {}
                 Err(e) => {
                     tracing::warn!(wallet_id = %wallet_id, coin = %coin_str, error = %e, "sweep to hot failed (will retry)");
+                    sweep_failures.insert(coin_str.clone());
                 }
             }
         }
         let _ = credited;
+    }
+    for coin in seen_coins {
+        let provider_key = format!("provider_{coin}");
+        let provider_streak = streak(&provider_key, provider_failures.contains(&coin));
+        if provider_streak >= 3 {
+            db::telemetry::record_worker_error(
+                pool,
+                "CRITICAL",
+                &provider_key,
+                &format!("CHAIN_PROVIDERS_UNAVAILABLE {coin}"),
+                None,
+            )
+            .await;
+        } else if provider_streak == 0 {
+            let _ = db::telemetry::resolve_worker_alert(pool, &provider_key).await;
+        }
+        let sweep_key = format!("sweep_{coin}");
+        let sweep_streak = streak(&sweep_key, sweep_failures.contains(&coin));
+        if sweep_streak >= 3 {
+            db::telemetry::record_worker_error(
+                pool,
+                "CRITICAL",
+                &sweep_key,
+                &format!("SWEEP_REPEATED_FAILURE {coin}"),
+                None,
+            )
+            .await;
+        } else if sweep_streak == 0 {
+            let _ = db::telemetry::resolve_worker_alert(pool, &sweep_key).await;
+        }
     }
 }
 
@@ -124,5 +180,14 @@ mod tests {
         assert_eq!(parse_coin("LTC"), Some(Coin::Ltc));
         assert!(parse_coin("NOPE").is_none());
         assert!(parse_coin("").is_none());
+    }
+
+    #[test]
+    fn consecutive_failures_reset_after_success() {
+        let key = format!("test-{}", Uuid::new_v4());
+        assert_eq!(streak(&key, true), 1);
+        assert_eq!(streak(&key, true), 2);
+        assert_eq!(streak(&key, false), 0);
+        assert_eq!(streak(&key, true), 1);
     }
 }

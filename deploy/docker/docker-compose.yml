@@ -35,6 +35,7 @@ services:
       COOKIE_SECURE: ${COOKIE_SECURE:-true}
       BIND_ADDR: "0.0.0.0:4000"
       RUST_LOG: info
+      APP_VERSION: ${APP_VERSION:-unknown}
       CORS_ORIGIN: ${CORS_ORIGIN:-https://www.satspay.pro,https://satspay.pro}
       # Absolute origin used to build the hosted checkout link returned as
       # `checkoutUrl`. Defaults to the first CORS_ORIGIN entry when unset.
@@ -97,8 +98,6 @@ services:
       DGB_INSIGHT_API: ${DGB_INSIGHT_API:-https://digiexplorer.info/api}
       # Empty until a dedicated DGB host exists (node VM cannot run digibyted).
       DGB_RPC_URL: ${DGB_RPC_URL:-}
-      # Empty until zerod has peers and has left IBD. Withdraw is fail-closed without it.
-      ZER_RPC_URL: ${ZER_RPC_URL:-}
       ZER_EXPLORER_API: ${ZER_EXPLORER_API:-https://zerochain.info/api}
       ZER_EXPLORER_API_KEY: ${ZER_EXPLORER_API_KEY:-}
       SWAPKIT_ENABLED: ${SWAPKIT_ENABLED:-false}
@@ -175,6 +174,13 @@ services:
       # (sealed with WALLET_ENCRYPTION_KEY, else ENCRYPTION_KEY). The plaintext
       # names are passed through solely so the worker can refuse them loudly.
       WALLET_ENCRYPTION_KEY: ${WALLET_ENCRYPTION_KEY:-}
+      # Alert delivery and signing RPC stay in the worker, away from the API.
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
+      # zerod próprio assina com WIF enquanto exploradores públicos leem/broadcastam.
+      ZER_RPC_URL: ${ZER_RPC_URL:-}
+      DOGE_BLOCKBOOK_API_KEY: ${DOGE_BLOCKBOOK_API_KEY:-}
+      DOGE_BLOCKBOOK_API: ${DOGE_BLOCKBOOK_API:-https://dogebook.nownodes.io}
       DEPOSIT_MNEMONIC_ENC: ${DEPOSIT_MNEMONIC_ENC:-}
       HOT_MNEMONIC_ENC: ${HOT_MNEMONIC_ENC:-}
       HOT_WALLET_WIF_ENC: ${HOT_WALLET_WIF_ENC:-}

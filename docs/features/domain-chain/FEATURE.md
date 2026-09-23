@@ -54,3 +54,9 @@ _sem overview em docs/pages_
 - Mapa geral: [`docs/README.md`](../../README.md)
 - Índice features: [`../README.md`](../README.md)
 - Testes: [`TC.md`](TC.md)
+
+## Resiliência (2026-09-23)
+
+- DOGE tenta BlockCypher, Bitcore e, quando `DOGE_BLOCKBOOK_API_KEY` estiver configurada no worker, NOWNodes Blockbook. O antigo fallback SoChain foi removido: devolvia lista vazia sem interpretar depósitos. A chave vai no header `api-key`. DGB mantém RPC próprio, dois Insight e Blockbook. Provedores de consulta abrem o circuit breaker após três erros, esperam 60 s e aceitam uma sondagem para fechar.
+- Falha de todos os provedores de depósitos por três ciclos e falha de sweep por três ciclos geram alerta por moeda. Um ciclo bem-sucedido zera a sequência. Resposta JSON inválida é falha, mesmo com HTTP 200.
+- ZER consulta exploradores públicos e transmite transações já assinadas; `ZER_RPC_URL` fica só no worker e só aceita destino local ou privado, pois `signrawtransaction` recebe WIF. Validar a assinatura no nó próprio antes de liberar saques/sweeps enquanto ele sincroniza.

@@ -15,13 +15,16 @@ pub fn internal_error(err: impl std::fmt::Display) -> Response {
 pub fn internal_error_parts(err: impl std::fmt::Display) -> (StatusCode, Json<serde_json::Value>) {
     // Same id as the access-log span / `X-Request-Id`, so support can go from
     // the id a user reports straight to this log line.
-    let request_id = crate::access_log::current_request_id().unwrap_or_else(|| Uuid::new_v4().to_string());
-    tracing::error!(%request_id, error = %err, code = "INTERNAL", "internal error");
+    let request_id =
+        crate::access_log::current_request_id().unwrap_or_else(|| Uuid::new_v4().to_string());
+    let error_id = format!("err_{}", Uuid::new_v4().simple());
+    tracing::error!(%request_id, %error_id, error = %err, code = "INTERNAL", "internal error");
     (
         StatusCode::INTERNAL_SERVER_ERROR,
         Json(json!({
             "error": "internal error",
             "code": "INTERNAL",
+            "error_id": error_id,
             "requestId": request_id,
         })),
     )
@@ -40,6 +43,7 @@ mod tests {
         let v: serde_json::Value = serde_json::from_slice(&bytes).expect("json");
         assert_eq!(v["code"], "INTERNAL");
         assert!(v["requestId"].as_str().unwrap().len() >= 32);
+        assert!(v["error_id"].as_str().unwrap().starts_with("err_"));
         let dumped = bytes.to_vec();
         let text = String::from_utf8(dumped).unwrap();
         assert!(!text.contains("secret_table"));

@@ -115,7 +115,9 @@ pub fn normalize_text(s: &str) -> String {
         if looks_like_id_token(raw) {
             out.push_str("<id> ");
         } else if raw.chars().filter(|c| c.is_ascii_digit()).count() >= 5
-            && raw.chars().all(|c| c.is_ascii_digit() || matches!(c, ',' | '.' | ':' | '-' | '/'))
+            && raw
+                .chars()
+                .all(|c| c.is_ascii_digit() || matches!(c, ',' | '.' | ':' | '-' | '/'))
         {
             out.push_str("<n> ");
         } else {
@@ -135,7 +137,10 @@ pub fn normalize_text(s: &str) -> String {
 /// then fragmented into a separate group per distinct second line, and the
 /// stored message lost its line breaks for whoever read the dashboard.
 pub fn redact_secrets(s: &str) -> String {
-    s.split('\n').map(redact_line).collect::<Vec<_>>().join("\n")
+    s.split('\n')
+        .map(redact_line)
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn redact_line(s: &str) -> String {
@@ -152,7 +157,9 @@ fn redact_line(s: &str) -> String {
     for tok in out.split_whitespace() {
         if tok.starts_with("eyJ") && tok.matches('.').count() >= 2 && tok.len() > 40 {
             cleaned.push_str("[REDACTED_JWT]");
-        } else if (tok.starts_with("sk_") || tok.starts_with("pk_") || tok.starts_with("ak_")) && tok.len() > 12 {
+        } else if (tok.starts_with("sk_") || tok.starts_with("pk_") || tok.starts_with("ak_"))
+            && tok.len() > 12
+        {
             cleaned.push_str("[REDACTED_KEY]");
         } else if tok.len() == 64 && tok.chars().all(|c| c.is_ascii_hexdigit()) {
             cleaned.push_str("[REDACTED_HEX]");
@@ -174,7 +181,12 @@ fn stack_frame_key(stack: Option<&str>) -> String {
             continue;
         }
         // Prefer frames that look like code locations.
-        if t.contains("at ") || t.contains(".rs:") || t.contains(".ts:") || t.contains(".tsx:") || t.contains('/') {
+        if t.contains("at ")
+            || t.contains(".rs:")
+            || t.contains(".ts:")
+            || t.contains(".tsx:")
+            || t.contains('/')
+        {
             return normalize_text(t);
         }
     }
@@ -198,7 +210,10 @@ pub fn compute_fingerprint(payload: &NewErrorPayload) -> String {
     let frame = stack_frame_key(payload.stack_trace.as_deref());
     let kind = payload_kind(payload);
     let method = payload.method.as_deref().unwrap_or("").to_ascii_uppercase();
-    let status = payload.status_code.map(|c| c.to_string()).unwrap_or_default();
+    let status = payload
+        .status_code
+        .map(|c| c.to_string())
+        .unwrap_or_default();
     let raw = format!(
         "{}|{}|{}|{}|{}|{}|{}|{}",
         payload.service, payload.level, method, status, endpoint, kind, msg, frame
@@ -213,7 +228,11 @@ fn alert_worthy(payload: &NewErrorPayload) -> bool {
     if matches!(level, "CRITICAL" | "FATAL") {
         return true;
     }
-    if payload.endpoint.as_deref().is_some_and(|e| e.starts_with("security://")) {
+    if payload
+        .endpoint
+        .as_deref()
+        .is_some_and(|e| e.starts_with("security://"))
+    {
         return matches!(level, "ERROR" | "CRITICAL" | "FATAL");
     }
     false
@@ -225,18 +244,26 @@ fn spike_worthy(occurrences: i32) -> bool {
 
 /// Best-effort webhook when `TELEMETRY_ALERT_WEBHOOK_URL` is set (Discord/Slack-compatible JSON).
 async fn maybe_fire_alert(payload: &NewErrorPayload, recorded: RecordedError, reason: &str) {
-    let Ok(url) = std::env::var("TELEMETRY_ALERT_WEBHOOK_URL") else {
-        return;
-    };
-    let url = url.trim().to_string();
-    if url.is_empty() {
+    let webhook = std::env::var("TELEMETRY_ALERT_WEBHOOK_URL")
+        .ok()
+        .filter(|v| !v.trim().is_empty());
+    let telegram_token = std::env::var("TELEGRAM_BOT_TOKEN")
+        .ok()
+        .filter(|v| !v.trim().is_empty());
+    let telegram_chat = std::env::var("TELEGRAM_CHAT_ID")
+        .ok()
+        .filter(|v| !v.trim().is_empty());
+    if webhook.is_none() && (telegram_token.is_none() || telegram_chat.is_none()) {
         return;
     }
 
     let title = if recorded.is_new {
         format!("NEW {} ({reason})", payload.level)
     } else {
-        format!("SPIKE {} x{} ({reason})", payload.level, recorded.occurrences)
+        format!(
+            "SPIKE {} x{} ({reason})",
+            payload.level, recorded.occurrences
+        )
     };
     let body = serde_json::json!({
         "content": format!(
@@ -261,6 +288,10 @@ async fn maybe_fire_alert(payload: &NewErrorPayload, recorded: RecordedError, re
         }]
     });
 
+    let alert_text = body["content"]
+        .as_str()
+        .unwrap_or("SatsPay alert")
+        .to_owned();
     tokio::spawn(async move {
         let client = match reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(5))
@@ -272,20 +303,50 @@ async fn maybe_fire_alert(payload: &NewErrorPayload, recorded: RecordedError, re
                 return;
             }
         };
-        if let Err(e) = client.post(&url).json(&body).send().await {
-            tracing::warn!(error = %e, "telemetry alert webhook failed");
+        if let Some(url) = webhook {
+            match client.post(url).json(&body).send().await {
+                Ok(response) if !response.status().is_success() => {
+                    tracing::warn!(status = %response.status(), "telemetry alert webhook rejected")
+                }
+                Err(_) => tracing::warn!("telemetry alert webhook failed"),
+                _ => {}
+            }
+        }
+        if let (Some(token), Some(chat_id)) = (telegram_token, telegram_chat) {
+            if !post_telegram(
+                &client,
+                "https://api.telegram.org",
+                &token,
+                &chat_id,
+                &alert_text,
+            )
+            .await
+            {
+                tracing::warn!("telegram alert delivery failed");
+            }
         }
     });
 }
 
 /// Records a new error or increments the occurrences count if fingerprint matches an open error.
-pub async fn record_error(pool: &PgPool, payload: NewErrorPayload) -> Result<RecordedError, sqlx::Error> {
+pub async fn record_error(
+    pool: &PgPool,
+    payload: NewErrorPayload,
+) -> Result<RecordedError, sqlx::Error> {
     let mut payload = payload;
     payload.message = redact_secrets(&payload.message);
     if let Some(stack) = payload.stack_trace.take() {
         payload.stack_trace = Some(redact_secrets(&stack));
     }
     let fingerprint = compute_fingerprint(&payload);
+    // Serialize matching fingerprints across API and worker processes. Without
+    // this lock, simultaneous first occurrences can both miss UPDATE and each
+    // INSERT a separate open group.
+    let mut tx = pool.begin().await?;
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtext($1))")
+        .bind(&fingerprint)
+        .execute(&mut *tx)
+        .await?;
 
     let existing = sqlx::query(
         "UPDATE system_error_logs
@@ -299,7 +360,7 @@ pub async fn record_error(pool: &PgPool, payload: NewErrorPayload) -> Result<Rec
     .bind(&payload.stack_trace)
     .bind(&payload.request_payload)
     .bind(&fingerprint)
-    .fetch_optional(pool)
+    .fetch_optional(&mut *tx)
     .await?;
 
     if let Some(row) = existing {
@@ -308,6 +369,7 @@ pub async fn record_error(pool: &PgPool, payload: NewErrorPayload) -> Result<Rec
             is_new: false,
             occurrences: row.get("occurrences_count"),
         };
+        tx.commit().await?;
         if spike_worthy(recorded.occurrences) && alert_worthy(&payload) {
             maybe_fire_alert(&payload, recorded, "spike").await;
         }
@@ -331,11 +393,22 @@ pub async fn record_error(pool: &PgPool, payload: NewErrorPayload) -> Result<Rec
     .bind(&payload.method)
     .bind(payload.status_code)
     .bind(payload.user_id)
-    .bind(payload.ip_address.as_deref().map(|ip| crate::privacy::store_ip(None, ip)))
+    .bind(
+        payload
+            .ip_address
+            .as_deref()
+            .map(|ip| crate::privacy::store_ip(None, ip)),
+    )
     .bind(&payload.request_payload)
-    .bind(payload.user_agent.as_deref().map(|ua| ua.chars().take(80).collect::<String>()))
-    .fetch_one(pool)
+    .bind(
+        payload
+            .user_agent
+            .as_deref()
+            .map(|ua| ua.chars().take(80).collect::<String>()),
+    )
+    .fetch_one(&mut *tx)
     .await?;
+    tx.commit().await?;
 
     let recorded = RecordedError {
         id,
@@ -420,10 +493,12 @@ pub async fn list_errors(
 
 /// Marks an error as resolved.
 pub async fn resolve_error(pool: &PgPool, id: Uuid) -> Result<(), sqlx::Error> {
-    sqlx::query("UPDATE system_error_logs SET status = 'RESOLVED', resolved_at = NOW() WHERE id = $1")
-        .bind(id)
-        .execute(pool)
-        .await?;
+    sqlx::query(
+        "UPDATE system_error_logs SET status = 'RESOLVED', resolved_at = NOW() WHERE id = $1",
+    )
+    .bind(id)
+    .execute(pool)
+    .await?;
     Ok(())
 }
 
@@ -432,10 +507,12 @@ pub async fn batch_resolve_errors(pool: &PgPool, ids: &[Uuid]) -> Result<u64, sq
     if ids.is_empty() {
         return Ok(0);
     }
-    let res = sqlx::query("UPDATE system_error_logs SET status = 'RESOLVED', resolved_at = NOW() WHERE id = ANY($1)")
-        .bind(ids)
-        .execute(pool)
-        .await?;
+    let res = sqlx::query(
+        "UPDATE system_error_logs SET status = 'RESOLVED', resolved_at = NOW() WHERE id = ANY($1)",
+    )
+    .bind(ids)
+    .execute(pool)
+    .await?;
     Ok(res.rows_affected())
 }
 
@@ -506,6 +583,124 @@ pub async fn record_worker_error(
     }
 }
 
+pub async fn resolve_worker_alert(pool: &PgPool, task_name: &str) -> Result<bool, sqlx::Error> {
+    let endpoint = format!("task://worker/{task_name}");
+    let closed: Vec<Uuid> = sqlx::query_scalar(
+        "UPDATE system_error_logs SET status = 'RESOLVED', resolved_at = now() \
+         WHERE service = 'worker' AND endpoint = $1 AND status IN ('OPEN', 'INVESTIGATING') RETURNING id",
+    ).bind(endpoint).fetch_all(pool).await?;
+    if !closed.is_empty() {
+        send_telegram_notice(&format!("RECOVERED worker {task_name}")).await;
+    }
+    Ok(!closed.is_empty())
+}
+
+pub async fn send_telegram_notice(message: &str) {
+    let (Ok(token), Ok(chat_id)) = (
+        std::env::var("TELEGRAM_BOT_TOKEN"),
+        std::env::var("TELEGRAM_CHAT_ID"),
+    ) else {
+        return;
+    };
+    if token.trim().is_empty() || chat_id.trim().is_empty() {
+        return;
+    }
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(5))
+        .build();
+    let Ok(client) = client else {
+        return;
+    };
+    if !post_telegram(
+        &client,
+        "https://api.telegram.org",
+        &token,
+        &chat_id,
+        message,
+    )
+    .await
+    {
+        tracing::warn!("telegram recovery notice failed");
+    }
+}
+
+async fn post_telegram(
+    client: &reqwest::Client,
+    base: &str,
+    token: &str,
+    chat_id: &str,
+    message: &str,
+) -> bool {
+    // The token appears in the Bot API path. Never log the URL or transport error.
+    let url = format!("{base}/bot{token}/sendMessage");
+    let body = serde_json::json!({"chat_id": chat_id, "text": message});
+    client
+        .post(url)
+        .json(&body)
+        .send()
+        .await
+        .is_ok_and(|response| response.status().is_success())
+}
+
+/// Raw, non-PII failure events for a rolling 5xx/min alert and deploy correlation.
+pub async fn record_http_failure(
+    pool: &PgPool,
+    module: &str,
+    version: &str,
+    status: i32,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "INSERT INTO http_failure_events (module, app_version, status_code) VALUES ($1, $2, $3)",
+    )
+    .bind(module)
+    .bind(version)
+    .bind(status)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+fn prometheus_label(value: &str) -> String {
+    value
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('\n', "\\n")
+}
+
+/// Additional gauges from the shared database. No user/address/transaction labels.
+pub async fn render_operational_metrics(pool: &PgPool) -> Result<String, sqlx::Error> {
+    let mut output = String::from("\n# TYPE satspay_http_5xx_last_minute gauge\n");
+    let failures = sqlx::query("SELECT module, app_version, count(*) AS total FROM http_failure_events WHERE occurred_at >= now() - interval '1 minute' GROUP BY module, app_version")
+        .fetch_all(pool).await?;
+    for row in failures {
+        let module: String = row.get("module");
+        let version: String = row.get("app_version");
+        let total: i64 = row.get("total");
+        output.push_str(&format!(
+            "satspay_http_5xx_last_minute{{module=\"{}\",version=\"{}\"}} {}\n",
+            prometheus_label(&module),
+            prometheus_label(&version),
+            total
+        ));
+    }
+    let available: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM deposit_address_pool WHERE coin = 'SOL' AND claimed_at IS NULL",
+    )
+    .fetch_one(pool)
+    .await?;
+    output.push_str(&format!(
+        "# TYPE satspay_sol_deposit_pool_available gauge\nsatspay_sol_deposit_pool_available {}\n",
+        available
+    ));
+    let stuck: i64 = sqlx::query_scalar("SELECT count(*) FROM internal_jobs WHERE job_type = 'withdrawal_broadcast' AND ((status = 'RUNNING' AND locked_at < now() - interval '5 minutes') OR (status = 'PENDING' AND run_after < now() - interval '5 minutes') OR status = 'FAILED')")
+        .fetch_one(pool).await?;
+    output.push_str(&format!(
+        "# TYPE satspay_withdrawal_jobs_stalled gauge\nsatspay_withdrawal_jobs_stalled {}\n",
+        stuck
+    ));
+    Ok(output)
+}
+
 /// Marks an error as ignored.
 pub async fn ignore_error(pool: &PgPool, id: Uuid) -> Result<(), sqlx::Error> {
     sqlx::query("UPDATE system_error_logs SET status = 'IGNORED' WHERE id = $1")
@@ -525,40 +720,47 @@ pub async fn clear_resolved_errors(pool: &PgPool) -> Result<u64, sqlx::Error> {
 
 /// Returns summary overview metrics for the Admin Telemetry dashboard.
 pub async fn get_telemetry_overview(pool: &PgPool) -> Result<TelemetryOverview, sqlx::Error> {
-    let open_errors: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM system_error_logs WHERE status IN ('OPEN', 'INVESTIGATING')")
-        .fetch_one(pool)
-        .await
-        .unwrap_or(0);
+    let open_errors: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM system_error_logs WHERE status IN ('OPEN', 'INVESTIGATING')",
+    )
+    .fetch_one(pool)
+    .await
+    .unwrap_or(0);
 
     let critical_errors: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM system_error_logs WHERE level IN ('CRITICAL', 'FATAL') AND status = 'OPEN'")
         .fetch_one(pool)
         .await
         .unwrap_or(0);
 
-    let errors_24h: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM system_error_logs WHERE last_seen_at >= NOW() - INTERVAL '24 hours'")
-        .fetch_one(pool)
-        .await
-        .unwrap_or(0);
+    let errors_24h: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM system_error_logs WHERE last_seen_at >= NOW() - INTERVAL '24 hours'",
+    )
+    .fetch_one(pool)
+    .await
+    .unwrap_or(0);
 
-    let total_users: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users WHERE email <> 'system@bitcosats.internal'")
-        .fetch_one(pool)
-        .await
-        .unwrap_or(0);
+    let total_users: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM users WHERE email <> 'system@bitcosats.internal'")
+            .fetch_one(pool)
+            .await
+            .unwrap_or(0);
 
-    let total_wallets: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM wallets WHERE kind = 'PERSONAL'")
-        .fetch_one(pool)
-        .await
-        .unwrap_or(0);
+    let total_wallets: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM wallets WHERE kind = 'PERSONAL'")
+            .fetch_one(pool)
+            .await
+            .unwrap_or(0);
 
     let total_merchants: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users WHERE merchant_status != 'NONE' AND email <> 'system@bitcosats.internal'")
         .fetch_one(pool)
         .await
         .unwrap_or(0);
 
-    let pending_withdrawals: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM withdrawals WHERE status = 'PENDING'")
-        .fetch_one(pool)
-        .await
-        .unwrap_or(0);
+    let pending_withdrawals: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM withdrawals WHERE status = 'PENDING'")
+            .fetch_one(pool)
+            .await
+            .unwrap_or(0);
 
     let active_conns = (pool.size() as i32 - pool.num_idle() as i32).max(1);
 
@@ -602,30 +804,35 @@ pub struct SystemMetricsSnapshot {
 
 /// Captures a system telemetry metrics snapshot and stores it in `system_metrics_snapshots`.
 pub async fn capture_metrics_snapshot(pool: &PgPool) -> Result<Uuid, sqlx::Error> {
-    let total_users: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users WHERE email <> 'system@bitcosats.internal'")
-        .fetch_one(pool)
-        .await
-        .unwrap_or(0);
+    let total_users: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM users WHERE email <> 'system@bitcosats.internal'")
+            .fetch_one(pool)
+            .await
+            .unwrap_or(0);
 
-    let total_wallets: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM wallets WHERE kind = 'PERSONAL'")
-        .fetch_one(pool)
-        .await
-        .unwrap_or(0);
+    let total_wallets: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM wallets WHERE kind = 'PERSONAL'")
+            .fetch_one(pool)
+            .await
+            .unwrap_or(0);
 
     let total_merchants: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users WHERE merchant_status != 'NONE' AND email <> 'system@bitcosats.internal'")
         .fetch_one(pool)
         .await
         .unwrap_or(0);
 
-    let pending_withdrawals: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM withdrawals WHERE status = 'PENDING'")
-        .fetch_one(pool)
-        .await
-        .unwrap_or(0);
+    let pending_withdrawals: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM withdrawals WHERE status = 'PENDING'")
+            .fetch_one(pool)
+            .await
+            .unwrap_or(0);
 
-    let errors_1h: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM system_error_logs WHERE last_seen_at >= NOW() - INTERVAL '1 hour'")
-        .fetch_one(pool)
-        .await
-        .unwrap_or(0);
+    let errors_1h: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM system_error_logs WHERE last_seen_at >= NOW() - INTERVAL '1 hour'",
+    )
+    .fetch_one(pool)
+    .await
+    .unwrap_or(0);
 
     let active_conns = (pool.size() as i32 - pool.num_idle() as i32).max(1);
     let rpm = (25 + (active_conns * 4)).clamp(10, 500);
@@ -644,7 +851,7 @@ pub async fn capture_metrics_snapshot(pool: &PgPool) -> Result<Uuid, sqlx::Error
             total_users, total_wallets, total_merchants, pending_withdrawals,
             volume_usd_24h, captured_at
         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
-        RETURNING id"
+        RETURNING id",
     )
     .bind(rpm)
     .bind(avg_latency)
@@ -663,7 +870,10 @@ pub async fn capture_metrics_snapshot(pool: &PgPool) -> Result<Uuid, sqlx::Error
 }
 
 /// Fetches recent telemetry metrics snapshots for charts.
-pub async fn get_metrics_history(pool: &PgPool, hours: i64) -> Result<Vec<SystemMetricsSnapshot>, sqlx::Error> {
+pub async fn get_metrics_history(
+    pool: &PgPool,
+    hours: i64,
+) -> Result<Vec<SystemMetricsSnapshot>, sqlx::Error> {
     let clamped_hours = hours.clamp(1, 168); // 1h to 7 days
     let rows = sqlx::query(
         "SELECT id, rpm, avg_latency_ms, p95_latency_ms, error_rate_pct, active_db_connections,
@@ -672,7 +882,7 @@ pub async fn get_metrics_history(pool: &PgPool, hours: i64) -> Result<Vec<System
          FROM system_metrics_snapshots
          WHERE captured_at >= NOW() - ($1 * INTERVAL '1 hour')
          ORDER BY captured_at ASC
-         LIMIT 300"
+         LIMIT 300",
     )
     .bind(clamped_hours)
     .fetch_all(pool)
@@ -853,5 +1063,31 @@ mod redaction_line_tests {
         assert!(!out.contains("tokensecret"), "{out}");
         assert!(out.contains("[REDACTED_HEX]"), "{out}");
         assert_eq!(out.lines().count(), 3, "{out}");
+    }
+}
+
+#[cfg(test)]
+mod telegram_tests {
+    use super::*;
+    use wiremock::{
+        matchers::{body_json, method, path},
+        Mock, MockServer, ResponseTemplate,
+    };
+
+    #[tokio::test]
+    async fn posts_message_to_expected_chat_and_reports_rejection() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/bottest-token/sendMessage"))
+            .and(body_json(
+                serde_json::json!({"chat_id":"123", "text":"incident"}),
+            ))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"ok": true})))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let client = reqwest::Client::new();
+        assert!(post_telegram(&client, &server.uri(), "test-token", "123", "incident").await);
+        assert!(!post_telegram(&client, &server.uri(), "test-token", "123", "different").await);
     }
 }

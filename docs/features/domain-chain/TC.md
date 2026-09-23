@@ -30,6 +30,11 @@
 
 ## Critérios de aceite
 
+- [ ] DOGE e DGB saltam provedores após três falhas, retomam após 60 s e não tratam HTML 200 como sucesso.
+- [ ] Blockbook DOGE credenciado detecta saída destinada ao endereço correto, sem repassar chave em URL/log.
+- [ ] ZER recusa RPC público de assinatura; `zerod` local assina enquanto leitura e broadcast usam provedor público.
+- [ ] Falha de detecção não impede a tentativa de sweep, mas gera alerta persistente após três ciclos.
+
 - [ ] Rotas documentadas batem com `App.tsx`
 - [ ] APIs documentadas batem com chamadas `api()` / handlers Axum
 - [ ] Sem regressão de hooks (Rules of Hooks)

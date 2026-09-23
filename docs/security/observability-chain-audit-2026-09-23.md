@@ -1,0 +1,40 @@
+# Relatório bruto — observabilidade e resiliência de chain (2026-09-23)
+
+## Ambiente e limites
+
+- Branch: `security/adr-0012-custody`. API de desenvolvimento em `127.0.0.1:4599`, com chain stub e Postgres 16 descartável em `127.0.0.1:55439`. Nenhuma carga ou probe DAST foi aplicada à produção.
+- O container `kali-pentest:latest` tem `curl` e Python; não tem ZAP, nuclei nem nmap. Os probes abaixo foram direcionados. Isso não é um pentest completo.
+- A limpeza ficou restrita aos itens 1 e 2. A branch já continha uma limpeza ampla e correções de contrato; não havia evidência suficiente para excluir outros arquivos de produção.
+
+## Achados e correções
+
+| ID | Severidade | Achado bruto | Correção / evidência |
+|---|---|---|---|
+| O1 | Alta | O worker só registrava em log falhas de detecção e sweep; todos os provedores DOGE/DGB poderiam falhar sem notificação. | Falha de todos os provedores ou sweep por três ciclos gera grupo crítico por moeda; sucesso resolve. |
+| O2 | Alta | O pool SOL vazio, saques presos e divergência de crédito no ledger não geravam alerta operacional específico. | Monitor periódico consulta estado sem alterar saldos; métricas e alerta Telegram com recuperação. |
+| O3 | Média | Dois erros simultâneos com o mesmo fingerprint podiam criar dois grupos abertos. | Advisory lock transacional por fingerprint; teste concorrente confirmou um grupo com duas ocorrências. |
+| O4 | Média | O histórico agrupado não permite calcular 5xx/min nem ligar erros ao commit. | Eventos mínimos de 5xx por sete dias, métrica por módulo/versão e alerta a partir de cinco por minuto. |
+| C1 | Alta | Falha de indexadores DOGE/DGB podia gerar dezenas de tentativas inúteis por carteira. | Circuit breaker compartilhado por processo, três falhas, 60 s de espera, uma sondagem e teste de recuperação. |
+| C2 | Alta | Um `ZER_RPC_URL` público receberia WIF em `signrawtransaction`. | Somente endereço local/privado aceito para signer; consultas/broadcast continuam públicos. Teste rejeita IP/domínio público. |
+| C3 | Média | O client ignorava erros se a mensagem apenas mencionasse um domínio de analytics. | O filtro verifica o host do script de origem; teste cobre domínio real e domínio semelhante malicioso. |
+| C4 | Alta | O fallback SoChain para DOGE retornava lista vazia após qualquer HTTP 200, sem ler transações; isso mascarava a falha dos provedores anteriores como ausência de depósitos. | Removido do caminho DOGE e apagada a função sem uso. O Blockbook com chave é a reserva funcional; sem chave, a falha total agora é visível ao alerta. |
+| C5 | Alta | Falha HTTP/JSON do explorador ZER podia incluir URL com chave de API no texto do erro. | Mensagem de erro agora contém só o tipo da falha ou status HTTP, sem URL nem resposta de transporte. |
+
+## Testes executados
+
+- Rust `chain --lib`: 65 testes passaram após as correções iniciais; o teste adicional de segredo ZER passou isoladamente (total atual: 66). `worker`: 2 testes de binário e 1 teste SQLx passaram, incluindo alerta e recuperação no Postgres. `db` SQLx novo: 3 testes passaram. Suítes completas `db` e `api-http` contra Postgres descartável: passaram, com testes ignorados já existentes.
+- Client: `npm run test:unit` → 120 arquivos, 703 testes passaram; testes direcionados posteriores de erro/contrato → 29 passaram. `npm run build` passou; Vite avisou sobre um chunk acima de 800 kB.
+- Gate de lógica do client (`npm run test:logic`): 34 arquivos, 251 testes passaram; 100% de linhas e 95,57% de branches no subconjunto configurado. O jsdom emitiu aviso de navegação não implementada, sem falha de teste.
+- Kali local: 8/8 probes passaram (`healthz`, Prometheus, ausência de segredos nas métricas, auth em wallet/admin, JSON inválido com `{error,code}`, CORS e sanitização de request ID).
+- k6 local: 34.636 requisições em 40 s, pico de 100 VUs, 0% falhas, ~866 req/s, p95 2,89 ms. Rotas leves com chain stub; o número não estima capacidade de produção, saques nem latência de provedores externos.
+- Gitleaks: 42 commits, nenhum segredo detectado; scan do diff preparado (127,67 KB) também não encontrou segredo. Um scan irrestrito do diretório de trabalho percorreu 4,22 GB, inclusive artefatos de build, e gerou 76 achados ainda não triados; ele não serve como gate deste commit. `cargo audit --deny warnings`: passou com os avisos aceitos pelo projeto. Semgrep local: 22 `WARNING` já existentes, zero `ERROR`; CodeQL JS com banco recriado: 4 achados `js/xss-through-dom` em CSS do SDK com valores derivados apenas de constantes/enum. Os cinco alertas anteriores de substring de URL no filtro de telemetria desapareceram.
+- Cobertura de chain: gate antigo abrangendo `registry.rs` (orquestração/env) e `types.rs` (trait) mediu 84,62% e falhou; o núcleo puro, incluindo o novo circuit breaker, mediu 95,55% de linhas com exclusões documentadas no CI. A suíte completa de `api-http` mediu 82,59% de linhas (6.260 linhas instrumentadas, 1.090 não cobertas); `swap.rs` ficou em 60,55% e `withdrawals.rs` em 56,07%. O gate da API permanece informativo; o objetivo de 90% exige trabalho adicional fora dos itens 1/2. Nenhuma alegação de 100% global.
+- O gate `db --lib --tests --fail-under-lines 90` passou com 90,17% de linhas (8.996 instrumentadas, 884 não cobertas) após o teste de resolução de alerta. A medição anterior, antes desse teste, era 89,94%.
+- Compose validou com variáveis fictícias; a sintaxe do script de deploy passou. Não há `DEPLOY_SSH_KEY` nem `DEPLOY_SSH_PASSWORD` no ambiente, mas há uma chave `bitcosats-deploy` carregada no agente SSH e o host está no `known_hosts`; `--check-auth` passou. Nenhum deploy foi executado até esta etapa.
+- Inspeção remota sem mostrar valores confirmou que `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `ZER_RPC_URL` e `DOGE_BLOCKBOOK_API_KEY` ainda não estão configuradas em `/root/bitcosats/.env` na VM. A entrega de alerta Telegram, assinatura ZER e reserva DOGE não podem ser validadas no deploy enquanto estiverem ausentes.
+
+## Pendente de validação operacional
+
+- Confirmar a chave Blockbook DOGE, a resposta real do provedor reserva e a saúde de DGB a partir da VM. Sem isso, o código alerta e evita cascatas, mas não prova que depósitos DOGE/DGB já são detectados em produção.
+- Configurar bot/chat Telegram e verificar entrega de alerta de teste na VM. Configurar RPC `zerod` próprio e executar assinatura sem broadcast durante a sincronização; não enviar WIF a um serviço público.
+- Confirmar métricas, fila e status de erro no commit implantado. Um teste de saque/sweep real requer fundos de teste e janela operacional própria.

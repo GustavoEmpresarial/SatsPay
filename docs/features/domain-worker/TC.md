@@ -30,6 +30,10 @@
 
 ## Critérios de aceite
 
+- [ ] Fila de saque atrasada por cinco minutos ou `FAILED` alerta e não duplica processamento.
+- [ ] Pool SOL vazio e depósito creditado sem lançamento igual no ledger alertam sem alterar saldo.
+- [ ] Três sweeps falhos consecutivos alertam; sucesso posterior resolve o incidente.
+
 - [ ] Rotas documentadas batem com `App.tsx`
 - [ ] APIs documentadas batem com chamadas `api()` / handlers Axum
 - [ ] Sem regressão de hooks (Rules of Hooks)

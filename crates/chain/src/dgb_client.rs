@@ -10,6 +10,7 @@ use crate::types::{ChainError, OnchainTx};
 use crate::utxo_node_rpc::UtxoNodeRpc;
 use serde::Deserialize;
 use serde_json::json;
+use std::hash::{Hash, Hasher};
 
 /// Blockbook explorer used when the Insight hosts are down.
 pub const BLOCKBOOK_FALLBACK: &str = "https://digibyte.atomicwallet.io/api";
@@ -65,39 +66,72 @@ impl DgbClient {
     /// Explicit host list, no built-in fallbacks: tests must never reach a real explorer.
     #[cfg(test)]
     fn with_bases_for_test(bases: Vec<String>) -> Self {
-        Self { http: reqwest::Client::new(), bases, rpc: None }
+        Self {
+            http: reqwest::Client::new(),
+            bases,
+            rpc: None,
+        }
     }
 
     async fn get_json<T: for<'de> Deserialize<'de>>(&self, suffix: &str) -> Result<T, ChainError> {
         let mut errors: Vec<String> = Vec::new();
-        for base in &self.bases {
+        for (index, base) in self.bases.iter().enumerate() {
             let url = format!("{base}{suffix}");
-            match self.http.get(&url).send().await {
-                Ok(resp) if resp.status().is_success() => match resp.json::<T>().await {
-                    Ok(v) => return Ok(v),
-                    Err(e) => errors.push(format!("{url}: bad body ({e})")),
-                },
-                Ok(resp) => errors.push(format!("{url} HTTP {}", resp.status())),
-                Err(e) => errors.push(e.to_string()),
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            base.hash(&mut hasher);
+            // Insight and Blockbook paths may coexist on a host. A 404 for
+            // one dialect must not open the other's circuit.
+            let dialect = if suffix.starts_with("/v2/") {
+                "blockbook"
+            } else {
+                "insight"
+            };
+            let provider = format!("dgb_{dialect}_{index}_{:x}", hasher.finish());
+            match crate::provider_circuit::call(&provider, || async {
+                let resp = self.http.get(&url).send().await.map_err(|e| ChainError {
+                    message: e.to_string(),
+                })?;
+                if !resp.status().is_success() {
+                    return Err(ChainError {
+                        message: format!("HTTP {}", resp.status()),
+                    });
+                }
+                resp.json::<T>().await.map_err(|e| ChainError {
+                    message: format!("bad body: {e}"),
+                })
+            })
+            .await
+            {
+                Ok(v) => return Ok(v),
+                Err(e) => errors.push(format!("{provider}: {}", e.message)),
             }
         }
-        Err(ChainError { message: format!("DGB indexers failed: {}", errors.join("; ")) })
+        Err(ChainError {
+            message: format!("DGB indexers failed: {}", errors.join("; ")),
+        })
     }
 
     pub async fn fetch_deposits(&self, address: &str) -> Result<Vec<OnchainTx>, ChainError> {
         if let Some(rpc) = &self.rpc {
             match rpc.scan_address(address).await {
                 Ok(txs) => return Ok(txs),
-                Err(e) => tracing::warn!(error = %e.message, address, "DGB scantxoutset failed; trying Insight"),
+                Err(e) => {
+                    tracing::warn!(error = %e.message, address, "DGB scantxoutset failed; trying Insight")
+                }
             }
         }
-        if let Ok(utxos) = self.get_json::<Vec<InsightUtxo>>(&format!("/addr/{address}/utxo")).await {
+        if let Ok(utxos) = self
+            .get_json::<Vec<InsightUtxo>>(&format!("/addr/{address}/utxo"))
+            .await
+        {
             return Ok(utxos
                 .into_iter()
                 .map(|u| OnchainTx {
                     tx_hash: u.txid,
                     vout: u.vout,
-                    amount: u.satoshis.unwrap_or_else(|| ((u.amount.unwrap_or(0.0)) * 100_000_000.0).round() as u128),
+                    amount: u.satoshis.unwrap_or_else(|| {
+                        ((u.amount.unwrap_or(0.0)) * 100_000_000.0).round() as u128
+                    }),
                     confirmations: u.confirmations.unwrap_or(0),
                     address: address.to_string(),
                 })
@@ -120,27 +154,51 @@ impl DgbClient {
         if let Some(rpc) = &self.rpc {
             match rpc.get_balance(address).await {
                 Ok(sats) => return Ok(sats),
-                Err(e) => tracing::warn!(error = %e.message, address, "DGB node balance failed; trying Insight"),
+                Err(e) => {
+                    tracing::warn!(error = %e.message, address, "DGB node balance failed; trying Insight")
+                }
             }
         }
         // Insight-style `/addr/{address}`
-        if let Ok(v) = self.get_json::<serde_json::Value>(&format!("/addr/{address}")).await {
-            if let Some(s) = v.get("balanceSat").and_then(|x| x.as_u64()).map(|u| u as u128) {
+        if let Ok(v) = self
+            .get_json::<serde_json::Value>(&format!("/addr/{address}"))
+            .await
+        {
+            if let Some(s) = v
+                .get("balanceSat")
+                .and_then(|x| x.as_u64())
+                .map(|u| u as u128)
+            {
                 return Ok(s);
             }
-            if let Some(s) = v.get("balanceSat").and_then(|x| x.as_str()).and_then(|s| s.parse().ok()) {
+            if let Some(s) = v
+                .get("balanceSat")
+                .and_then(|x| x.as_str())
+                .and_then(|s| s.parse().ok())
+            {
                 return Ok(s);
             }
             if let Some(b) = v.get("balance").and_then(|x| x.as_f64()) {
                 return Ok((b * 100_000_000.0).round() as u128);
             }
-            if let Some(b) = v.get("balance").and_then(|x| x.as_str()).and_then(|s| s.parse::<f64>().ok()) {
+            if let Some(b) = v
+                .get("balance")
+                .and_then(|x| x.as_str())
+                .and_then(|s| s.parse::<f64>().ok())
+            {
                 return Ok((b * 100_000_000.0).round() as u128);
             }
         }
         // Blockbook `/v2/address/{address}` — balance string in sats
-        if let Ok(v) = self.get_json::<serde_json::Value>(&format!("/v2/address/{address}")).await {
-            if let Some(s) = v.get("balance").and_then(|x| x.as_str()).and_then(|s| s.parse().ok()) {
+        if let Ok(v) = self
+            .get_json::<serde_json::Value>(&format!("/v2/address/{address}"))
+            .await
+        {
+            if let Some(s) = v
+                .get("balance")
+                .and_then(|x| x.as_str())
+                .and_then(|s| s.parse().ok())
+            {
                 return Ok(s);
             }
             if let Some(s) = v.get("balance").and_then(|x| x.as_u64()).map(|u| u as u128) {
@@ -158,20 +216,22 @@ impl DgbClient {
 
     async fn cryptoid_balance(&self, address: &str) -> Result<u128, ChainError> {
         let url = format!("https://chainz.cryptoid.info/dgb/api.dws?q=getbalance&a={address}");
-        let resp = self
-            .http
-            .get(&url)
-            .send()
-            .await
-            .map_err(|e| ChainError { message: e.to_string() })?;
+        let resp = self.http.get(&url).send().await.map_err(|e| ChainError {
+            message: e.to_string(),
+        })?;
         if !resp.status().is_success() {
             return Err(ChainError {
                 message: format!("cryptoid HTTP {}", resp.status()),
             });
         }
-        let text = resp.text().await.map_err(|e| ChainError { message: e.to_string() })?;
+        let text = resp.text().await.map_err(|e| ChainError {
+            message: e.to_string(),
+        })?;
         let trimmed = text.trim();
-        if trimmed.is_empty() || trimmed.starts_with('<') || trimmed.to_ascii_lowercase().contains("invalid") {
+        if trimmed.is_empty()
+            || trimmed.starts_with('<')
+            || trimmed.to_ascii_lowercase().contains("invalid")
+        {
             return Err(ChainError {
                 message: format!("cryptoid bad body: {trimmed}"),
             });
@@ -186,16 +246,23 @@ impl DgbClient {
         if let Some(rpc) = &self.rpc {
             match rpc.fetch_utxos(address).await {
                 Ok(utxos) => return Ok(utxos),
-                Err(e) => tracing::warn!(error = %e.message, address, "DGB node UTXOs failed; trying Insight"),
+                Err(e) => {
+                    tracing::warn!(error = %e.message, address, "DGB node UTXOs failed; trying Insight")
+                }
             }
         }
-        match self.get_json::<Vec<InsightUtxo>>(&format!("/addr/{address}/utxo")).await {
+        match self
+            .get_json::<Vec<InsightUtxo>>(&format!("/addr/{address}/utxo"))
+            .await
+        {
             Ok(raw) => Ok(raw
                 .into_iter()
                 .map(|u| Utxo {
                     txid: u.txid,
                     vout: u.vout,
-                    value: u.satoshis.unwrap_or_else(|| ((u.amount.unwrap_or(0.0)) * 100_000_000.0).round() as u128) as u64,
+                    value: u.satoshis.unwrap_or_else(|| {
+                        ((u.amount.unwrap_or(0.0)) * 100_000_000.0).round() as u128
+                    }) as u64,
                     script_pubkey_hex: u.script_pub_key.unwrap_or_default(),
                 })
                 .collect()),
@@ -203,7 +270,9 @@ impl DgbClient {
                 tracing::warn!(error = %insight_err.message, address, "DGB Insight UTXOs failed; trying Blockbook");
                 // Blockbook has no scriptPubKey per UTXO: the caller derives it
                 // from the address (see `fill_missing_scripts`).
-                let book: BlockbookUtxos = self.get_json(&format!("/v2/utxo/{address}?confirmed=true")).await?;
+                let book: BlockbookUtxos = self
+                    .get_json(&format!("/v2/utxo/{address}?confirmed=true"))
+                    .await?;
                 blockbook_to_utxos(book)
             }
         }
@@ -215,13 +284,23 @@ impl DgbClient {
                 return Ok(fee.max(1));
             }
         }
-        let fee_per_kb: f64 = self.get_json("/utils/estimatefee?nbBlocks=2").await.unwrap_or(-1.0);
+        let fee_per_kb: f64 = self
+            .get_json("/utils/estimatefee?nbBlocks=2")
+            .await
+            .unwrap_or(-1.0);
         if fee_per_kb > 0.0 {
             return Ok(((fee_per_kb * 100_000_000.0) / 1000.0).max(1.0) as u64);
         }
         // Blockbook: {"result":"0.0001"} (DGB per kB).
-        if let Ok(v) = self.get_json::<serde_json::Value>("/v2/estimatefee/2").await {
-            if let Some(per_kb) = v.get("result").and_then(|r| r.as_str()).and_then(|s| s.parse::<f64>().ok()) {
+        if let Ok(v) = self
+            .get_json::<serde_json::Value>("/v2/estimatefee/2")
+            .await
+        {
+            if let Some(per_kb) = v
+                .get("result")
+                .and_then(|r| r.as_str())
+                .and_then(|s| s.parse::<f64>().ok())
+            {
                 if per_kb > 0.0 {
                     return Ok(((per_kb * 100_000_000.0) / 1000.0).max(1.0) as u64);
                 }
@@ -235,48 +314,84 @@ impl DgbClient {
         if let Some(rpc) = &self.rpc {
             match rpc.broadcast(raw_hex).await {
                 Ok(txid) => return Ok(txid),
-                Err(e) => tracing::warn!(error = %e.message, "DGB sendrawtransaction failed; trying Insight"),
+                Err(e) => {
+                    tracing::warn!(error = %e.message, "DGB sendrawtransaction failed; trying Insight")
+                }
             }
         }
         let mut errors: Vec<String> = Vec::new();
-        for base in &self.bases {
-            let url = format!("{base}/tx/send");
-            match self.http.post(&url).json(&json!({ "rawtx": raw_hex })).send().await {
-                // Non-JSON 200 (maintenance page, SPA catch-all): record it and
-                // fall through to this host's Blockbook route, then the next
-                // host. Re-sending the same signed tx is idempotent (same txid).
-                Ok(resp) if resp.status().is_success() => match resp.json::<serde_json::Value>().await {
-                    Ok(v) => {
-                        if let Some(txid) = v.get("txid").and_then(|t| t.as_str()) {
-                            return Ok(txid.to_string());
-                        }
-                        if let Some(txid) = v.as_str() {
-                            return Ok(txid.to_string());
-                        }
-                        errors.push(format!("{url}: {v}"));
-                    }
-                    Err(e) => errors.push(format!("{url}: bad body ({e})")),
-                },
-                Ok(resp) => errors.push(format!("{url} HTTP {}", resp.status())),
-                Err(e) => errors.push(e.to_string()),
+        for (index, base) in self.bases.iter().enumerate() {
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            base.hash(&mut hasher);
+            let host = hasher.finish();
+            let insight = format!("dgb_broadcast_insight_{index}_{host:x}");
+            // Re-sending one signed transaction is idempotent (same txid).
+            match crate::provider_circuit::call(&insight, || async {
+                let resp = self
+                    .http
+                    .post(format!("{base}/tx/send"))
+                    .json(&json!({ "rawtx": raw_hex }))
+                    .send()
+                    .await
+                    .map_err(|_| ChainError {
+                        message: "request failed".into(),
+                    })?;
+                if !resp.status().is_success() {
+                    return Err(ChainError {
+                        message: format!("HTTP {}", resp.status()),
+                    });
+                }
+                let v: serde_json::Value = resp.json().await.map_err(|_| ChainError {
+                    message: "bad body".into(),
+                })?;
+                v.get("txid")
+                    .and_then(|t| t.as_str())
+                    .or_else(|| v.as_str())
+                    .map(str::to_owned)
+                    .ok_or_else(|| ChainError {
+                        message: "missing txid".into(),
+                    })
+            })
+            .await
+            {
+                Ok(txid) => return Ok(txid),
+                Err(e) => errors.push(format!("{insight}: {}", e.message)),
             }
-            // Blockbook: POST /v2/sendtx/ with the raw hex as body → {"result": txid}.
-            let bb = format!("{base}/v2/sendtx/");
-            match self.http.post(&bb).body(raw_hex.to_string()).send().await {
-                Ok(resp) if resp.status().is_success() => match resp.json::<serde_json::Value>().await {
-                    Ok(v) => {
-                        if let Some(txid) = v.get("result").and_then(|t| t.as_str()) {
-                            return Ok(txid.to_string());
-                        }
-                        errors.push(format!("{bb}: {v}"));
-                    }
-                    Err(e) => errors.push(format!("{bb}: bad body ({e})")),
-                },
-                Ok(resp) => errors.push(format!("{bb} HTTP {}", resp.status())),
-                Err(e) => errors.push(e.to_string()),
+            let blockbook = format!("dgb_broadcast_blockbook_{index}_{host:x}");
+            match crate::provider_circuit::call(&blockbook, || async {
+                let resp = self
+                    .http
+                    .post(format!("{base}/v2/sendtx/"))
+                    .body(raw_hex.to_string())
+                    .send()
+                    .await
+                    .map_err(|_| ChainError {
+                        message: "request failed".into(),
+                    })?;
+                if !resp.status().is_success() {
+                    return Err(ChainError {
+                        message: format!("HTTP {}", resp.status()),
+                    });
+                }
+                let v: serde_json::Value = resp.json().await.map_err(|_| ChainError {
+                    message: "bad body".into(),
+                })?;
+                v.get("result")
+                    .and_then(|t| t.as_str())
+                    .map(str::to_owned)
+                    .ok_or_else(|| ChainError {
+                        message: "missing txid".into(),
+                    })
+            })
+            .await
+            {
+                Ok(txid) => return Ok(txid),
+                Err(e) => errors.push(format!("{blockbook}: {}", e.message)),
             }
         }
-        Err(ChainError { message: format!("DGB broadcast failed: {}", errors.join("; ")) })
+        Err(ChainError {
+            message: format!("DGB broadcast failed: {}", errors.join("; ")),
+        })
     }
 }
 
@@ -309,9 +424,17 @@ fn blockbook_to_utxos(book: BlockbookUtxos) -> Result<Vec<Utxo>, ChainError> {
     book.into_iter()
         .map(|u| {
             let value = u.value.parse::<u64>().map_err(|_| ChainError {
-                message: format!("DGB Blockbook bad UTXO value {:?} for {}:{}", u.value, u.txid, u.vout),
+                message: format!(
+                    "DGB Blockbook bad UTXO value {:?} for {}:{}",
+                    u.value, u.txid, u.vout
+                ),
             })?;
-            Ok(Utxo { txid: u.txid, vout: u.vout, value, script_pubkey_hex: String::new() })
+            Ok(Utxo {
+                txid: u.txid,
+                vout: u.vout,
+                value,
+                script_pubkey_hex: String::new(),
+            })
         })
         .collect()
 }
@@ -339,15 +462,26 @@ mod tests {
         assert_eq!(utxos[0].vout, 1);
         assert!(utxos[0].script_pubkey_hex.is_empty());
 
-        let bad: BlockbookUtxos = serde_json::from_str(r#"[{"txid":"bb","vout":0,"value":"1.5"}]"#).unwrap();
+        let bad: BlockbookUtxos =
+            serde_json::from_str(r#"[{"txid":"bb","vout":0,"value":"1.5"}]"#).unwrap();
         assert!(blockbook_to_utxos(bad).is_err());
     }
 
     #[test]
     fn fill_missing_scripts_only_touches_empty_ones() {
         let mut utxos = vec![
-            Utxo { txid: "a".into(), vout: 0, value: 1, script_pubkey_hex: String::new() },
-            Utxo { txid: "b".into(), vout: 0, value: 1, script_pubkey_hex: "0014ff".into() },
+            Utxo {
+                txid: "a".into(),
+                vout: 0,
+                value: 1,
+                script_pubkey_hex: String::new(),
+            },
+            Utxo {
+                txid: "b".into(),
+                vout: 0,
+                value: 1,
+                script_pubkey_hex: "0014ff".into(),
+            },
         ];
         fill_missing_scripts(&mut utxos, "0014aa");
         assert_eq!(utxos[0].script_pubkey_hex, "0014aa");
@@ -362,7 +496,9 @@ mod tests {
         let addr = listener.local_addr().unwrap();
         tokio::spawn(async move {
             loop {
-                let Ok((mut sock, _)) = listener.accept().await else { return };
+                let Ok((mut sock, _)) = listener.accept().await else {
+                    return;
+                };
                 let routes = routes.clone();
                 tokio::spawn(async move {
                     let mut buf = Vec::new();
@@ -370,7 +506,9 @@ mod tests {
                     // Read headers, then the declared body, so the client never sees a reset.
                     loop {
                         let n = sock.read(&mut chunk).await.unwrap_or(0);
-                        if n == 0 { break; }
+                        if n == 0 {
+                            break;
+                        }
                         buf.extend_from_slice(&chunk[..n]);
                         if let Some(end) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
                             let head = String::from_utf8_lossy(&buf[..end]).to_ascii_lowercase();
@@ -379,18 +517,28 @@ mod tests {
                                 .find_map(|l| l.strip_prefix("content-length:"))
                                 .and_then(|v| v.trim().parse::<usize>().ok())
                                 .unwrap_or(0);
-                            if buf.len() >= end + 4 + len { break; }
+                            if buf.len() >= end + 4 + len {
+                                break;
+                            }
                         }
                     }
                     let req = String::from_utf8_lossy(&buf);
                     let mut first = req.lines().next().unwrap_or("").split_whitespace();
-                    let key = format!("{} {}", first.next().unwrap_or(""), first.next().unwrap_or(""));
+                    let key = format!(
+                        "{} {}",
+                        first.next().unwrap_or(""),
+                        first.next().unwrap_or("")
+                    );
                     let (status, body) = routes
                         .iter()
                         .find(|(k, _, _)| *k == key)
                         .map(|(_, st, b)| (*st, *b))
                         .unwrap_or((404, "not found"));
-                    let ct = if body.starts_with('<') { "text/html" } else { "application/json" };
+                    let ct = if body.starts_with('<') {
+                        "text/html"
+                    } else {
+                        "application/json"
+                    };
                     let resp = format!(
                         "HTTP/1.1 {status} X\r\ncontent-type: {ct}\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
                         body.len()
@@ -417,7 +565,10 @@ mod tests {
             r#"[{"txid":"ff","vout":2,"value":"5000","confirmations":3}]"#,
         )])
         .await;
-        let utxos = DgbClient::with_bases_for_test(vec![a, b]).fetch_utxos("DADDR").await.unwrap();
+        let utxos = DgbClient::with_bases_for_test(vec![a, b])
+            .fetch_utxos("DADDR")
+            .await
+            .unwrap();
         assert_eq!(utxos.len(), 1);
         assert_eq!(utxos[0].value, 5000);
     }
@@ -430,20 +581,41 @@ mod tests {
             ("POST /api/v2/sendtx/", 200, r#"{"result":"txid-bb"}"#),
         ])
         .await;
-        let txid = DgbClient::with_bases_for_test(vec![host]).broadcast("00ff").await.unwrap();
+        let txid = DgbClient::with_bases_for_test(vec![host])
+            .broadcast("00ff")
+            .await
+            .unwrap();
         assert_eq!(txid, "txid-bb");
     }
 
     #[tokio::test]
     async fn broadcast_moves_to_the_next_host_and_reports_every_failure() {
-        let a = mock_host(vec![("POST /api/tx/send", 200, HTML), ("POST /api/v2/sendtx/", 200, HTML)]).await;
+        let a = mock_host(vec![
+            ("POST /api/tx/send", 200, HTML),
+            ("POST /api/v2/sendtx/", 200, HTML),
+        ])
+        .await;
         let b = mock_host(vec![("POST /api/tx/send", 200, r#"{"txid":"txid-b"}"#)]).await;
-        let txid = DgbClient::with_bases_for_test(vec![a.clone(), b]).broadcast("00ff").await.unwrap();
+        let txid = DgbClient::with_bases_for_test(vec![a.clone(), b])
+            .broadcast("00ff")
+            .await
+            .unwrap();
         assert_eq!(txid, "txid-b");
 
-        let err = DgbClient::with_bases_for_test(vec![a]).broadcast("00ff").await.unwrap_err();
-        assert!(err.message.contains("/tx/send: bad body"), "{}", err.message);
-        assert!(err.message.contains("/v2/sendtx/: bad body"), "{}", err.message);
+        let err = DgbClient::with_bases_for_test(vec![a])
+            .broadcast("00ff")
+            .await
+            .unwrap_err();
+        assert!(
+            err.message.contains("dgb_broadcast_insight_0_") && err.message.contains(": bad body"),
+            "{}",
+            err.message
+        );
+        assert!(
+            err.message.contains("dgb_broadcast_blockbook_0_") && err.message.contains(": bad body"),
+            "{}",
+            err.message
+        );
     }
 
     #[test]

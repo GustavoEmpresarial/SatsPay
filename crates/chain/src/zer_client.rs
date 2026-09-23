@@ -21,10 +21,18 @@ pub struct ZerClient {
 }
 
 impl ZerClient {
-    pub fn with_rpc(explorer_base: &str, explorer_key: Option<&str>, rpc_url: Option<&str>) -> Self {
+    pub fn with_rpc(
+        explorer_base: &str,
+        explorer_key: Option<&str>,
+        rpc_url: Option<&str>,
+    ) -> Self {
         let rpc = rpc_url.and_then(|raw| {
             let raw = raw.trim();
             if raw.is_empty() {
+                return None;
+            }
+            if !trusted_signer_rpc(raw) {
+                tracing::warn!("ZER_RPC_URL must name a local/private signer; public RPC rejected");
                 return None;
             }
             match UtxoNodeRpc::new(raw) {
@@ -38,7 +46,10 @@ impl ZerClient {
         Self {
             http: reqwest::Client::new(),
             explorer_base: explorer_base.trim_end_matches('/').to_string(),
-            explorer_key: explorer_key.map(str::trim).filter(|s| !s.is_empty()).map(str::to_string),
+            explorer_key: explorer_key
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string),
             rpc,
         }
     }
@@ -67,20 +78,26 @@ impl ZerClient {
 
     async fn explorer_json(&self, path: &str) -> Result<Value, ChainError> {
         let url = self.explorer_url(path);
-        let resp = self.http.get(&url).send().await.map_err(|e| ChainError { message: e.to_string() })?;
+        let resp = self.http.get(&url).send().await.map_err(|_| ChainError {
+            message: "ZER explorer request failed".into(),
+        })?;
         if !resp.status().is_success() {
             return Err(ChainError {
-                message: format!("ZER explorer HTTP {} {url}", resp.status()),
+                message: format!("ZER explorer HTTP {}", resp.status()),
             });
         }
-        resp.json().await.map_err(|e| ChainError { message: e.to_string() })
+        resp.json().await.map_err(|_| ChainError {
+            message: "ZER explorer invalid JSON".into(),
+        })
     }
 
     pub async fn fetch_deposits(&self, address: &str) -> Result<Vec<OnchainTx>, ChainError> {
         if let Some(rpc) = &self.rpc {
             match rpc.scan_address(address).await {
                 Ok(txs) => return Ok(txs),
-                Err(e) => tracing::warn!(error = %e.message, address, "ZER scantxoutset failed; trying explorer"),
+                Err(e) => {
+                    tracing::warn!(error = %e.message, address, "ZER scantxoutset failed; trying explorer")
+                }
             }
         }
         self.explorer_txs(address).await
@@ -97,8 +114,13 @@ impl ZerClient {
         Ok(rows
             .into_iter()
             .filter_map(|tx| {
-                let tx_hash = tx.get("txid").or_else(|| tx.get("hash")).and_then(Value::as_str)?.to_string();
-                let confirmations = tx.get("confirmations").and_then(Value::as_u64).unwrap_or(0) as u32;
+                let tx_hash = tx
+                    .get("txid")
+                    .or_else(|| tx.get("hash"))
+                    .and_then(Value::as_str)?
+                    .to_string();
+                let confirmations =
+                    tx.get("confirmations").and_then(Value::as_u64).unwrap_or(0) as u32;
                 let amount = tx
                     .get("amount")
                     .and_then(value_to_sats)
@@ -119,17 +141,26 @@ impl ZerClient {
         if let Some(rpc) = &self.rpc {
             match rpc.get_balance(address).await {
                 Ok(sats) => return Ok(sats),
-                Err(e) => tracing::warn!(error = %e.message, address, "ZER node balance failed; trying explorer"),
+                Err(e) => {
+                    tracing::warn!(error = %e.message, address, "ZER node balance failed; trying explorer")
+                }
             }
         }
-        let v = self.explorer_json(&format!("addressinfo/{address}")).await?;
+        let v = self
+            .explorer_json(&format!("addressinfo/{address}"))
+            .await?;
         if let Some(sats) = v.get("balanceSat").and_then(value_to_sats) {
             return Ok(sats);
         }
         if let Some(sats) = v.get("balance").and_then(value_to_sats) {
             return Ok(sats);
         }
-        Ok(self.fetch_deposits(address).await?.into_iter().map(|d| d.amount).sum())
+        Ok(self
+            .fetch_deposits(address)
+            .await?
+            .into_iter()
+            .map(|d| d.amount)
+            .sum())
     }
 
     pub async fn fetch_utxos(&self, address: &str) -> Result<Vec<Utxo>, ChainError> {
@@ -137,7 +168,9 @@ impl ZerClient {
             match rpc.fetch_utxos(address).await {
                 Ok(u) if !u.is_empty() => return Ok(u),
                 Ok(_) => tracing::warn!(address, "ZER node returned no UTXOs; trying explorer"),
-                Err(e) => tracing::warn!(error = %e.message, address, "ZER node UTXOs failed; trying explorer"),
+                Err(e) => {
+                    tracing::warn!(error = %e.message, address, "ZER node UTXOs failed; trying explorer")
+                }
             }
         }
         self.explorer_utxos(address).await
@@ -164,7 +197,9 @@ impl ZerClient {
                 .unwrap_or_default();
             if let Some(vins) = tx.get("vin").and_then(Value::as_array) {
                 for vin in vins {
-                    let Some(prev) = vin.get("txid").and_then(Value::as_str) else { continue };
+                    let Some(prev) = vin.get("txid").and_then(Value::as_str) else {
+                        continue;
+                    };
                     let vout = vin.get("vout").and_then(Value::as_u64).unwrap_or(0) as u32;
                     spent.insert((prev.to_string(), vout));
                 }
@@ -173,7 +208,9 @@ impl ZerClient {
             if confs == 0 {
                 continue;
             }
-            let Some(vouts) = tx.get("vout").and_then(Value::as_array) else { continue };
+            let Some(vouts) = tx.get("vout").and_then(Value::as_array) else {
+                continue;
+            };
             for (vout, out) in vouts.iter().enumerate() {
                 let spk = out.get("scriptPubKey").cloned().unwrap_or(Value::Null);
                 let owned = spk
@@ -190,7 +227,11 @@ impl ZerClient {
                     .and_then(value_to_sats)
                     .or_else(|| out.get("value").and_then(value_to_sats))
                     .unwrap_or(0);
-                let script_pubkey_hex = spk.get("hex").and_then(Value::as_str).unwrap_or("").to_string();
+                let script_pubkey_hex = spk
+                    .get("hex")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_string();
                 if value_sats == 0 || txid.is_empty() {
                     continue;
                 }
@@ -220,7 +261,9 @@ impl ZerClient {
             let url = format!("{base}/status?q=getInfo");
             match self.http.get(&url).send().await {
                 Ok(resp) if resp.status().is_success() => {
-                    let v: Value = resp.json().await.map_err(|e| ChainError { message: e.to_string() })?;
+                    let v: Value = resp.json().await.map_err(|e| ChainError {
+                        message: e.to_string(),
+                    })?;
                     if let Some(h) = v.pointer("/info/blocks").and_then(Value::as_u64) {
                         return Ok(h);
                     }
@@ -228,7 +271,9 @@ impl ZerClient {
                         return Ok(h);
                     }
                 }
-                Ok(resp) => tracing::warn!(status = %resp.status(), url, "ZER Insight tip HTTP error"),
+                Ok(resp) => {
+                    tracing::warn!(status = %resp.status(), url, "ZER Insight tip HTTP error")
+                }
                 Err(e) => tracing::warn!(error = %e, url, "ZER Insight tip request failed"),
             }
         }
@@ -244,17 +289,27 @@ impl ZerClient {
             let url = format!("{base}/addr/{address}/utxo");
             match self.http.get(&url).send().await {
                 Ok(resp) if resp.status().is_success() => {
-                    let rows: Vec<Value> = resp.json().await.map_err(|e| ChainError { message: e.to_string() })?;
+                    let rows: Vec<Value> = resp.json().await.map_err(|e| ChainError {
+                        message: e.to_string(),
+                    })?;
                     let mut utxos = Vec::new();
                     for u in rows {
-                        let txid = u.get("txid").and_then(Value::as_str).unwrap_or("").to_string();
+                        let txid = u
+                            .get("txid")
+                            .and_then(Value::as_str)
+                            .unwrap_or("")
+                            .to_string();
                         let vout = u.get("vout").and_then(Value::as_u64).unwrap_or(0) as u32;
                         let value = u
                             .get("satoshis")
                             .and_then(value_to_sats)
                             .or_else(|| u.get("amount").and_then(value_to_sats))
                             .unwrap_or(0) as u64;
-                        let script_pubkey_hex = u.get("scriptPubKey").and_then(Value::as_str).unwrap_or("").to_string();
+                        let script_pubkey_hex = u
+                            .get("scriptPubKey")
+                            .and_then(Value::as_str)
+                            .unwrap_or("")
+                            .to_string();
                         if txid.is_empty() || value == 0 || script_pubkey_hex.is_empty() {
                             continue;
                         }
@@ -279,9 +334,17 @@ impl ZerClient {
         })
     }
 
-    pub async fn broadcast_signed(&self, wif: &str, to_address: &str, amount_sats: u64, change_address: &str) -> Result<(String, u64), ChainError> {
+    pub async fn broadcast_signed(
+        &self,
+        wif: &str,
+        to_address: &str,
+        amount_sats: u64,
+        change_address: &str,
+    ) -> Result<(String, u64), ChainError> {
         let rpc = self.rpc.as_ref().ok_or_else(|| ChainError {
-            message: "ZER_RPC_URL required for withdraw (zerod signs; broadcast uses public Insight)".into(),
+            message:
+                "ZER_RPC_URL required for withdraw (zerod signs; broadcast uses public Insight)"
+                    .into(),
         })?;
         // Prefer public Insight UTXOs while private node lags tip.
         let utxos = match self.insight_utxos(change_address).await {
@@ -302,7 +365,10 @@ impl ZerClient {
         let fee: u64 = 10_000; // 0.0001 ZER
         if total < amount_sats.saturating_add(fee) {
             return Err(ChainError {
-                message: format!("ZER insufficient hot funds: have {total} need {}", amount_sats.saturating_add(fee)),
+                message: format!(
+                    "ZER insufficient hot funds: have {total} need {}",
+                    amount_sats.saturating_add(fee)
+                ),
             });
         }
         let change = total - amount_sats - fee;
@@ -315,8 +381,14 @@ impl ZerClient {
         // Force expiry to public tip + 40 blocks (~network requirement).
         let tip = self.public_tip_height().await?;
         let expiry = tip.saturating_add(40);
-        tracing::info!(tip, expiry, "ZER createrawtransaction with public expiryheight");
-        let raw = rpc.create_raw_transaction_ex(&inputs, &outputs, Some(expiry)).await?;
+        tracing::info!(
+            tip,
+            expiry,
+            "ZER createrawtransaction with public expiryheight"
+        );
+        let raw = rpc
+            .create_raw_transaction_ex(&inputs, &outputs, Some(expiry))
+            .await?;
         // Pass prevouts so signing works even when zerod UTXO set is behind tip.
         let signed = match rpc.sign_raw_transaction_legacy(&raw, wif, &utxos).await {
             Ok(hex) => hex,
@@ -334,9 +406,17 @@ impl ZerClient {
         let mut last = String::new();
         for base in PUBLIC_BROADCAST_BASES {
             let url = format!("{base}/tx/send");
-            match self.http.post(&url).json(&json!({ "rawtx": raw_hex })).send().await {
+            match self
+                .http
+                .post(&url)
+                .json(&json!({ "rawtx": raw_hex }))
+                .send()
+                .await
+            {
                 Ok(resp) if resp.status().is_success() => {
-                    let v: Value = resp.json().await.map_err(|e| ChainError { message: e.to_string() })?;
+                    let v: Value = resp.json().await.map_err(|e| ChainError {
+                        message: e.to_string(),
+                    })?;
                     if let Some(txid) = v.get("txid").and_then(Value::as_str) {
                         tracing::info!(txid, url, "ZER broadcasted via public Insight");
                         return Ok(txid.to_string());
@@ -386,6 +466,30 @@ impl ZerClient {
     }
 }
 
+/// ZER's signing RPC receives a WIF. It must never point at a public API.
+fn trusted_signer_rpc(raw: &str) -> bool {
+    let Ok(url) = reqwest::Url::parse(raw) else {
+        return false;
+    };
+    if url.scheme() != "http" && url.scheme() != "https" {
+        return false;
+    }
+    let Some(host) = url.host_str() else {
+        return false;
+    };
+    if host == "localhost" {
+        return true;
+    }
+    if let Ok(ip) = host.parse::<std::net::IpAddr>() {
+        return match ip {
+            std::net::IpAddr::V4(v) => v.is_private() || v.is_loopback(),
+            std::net::IpAddr::V6(v) => v.is_loopback() || v.is_unique_local(),
+        };
+    }
+    // Docker service names contain no dot; public DNS names do.
+    !host.contains('.') && host.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'-')
+}
+
 fn value_to_sats(v: &Value) -> Option<u128> {
     match v {
         Value::Number(n) => {
@@ -395,11 +499,14 @@ fn value_to_sats(v: &Value) -> Option<u128> {
                     return Some(u as u128);
                 }
             }
-            n.as_f64().map(|f| (f * 100_000_000.0).round().max(0.0) as u128)
+            n.as_f64()
+                .map(|f| (f * 100_000_000.0).round().max(0.0) as u128)
         }
         Value::String(s) => {
             if s.contains('.') {
-                s.parse::<f64>().ok().map(|f| (f * 100_000_000.0).round().max(0.0) as u128)
+                s.parse::<f64>()
+                    .ok()
+                    .map(|f| (f * 100_000_000.0).round().max(0.0) as u128)
             } else {
                 s.parse().ok()
             }
@@ -410,4 +517,41 @@ fn value_to_sats(v: &Value) -> Option<u128> {
 
 fn sats_to_coin_str(sats: u64) -> String {
     format!("{}.{:08}", sats / 100_000_000, sats % 100_000_000)
+}
+
+#[cfg(test)]
+mod signer_rpc_tests {
+    use super::*;
+
+    #[test]
+    fn private_signer_addresses_only() {
+        assert!(trusted_signer_rpc("http://127.0.0.1:23832"));
+        assert!(trusted_signer_rpc("http://10.0.0.3:23832"));
+        assert!(trusted_signer_rpc("http://zerod:23832"));
+        assert!(!trusted_signer_rpc("https://public-rpc.example:443"));
+        assert!(!trusted_signer_rpc("https://8.8.8.8:443"));
+    }
+
+    #[tokio::test]
+    async fn explorer_error_does_not_expose_key_in_url() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut request = [0u8; 1024];
+            let n = socket.read(&mut request).await.unwrap();
+            assert!(String::from_utf8_lossy(&request[..n]).contains("secret-test-key"));
+            socket
+                .write_all(b"HTTP/1.1 429 Too Many Requests\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+                .await
+                .unwrap();
+        });
+        let client = ZerClient::with_rpc(&format!("http://{addr}"), Some("secret-test-key"), None);
+        let err = client.explorer_json("addressinfo/test").await.unwrap_err();
+        assert!(err.message.contains("429"));
+        assert!(!err.message.contains("secret-test-key"));
+        assert!(!err.message.contains(&addr.to_string()));
+        server.await.unwrap();
+    }
 }

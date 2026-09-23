@@ -68,8 +68,9 @@ jobs:
           cargo llvm-cov --package events --lib --tests \
             --ignore-filename-regex '(producer|relay)\.rs$' \
             --fail-under-lines 90 --summary-only
+          # Pure chain logic: registry wires clients/env and types declares the async I/O trait.
           cargo llvm-cov --package chain --lib --tests \
-            --ignore-filename-regex '(rpc_client|real_client|bitcore_client|dgb_client|evm_client|sol_client|zer_client|utxo_node_rpc)\.rs$' \
+            --ignore-filename-regex '(rpc_client|real_client|bitcore_client|dgb_client|evm_client|sol_client|zer_client|utxo_node_rpc|registry|types)\.rs$' \
             --fail-under-lines 90 --summary-only
           cargo llvm-cov --package db --lib --tests --fail-under-lines 90 --summary-only
 
@@ -138,6 +139,10 @@ jobs:
         env:
           DATABASE_URL: postgresql://bitcosats:test@127.0.0.1:5432/bitcosats
         run: cargo test -p queue --tests --quiet
+      - name: worker operational monitor sqlx (Postgres)
+        env:
+          DATABASE_URL: postgresql://bitcosats:test@127.0.0.1:5432/bitcosats
+        run: cargo test -p worker --test operational_monitor_sqlx --quiet
       - name: Coverage summary api-http (informational until ≥90)
         env:
           DATABASE_URL: postgresql://bitcosats:test@127.0.0.1:5432/bitcosats

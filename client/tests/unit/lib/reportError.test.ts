@@ -10,7 +10,9 @@ import {
 describe('isExternalNoise', () => {
   it('drops browser-extension and analytics frames', () => {
     expect(isExternalNoise('chrome-extension://abc', 'boom')).toBe(true);
-    expect(isExternalNoise(undefined, 'cloudflareinsights.com beacon')).toBe(true);
+    expect(isExternalNoise('https://cloudflareinsights.com/beacon.js', 'beacon')).toBe(true);
+    expect(isExternalNoise(undefined, 'cloudflareinsights.com beacon')).toBe(false);
+    expect(isExternalNoise('https://cloudflareinsights.com.evil.example/x', 'boom')).toBe(false);
     expect(isExternalNoise('at App.tsx:10', 'TypeError: x is not a function')).toBe(false);
   });
 });
