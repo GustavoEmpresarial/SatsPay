@@ -78,7 +78,7 @@ def deploy(deploy_backend=False):
             compose_path = os.path.join(root_dir, "deploy", "docker", "docker-compose.yml")
             if os.path.exists(compose_path):
                 tar.add(compose_path, arcname="docker-compose.yml")
-            for fname in ["Cargo.toml", "Cargo.lock", "Dockerfile.api-server", "Dockerfile.worker"]:
+            for fname in ["Cargo.toml", "Cargo.lock", "Dockerfile.api-server", "Dockerfile.worker", ".dockerignore"]:
                 fpath = os.path.join(root_dir, fname)
                 if os.path.exists(fpath):
                     tar.add(fpath, arcname=fname)

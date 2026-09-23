@@ -1,7 +1,8 @@
 FROM rust:1-bookworm AS builder
 WORKDIR /build
 RUN apt-get update && apt-get install -y --no-install-recommends cmake build-essential pkg-config libssl-dev libsasl2-dev && rm -rf /var/lib/apt/lists/*
-COPY . .
+COPY Cargo.toml Cargo.lock ./
+COPY crates ./crates
 RUN cargo build --release -p api-server
 
 FROM debian:bookworm-slim

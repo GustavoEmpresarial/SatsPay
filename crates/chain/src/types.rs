@@ -73,6 +73,12 @@ pub trait ChainClient: Send + Sync {
     async fn get_balance(&self, address: &str) -> Result<u128, ChainError>;
     /// Move all spendable funds at `hd_index` to the hot/withdrawal wallet.
     /// `Ok(None)` means nothing to sweep (dust, unsupported, or no key).
+    /// Worker only: keep `target` unclaimed pre-derived deposit addresses for
+    /// coins with no public derivation (SOL). Returns how many were added.
+    async fn top_up_deposit_pool(&self, _target: u32) -> Result<u32, ChainError> {
+        Ok(0)
+    }
+
     async fn sweep_deposit_to_hot(&self, hd_index: u32) -> Result<Option<BroadcastResult>, BroadcastError> {
         let _ = hd_index;
         Ok(None)

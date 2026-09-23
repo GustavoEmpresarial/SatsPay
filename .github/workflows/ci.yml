@@ -154,9 +154,10 @@ jobs:
           cache: npm
           cache-dependency-path: client/package-lock.json
       - name: Install cargo-audit
-        run: cargo install cargo-audit --locked || true
+        run: cargo install cargo-audit --locked
       - name: cargo audit
-        run: cargo audit --deny warnings || cargo audit
+        # Blocking. Accepted advisories live in .cargo/audit.toml (reasons in deny.toml).
+        run: cargo audit --deny warnings
       - name: npm audit (high+)
         working-directory: client
         run: |
@@ -172,6 +173,18 @@ jobs:
           command: check
           arguments: --all-features
 
+  gitleaks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Scan full git history for secrets
+        # Reviewed false positives are pinned by fingerprint in .gitleaksignore.
+        run: |
+          curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v8.24.3/gitleaks_8.24.3_linux_x64.tar.gz | tar -xz gitleaks
+          ./gitleaks git --no-banner --redact --exit-code 1 .
+
   secrets-hygiene:
     runs-on: ubuntu-latest
     steps:
@@ -185,6 +198,16 @@ jobs:
           grep -q 'TURNSTILE_SECRET: \${TURNSTILE_SECRET' deploy/docker/docker-compose.yml
           grep -q 'NODE_ENV: \${NODE_ENV' deploy/docker/docker-compose.yml
           grep -q 'COOKIE_SECURE' deploy/docker/docker-compose.yml
+      - name: api-server env carries no wallet key (ADR 0012)
+        run: |
+          python3 - <<'PY'
+          import re, sys, yaml
+          env = yaml.safe_load(open("deploy/docker/docker-compose.yml"))["services"]["api-server"]["environment"]
+          bad = [k for k in env if re.search(r"MNEMONIC|WIF|PRIVATE_KEY|HOT_WALLET|WALLET_ENCRYPTION", k)]
+          if bad:
+              sys.exit(f"FAIL: api-server receives wallet key vars: {bad}")
+          print(f"ok: {len(env)} api-server vars, none are wallet keys")
+          PY
       - name: Deploy script must not embed an SSH password
         run: |
           # Fails on any non-empty string literal assigned/defaulted as a credential.

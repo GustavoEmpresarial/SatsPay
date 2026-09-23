@@ -4,6 +4,7 @@
 //!
 //! TODO(fase 5+): balance_reconciliation, lend_accrual, worker_heartbeat.
 
+mod deposit_pool;
 mod deposit_watcher;
 mod dex_swap_runner;
 mod invoice_watcher;
@@ -42,15 +43,42 @@ async fn main() {
     db::house::ensure_house_inventory(&pool).await.expect("failed to ensure house inventory");
     db::lend::ensure_lend_reserves(&pool).await.expect("failed to ensure lend reserves");
 
-    let encryption_key = std::env::var("ENCRYPTION_KEY").expect("ENCRYPTION_KEY must be set (64 hex chars)");
+    let encryption_key = crypto::read_env_or_file("ENCRYPTION_KEY")
+        .unwrap_or_else(|e| panic!("{}: {e}", e.code()))
+        .expect("ENCRYPTION_KEY or ENCRYPTION_KEY_FILE must be set (64 hex chars)");
     let secrets = Arc::new(
         crypto::SecretsService::from_hex(&encryption_key).expect("ENCRYPTION_KEY must be 64 hex chars"),
     );
-    if let Some(m) = crypto::bootstrap_hot_mnemonic(&secrets).expect("hot mnemonic bootstrap failed") {
-        std::env::set_var("HOT_MNEMONIC", m);
-    }
 
-    let registry = std::sync::Arc::new(ChainRegistry::from_env(pool.clone()).expect("failed to build chain registry"));
+    // ADR 0012: the worker is the only signer. Wallet `*_ENC` values may be
+    // sealed with a key the api-server never sees (WALLET_ENCRYPTION_KEY);
+    // unset → ENCRYPTION_KEY, as before.
+    let wallet_secrets = match crypto::read_env_or_file("WALLET_ENCRYPTION_KEY").unwrap_or_else(|e| panic!("{}: {e}", e.code())) {
+        Some(hex) => crypto::SecretsService::from_hex(&hex).expect("WALLET_ENCRYPTION_KEY must be 64 hex chars"),
+        None => crypto::SecretsService::from_hex(&encryption_key).expect("ENCRYPTION_KEY must be 64 hex chars"),
+    };
+    let signer = match crypto::bootstrap_signer_secrets(&wallet_secrets) {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::error!(code = e.code(), severity = "FATAL", "{e}");
+            panic!("{}: {e}", e.code());
+        }
+    };
+    let keys = chain::SignerKeys {
+        hot_mnemonic: signer.hot_mnemonic.as_ref().map(|v| v.expose().to_string()),
+        deposit_mnemonic: signer.deposit_mnemonic.as_ref().map(|v| v.expose().to_string()),
+        hot_wallet_key: signer.hot_wallet_key.as_ref().map(|v| v.expose().to_string()),
+    };
+    drop(signer);
+
+    let registry = match ChainRegistry::from_env_with_signer(pool.clone(), keys) {
+        Ok(r) => std::sync::Arc::new(r),
+        Err(e) => {
+            // Carries CHAIN_DEPOSIT_KEY_MISMATCH / HOT_ADDRESS_MISMATCH / CHAIN_CONFIG_* as prefix.
+            tracing::error!(severity = "FATAL", error = %e, "chain registry refused the wallet config");
+            panic!("failed to build chain registry: {e}");
+        }
+    };
     let swapkit = Arc::new(SwapKitClient::from_env());
     let relay = Arc::new(RelayClient::from_env());
     let changenow = Arc::new(ChangeNowClient::from_env());
@@ -233,6 +261,20 @@ async fn main() {
         })
     });
 
+    let pool_target: u32 = std::env::var("DEPOSIT_POOL_TARGET").ok().and_then(|v| v.parse().ok()).unwrap_or(50);
+    let pool_interval = Duration::from_secs(
+        std::env::var("DEPOSIT_POOL_INTERVAL_SECS").ok().and_then(|v| v.parse().ok()).filter(|s| *s > 0).unwrap_or(60),
+    );
+    let topup_pool = pool.clone();
+    let topup_registry = registry.clone();
+    let deposit_pool_task = tokio::spawn(async move {
+        let mut interval = tokio::time::interval(pool_interval);
+        loop {
+            interval.tick().await;
+            deposit_pool::run_once(&topup_pool, &topup_registry, pool_target).await;
+        }
+    });
+
     let metrics_pool = pool.clone();
     let metrics_task = tokio::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_secs(60));
@@ -270,6 +312,7 @@ async fn main() {
         price_task,
         aave_task,
         metrics_task,
-        retain_task
+        retain_task,
+        deposit_pool_task
     );
 }

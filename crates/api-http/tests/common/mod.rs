@@ -87,12 +87,12 @@ pub fn test_state_with_reuse_grace(pool: PgPool, refresh_reuse_grace_secs: i64) 
         auth,
         email,
         pool,
-        chain_registry: Arc::new(ChainRegistry::build("development", true).unwrap()),
+        chain_registry: Arc::new(
+            ChainRegistry::build("development", true)
+                .unwrap()
+                .with_wallet(chain::PublicWalletConfig::from_env(false).expect("public wallet config")),
+        ),
         secrets,
-        hot_mnemonic: std::env::var("HOT_MNEMONIC")
-            .ok()
-            .filter(|s| !s.trim().is_empty())
-            .map(Arc::<str>::from),
         captcha,
         settings: AppSettings {
             faucet_cooldown_minutes: 60,
@@ -275,5 +275,22 @@ pub async fn seed_house_liquidity(pool: &PgPool, coins: &[Coin], amount: u64) {
         .await
         .expect("house credit");
         tx.commit().await.unwrap();
+    }
+}
+
+/// ADR 0012: the api-server only knows public hot addresses. Tests that used
+/// to put a hot mnemonic in env now publish the mainnet addresses it derives.
+#[allow(dead_code)]
+pub fn set_hot_addresses(mnemonic: &str) {
+    for coin in shared::COINS {
+        let addr = chain::hd_wallet::hot_address_from_mnemonic(mnemonic, coin, chain::ChainNetwork::Mainnet).expect("hot address");
+        std::env::set_var(format!("HOT_ADDRESS_{}", coin.as_str()), addr);
+    }
+}
+
+#[allow(dead_code)]
+pub fn clear_hot_addresses() {
+    for coin in shared::COINS {
+        std::env::remove_var(format!("HOT_ADDRESS_{}", coin.as_str()));
     }
 }

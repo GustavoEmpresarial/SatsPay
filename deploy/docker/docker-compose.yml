@@ -65,16 +65,33 @@ services:
       ALLOW_STUB_CHAIN: "false"
       USE_REAL_CHAIN_CLIENTS: "true"
       CHAIN_NETWORK: "mainnet"
-      HOT_WALLET_WIF: ${HOT_WALLET_WIF:-}
-      HOT_WALLET_PRIVATE_KEY: ${HOT_WALLET_PRIVATE_KEY:-}
-      POL_HOT_WALLET_KEY: ${POL_HOT_WALLET_KEY:-}
       EVM_RPC_URL: ${EVM_RPC_URL:-https://polygon-bor-rpc.publicnode.com}
       BSC_RPC_URL: ${BSC_RPC_URL:-https://bsc-rpc.publicnode.com}
-      CHAIN_DEPOSIT_XPUB: ${CHAIN_DEPOSIT_XPUB:-}
-      DEPOSIT_MNEMONIC: ${DEPOSIT_MNEMONIC:-}
-      # Dev: plaintext OK. Production (NODE_ENV=production): use HOT_MNEMONIC_ENC only.
-      HOT_MNEMONIC: ${HOT_MNEMONIC:-}
-      HOT_MNEMONIC_ENC: ${HOT_MNEMONIC_ENC:-}
+      # ADR 0012 — PUBLIC wallet data only in this shared block (api-server sees it).
+      # Generate with: cargo run -q -p worker --example custody_setup
+      # Wallet keys (*_MNEMONIC*, *_WIF*, *_PRIVATE_KEY*) belong in the worker block
+      # below; the api-server refuses to boot in production if it sees any.
+      DEPOSIT_XPUB_BTC: ${DEPOSIT_XPUB_BTC:-}
+      DEPOSIT_XPUB_LTC: ${DEPOSIT_XPUB_LTC:-}
+      DEPOSIT_XPUB_DOGE: ${DEPOSIT_XPUB_DOGE:-}
+      DEPOSIT_XPUB_BCH: ${DEPOSIT_XPUB_BCH:-}
+      DEPOSIT_XPUB_POL: ${DEPOSIT_XPUB_POL:-}
+      DEPOSIT_XPUB_DGB: ${DEPOSIT_XPUB_DGB:-}
+      DEPOSIT_XPUB_USDT: ${DEPOSIT_XPUB_USDT:-}
+      DEPOSIT_XPUB_USDC: ${DEPOSIT_XPUB_USDC:-}
+      DEPOSIT_XPUB_ZER: ${DEPOSIT_XPUB_ZER:-}
+      DEPOSIT_XPUB_PEPE: ${DEPOSIT_XPUB_PEPE:-}
+      HOT_ADDRESS_BTC: ${HOT_ADDRESS_BTC:-}
+      HOT_ADDRESS_LTC: ${HOT_ADDRESS_LTC:-}
+      HOT_ADDRESS_DOGE: ${HOT_ADDRESS_DOGE:-}
+      HOT_ADDRESS_BCH: ${HOT_ADDRESS_BCH:-}
+      HOT_ADDRESS_POL: ${HOT_ADDRESS_POL:-}
+      HOT_ADDRESS_DGB: ${HOT_ADDRESS_DGB:-}
+      HOT_ADDRESS_SOL: ${HOT_ADDRESS_SOL:-}
+      HOT_ADDRESS_USDT: ${HOT_ADDRESS_USDT:-}
+      HOT_ADDRESS_USDC: ${HOT_ADDRESS_USDC:-}
+      HOT_ADDRESS_ZER: ${HOT_ADDRESS_ZER:-}
+      HOT_ADDRESS_PEPE: ${HOT_ADDRESS_PEPE:-}
       SOL_RPC_URL: ${SOL_RPC_URL:-http://62.171.138.114:8899}
       SOLANA_PAY_URL: ${SOLANA_PAY_URL:-http://62.171.138.114:8090/healthz}
       DGB_INSIGHT_API: ${DGB_INSIGHT_API:-https://digiexplorer.info/api}
@@ -154,6 +171,23 @@ services:
       OUTBOX_RELAY_INTERVAL_MS: "1000"
       COINGECKO_API_BASE_URL: "https://api.coingecko.com/api/v3"
       COINGECKO_TIMEOUT_SECS: "10"
+      # ADR 0012 — signer keys: worker ONLY. Production accepts only *_ENC
+      # (sealed with WALLET_ENCRYPTION_KEY, else ENCRYPTION_KEY). The plaintext
+      # names are passed through solely so the worker can refuse them loudly.
+      WALLET_ENCRYPTION_KEY: ${WALLET_ENCRYPTION_KEY:-}
+      DEPOSIT_MNEMONIC_ENC: ${DEPOSIT_MNEMONIC_ENC:-}
+      HOT_MNEMONIC_ENC: ${HOT_MNEMONIC_ENC:-}
+      HOT_WALLET_WIF_ENC: ${HOT_WALLET_WIF_ENC:-}
+      HOT_WALLET_PRIVATE_KEY_ENC: ${HOT_WALLET_PRIVATE_KEY_ENC:-}
+      POL_HOT_WALLET_KEY_ENC: ${POL_HOT_WALLET_KEY_ENC:-}
+      DEPOSIT_MNEMONIC: ${DEPOSIT_MNEMONIC:-}
+      HOT_MNEMONIC: ${HOT_MNEMONIC:-}
+      HOT_WALLET_WIF: ${HOT_WALLET_WIF:-}
+      HOT_WALLET_PRIVATE_KEY: ${HOT_WALLET_PRIVATE_KEY:-}
+      POL_HOT_WALLET_KEY: ${POL_HOT_WALLET_KEY:-}
+      # SOL deposit addresses the keyless api-server hands out (ADR 0012).
+      DEPOSIT_POOL_TARGET: ${DEPOSIT_POOL_TARGET:-50}
+      DEPOSIT_POOL_INTERVAL_SECS: ${DEPOSIT_POOL_INTERVAL_SECS:-60}
       # KAFKA_BOOTSTRAP_SERVERS intentionally unset — outbox_relay stays disabled.
     networks:
       bitcosats-net:

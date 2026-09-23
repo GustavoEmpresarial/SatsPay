@@ -49,9 +49,6 @@ pub struct AppState<R: AuthRepo> {
     pub pool: PgPool,
     pub chain_registry: Arc<ChainRegistry>,
     pub secrets: Arc<SecretsService>,
-    /// Decrypted hot mnemonic held only in process memory (from
-    /// `HOT_MNEMONIC_ENC` in production). Never log or serialize this.
-    pub hot_mnemonic: Option<Arc<str>>,
     pub captcha: Arc<TurnstileVerifier>,
     pub settings: AppSettings,
     pub swapkit: Arc<SwapKitClient>,
@@ -69,7 +66,6 @@ impl<R: AuthRepo> Clone for AppState<R> {
             pool: self.pool.clone(),
             chain_registry: self.chain_registry.clone(),
             secrets: self.secrets.clone(),
-            hot_mnemonic: self.hot_mnemonic.clone(),
             captcha: self.captcha.clone(),
             settings: self.settings.clone(),
             swapkit: self.swapkit.clone(),

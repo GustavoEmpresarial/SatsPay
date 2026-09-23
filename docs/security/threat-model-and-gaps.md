@@ -36,6 +36,7 @@ Este documento descreve a análise de vetores de ataque, as defesas implementada
 | **Envio de E-mail (SMTP)** | ⏸️ `SMTP_ENABLED=false` (compose já aceita `SMTP_*`) | Ligar quando houver provedor com outbound OK + mailbox/`noreply@satspay.pro` |
 | **Feed de Preços** | ✅ CoinGecko integrado | Monitorar limites de rate limit da API |
 | **Backup Postgres (Compose)** | ✅ `scripts/exercise_compose_pg_backup_restore.sh` | CNPG/Barman PITR (`exercise-pitr-restore.sh`) ainda sem cluster/S3 nesta VM |
+| **Custódia de chaves** | ✅ ADR 0012: api-server watch-only (xpub por moeda + `HOT_ADDRESS_*`), chaves só no worker (`*_ENC`), SOL via pool | Migrar `.env` da VM (runbook §0) e rodar `scripts/custody_audit.py` |
 | **Lightning Network** | 📐 Arquitetura e ADR 0011 definidos | Implementar `crates/ln-bridge` na F0/F1 |
 
 ---
@@ -58,3 +59,4 @@ Antes de aceitar depósitos reais de usuários em Mainnet:
 - [ ] 11. **Backup offline da `ENCRYPTION_KEY`** + só então pensar em rotação AES (runbook §2 e §5).
 - [ ] 12. **LUKS / volume cifrado** para Postgres + `.env`.
 - [ ] 13. **iptables k3s 6443/10250** persistente no reboot (se ainda necessário).
+- [ ] 14. **ADR 0012 no `.env` da VM**: `DEPOSIT_XPUB_*`, `HOT_ADDRESS_*`, `*_MNEMONIC_ENC`; nenhuma var de chave no api-server; `custody_audit.py` sem findings.

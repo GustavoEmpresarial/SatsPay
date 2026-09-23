@@ -65,6 +65,7 @@ Bem-vindo à documentação técnica oficial do **BitcoSats**, uma plataforma fi
 - [`decisions/0009-gestao-segredos-external-secrets-operator.md`](decisions/0009-gestao-segredos-external-secrets-operator.md) — Centralização de segredos no Vault com ESO.
 - [`decisions/0010-feed-precos-coingecko-cache.md`](decisions/0010-feed-precos-coingecko-cache.md) — Feed de cotações com cache e fail-safe.
 - [`decisions/0011-lightning-btc-custodia-e-isolamento.md`](decisions/0011-lightning-btc-custodia-e-isolamento.md) — Custódia e isolamento na Lightning Network com `ln-bridge`.
+- [`decisions/0012-isolamento-signer-worker.md`](decisions/0012-isolamento-signer-worker.md) — Chaves de carteira só no worker; api-server watch-only.
 
 ---
 

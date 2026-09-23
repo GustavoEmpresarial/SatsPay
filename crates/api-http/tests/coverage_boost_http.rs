@@ -358,7 +358,7 @@ async fn oauth_edges_and_basic_auth(pool: PgPool) {
 #[sqlx::test(migrations = "../db/migrations")]
 async fn admin_forbidden_sweep_and_treasury_hot(pool: PgPool) {
     let _env = ENV_LOCK.lock().await;
-    std::env::set_var("HOT_MNEMONIC", HOT_MNEMONIC);
+    common::set_hot_addresses(HOT_MNEMONIC);
     std::env::set_var("CHAIN_NETWORK", "mainnet");
 
     let (state, user_token, user_id, _) = common::register_user(pool.clone(), "afbd").await;
@@ -548,7 +548,7 @@ async fn admin_forbidden_sweep_and_treasury_hot(pool: PgPool) {
     .await;
     assert_eq!(st, axum::http::StatusCode::CONFLICT);
 
-    std::env::remove_var("HOT_MNEMONIC");
+    common::clear_hot_addresses();
 }
 
 #[sqlx::test(migrations = "../db/migrations")]
@@ -767,7 +767,7 @@ async fn swap_dex_swapkit_api_errors(pool: PgPool) {
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     let _env = ENV_LOCK.lock().await;
-    std::env::set_var("HOT_MNEMONIC", HOT_MNEMONIC);
+    common::set_hot_addresses(HOT_MNEMONIC);
     common::seed_price_cache(&pool).await;
 
     let server = MockServer::start().await;
@@ -917,7 +917,7 @@ async fn swap_dex_swapkit_api_errors(pool: PgPool) {
         "contract path={st} {body}"
     );
 
-    std::env::remove_var("HOT_MNEMONIC");
+    common::clear_hot_addresses();
 }
 
 #[sqlx::test(migrations = "../db/migrations")]

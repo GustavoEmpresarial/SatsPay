@@ -1,0 +1,22 @@
+# Reviewed 2026-09-22: all placeholders / doc examples / redaction-test fixtures, no live secret.
+# Add a line only after confirming the finding is not a real credential.
+1742f8eb5d5edfbb1f679b8042fec899b6daf199:crates/api-http/tests/swap_quote_history_http.rs:generic-api-key:41
+f1545e027659c295be7ad326ac2212978c47579b:docs/api/public-api-hmac.md:generic-api-key:34
+f1545e027659c295be7ad326ac2212978c47579b:docs/api/public-api-hmac.md:generic-api-key:81
+efa3277da736894d39fc116e96624d5b9971e7d4:client/src/pages/MerchantDepositsPage.tsx:curl-auth-header:74
+ea57ebe6c25fe50300f3f270e157186bcd769392:client/src/pages/ApiDocsPage.tsx:curl-auth-header:998
+4f25af1aa3735e1cf8e754678b8ff128648d11b1:client/src/pages/MerchantDepositsPage.tsx:curl-auth-header:279
+4f25af1aa3735e1cf8e754678b8ff128648d11b1:client/src/pages/MerchantDepositsPage.tsx:curl-auth-header:348
+f713097aaa73151ade46cd6c0b0a46109444af07:client/tests/unit/lib/errorConsole.test.ts:stripe-access-token:7
+f713097aaa73151ade46cd6c0b0a46109444af07:client/tests/unit/lib/errorConsole.test.ts:stripe-access-token:11
+f713097aaa73151ade46cd6c0b0a46109444af07:client/src/pages/ApiDocsPage.tsx:generic-api-key:1156
+f713097aaa73151ade46cd6c0b0a46109444af07:client/src/pages/ApiDocsPage.tsx:curl-auth-header:552
+f713097aaa73151ade46cd6c0b0a46109444af07:client/src/pages/ApiDocsPage.tsx:curl-auth-header:723
+f713097aaa73151ade46cd6c0b0a46109444af07:client/src/pages/ApiDocsPage.tsx:curl-auth-header:770
+f713097aaa73151ade46cd6c0b0a46109444af07:client/src/pages/ApiDocsPage.tsx:curl-auth-header:813
+f713097aaa73151ade46cd6c0b0a46109444af07:client/src/pages/ApiDocsPage.tsx:curl-auth-header:1177
+f713097aaa73151ade46cd6c0b0a46109444af07:crates/db/src/telemetry.rs:stripe-access-token:747
+f713097aaa73151ade46cd6c0b0a46109444af07:deploy/docker/.env.example:generic-api-key:11
+f713097aaa73151ade46cd6c0b0a46109444af07:docs/api/public-api-hmac.md:generic-api-key:27
+f713097aaa73151ade46cd6c0b0a46109444af07:docs/api/public-api-hmac.md:generic-api-key:85
+f713097aaa73151ade46cd6c0b0a46109444af07:docs/getting-started/quickstart.md:generic-api-key:74

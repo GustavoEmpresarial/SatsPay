@@ -40,6 +40,13 @@ async fn main() {
     tracing_subscriber::fmt().json().with_env_filter(filter).init();
     db::telemetry::install_panic_hook("api-server");
 
+    // ADR 0012: this process faces the internet and signs nothing. Refuse to
+    // boot in production if any wallet key reached its env.
+    if let Err(e) = crypto::assert_no_signer_env() {
+        tracing::error!(code = e.code(), severity = "FATAL", "{e}");
+        panic!("{}: {e}", e.code());
+    }
+
     let database_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
     let pool = db::connect(&database_url).await.expect("failed to connect to Postgres");
     db::run_migrations(&pool).await.expect("failed to run migrations");
@@ -69,7 +76,9 @@ async fn main() {
     };
 
     let jwt = crypto::JwtService::new(&jwt_secret).expect("JWT_ACCESS_SECRET must be ≥32 bytes");
-    let encryption_key = std::env::var("ENCRYPTION_KEY").expect("ENCRYPTION_KEY must be set (64 hex chars)");
+    let encryption_key = crypto::read_env_or_file("ENCRYPTION_KEY")
+        .unwrap_or_else(|e| panic!("{}: {e}", e.code()))
+        .expect("ENCRYPTION_KEY or ENCRYPTION_KEY_FILE must be set (64 hex chars)");
     let secrets = Arc::new(
         crypto::SecretsService::from_hex(&encryption_key).expect("ENCRYPTION_KEY must be 64 hex chars"),
     );
@@ -79,14 +88,6 @@ async fn main() {
     }
 
     let auth_repo = Arc::new(PgAuthRepo::with_secrets(pool.clone(), secrets.clone()));
-    let hot_mnemonic = crypto::bootstrap_hot_mnemonic(&secrets)
-        .expect("hot mnemonic bootstrap failed")
-        .map(Arc::<str>::from);
-    // Inject decrypted mnemonic for ChainRegistry / resolve helpers that still
-    // read HOT_MNEMONIC from the process environment (never log this value).
-    if let Some(ref m) = hot_mnemonic {
-        std::env::set_var("HOT_MNEMONIC", m.as_ref());
-    }
     let email_sender = build_email_sender();
     let auth_service = Arc::new(AuthService::new(
         auth_repo,
@@ -96,6 +97,7 @@ async fn main() {
         email_sender.clone(),
     ));
 
+    // Watch-only: deposit xpubs, public hot addresses, SOL from the worker's pool.
     let chain_registry = Arc::new(ChainRegistry::from_env(pool.clone()).expect("failed to build chain registry"));
 
     let node_env = std::env::var("NODE_ENV").unwrap_or_else(|_| "development".to_string());
@@ -170,7 +172,6 @@ async fn main() {
         pool: pool.clone(),
         chain_registry,
         secrets,
-        hot_mnemonic,
         captcha: captcha_verifier,
         settings,
         swapkit: Arc::new(swapkit::SwapKitClient::from_env()),

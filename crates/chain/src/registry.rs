@@ -9,6 +9,7 @@ use crate::policy::{assert_stub_client_allowed, StubPolicyError};
 use crate::real_client::{RealChainClient, RealClientConfig};
 use crate::stub::StubClient;
 use crate::types::ChainClient;
+use crate::wallet_config::{PublicWalletConfig, SignerKeys, WalletConfigError};
 use shared::{Coin, COINS};
 use sqlx::PgPool;
 use std::collections::HashMap;
@@ -16,6 +17,7 @@ use std::sync::Arc;
 
 pub struct ChainRegistry {
     clients: HashMap<&'static str, Arc<dyn ChainClient>>,
+    wallet: PublicWalletConfig,
 }
 
 impl ChainRegistry {
@@ -27,7 +29,7 @@ impl ChainRegistry {
             let client = build_stub_client(coin, node_env, allow_stub_chain)?;
             clients.insert(coin.as_str(), client);
         }
-        Ok(Self { clients })
+        Ok(Self { clients, wallet: PublicWalletConfig::default() })
     }
 
     /// Real-client registry — one `RealChainClient` per coin, sharing the
@@ -38,7 +40,22 @@ impl ChainRegistry {
         for &coin in COINS.iter() {
             clients.insert(coin.as_str(), Arc::new(RealChainClient::new(coin, pool.clone(), config.clone())) as Arc<dyn ChainClient>);
         }
-        Self { clients }
+        Self { clients, wallet: config.wallet }
+    }
+
+    /// Replaces the public wallet config (hot addresses) — tests and stub setups.
+    pub fn with_wallet(mut self, wallet: PublicWalletConfig) -> Self {
+        self.wallet = wallet;
+        self
+    }
+
+    /// Public hot address for `coin` from `HOT_ADDRESS_<COIN>`. The api-server
+    /// never derives it: it holds no key to derive from.
+    pub fn hot_address(&self, coin: Coin) -> Result<String, String> {
+        self.wallet
+            .hot_address(coin)
+            .map(str::to_string)
+            .ok_or_else(|| format!("HOT_ADDRESS_{} not configured", coin.as_str()))
     }
 
     /// Swaps in `client` for the coin it reports. For tests that need a
@@ -55,21 +72,31 @@ impl ChainRegistry {
             .expect("ChainRegistry::build/build_real populates every Coin variant")
     }
 
-    /// Chooses `build` (stub) vs `build_real` based on `USE_REAL_CHAIN_CLIENTS`
-    /// and reads every real-client setting from env — no endpoint, key, or
-    /// lookback window is hardcoded in this crate. Shared by `api-server`
-    /// and `worker` so the two binaries can't drift on how this decision is made.
-    ///
-    /// When `USE_REAL_CHAIN_CLIENTS=true`, `CHAIN_NETWORK` is **required**
-    /// (`mainnet` | `testnet`) — no implicit default. Documented in
-    /// `docs/operations/env-vars-reference.md`.
+    /// api-server registry: watch-only. Reads **no** key material — deposit
+    /// addresses come from `DEPOSIT_XPUB_<COIN>` (SOL from the worker's pool),
+    /// and every signing path fails with `SIGNER_NOT_AVAILABLE`.
     pub fn from_env(pool: PgPool) -> Result<Self, String> {
+        Self::from_env_inner(pool, SignerKeys::default())
+    }
+
+    /// Worker registry: same public config plus the signing keys, handed in
+    /// already decrypted (never read from env here).
+    pub fn from_env_with_signer(pool: PgPool, keys: SignerKeys) -> Result<Self, String> {
+        Self::from_env_inner(pool, keys)
+    }
+
+    /// Chooses `build` (stub) vs `build_real` based on `USE_REAL_CHAIN_CLIENTS`
+    /// and reads every endpoint setting from env. Shared by `api-server`
+    /// and `worker` so the two binaries can't drift on how this decision is made.
+    fn from_env_inner(pool: PgPool, keys: SignerKeys) -> Result<Self, String> {
         let node_env = std::env::var("NODE_ENV").unwrap_or_else(|_| "development".to_string());
         let use_real = std::env::var("USE_REAL_CHAIN_CLIENTS").map(|v| v == "true").unwrap_or(true);
+        let production = node_env == "production" && use_real;
+        let wallet = PublicWalletConfig::from_env(production).map_err(|e: WalletConfigError| format!("{}: {e}", e.code()))?;
 
         if !use_real {
             let allow_stub_chain = std::env::var("ALLOW_STUB_CHAIN").map(|v| v == "true").unwrap_or(false);
-            return Self::build(&node_env, allow_stub_chain).map_err(|e| e.to_string());
+            return Self::build(&node_env, allow_stub_chain).map(|r| r.with_wallet(wallet)).map_err(|e| e.to_string());
         }
 
         let network = match std::env::var("CHAIN_NETWORK") {
@@ -77,17 +104,16 @@ impl ChainRegistry {
             Err(_) => ChainNetwork::Mainnet,
         };
 
+        if keys.deposit_mnemonic.is_some() || keys.hot_mnemonic.is_some() || keys.hot_wallet_key.is_some() {
+            crate::wallet_config::verify_signer_matches(&wallet, &keys, network).map_err(|e| format!("{}: {e}", e.code()))?;
+        }
+
         let bitcore_base_url = std::env::var("BITCORE_API_BASE_URL").unwrap_or_else(|_| "https://api.bitcore.io".to_string());
         let evm_rpc_url = std::env::var("EVM_RPC_URL").unwrap_or_else(|_| "https://polygon-bor-rpc.publicnode.com".to_string());
         let bsc_rpc_url = std::env::var("BSC_RPC_URL")
             .ok()
             .filter(|s| !s.trim().is_empty())
             .unwrap_or_else(|| "https://bsc-rpc.publicnode.com".to_string());
-        let deposit_xpub = std::env::var("CHAIN_DEPOSIT_XPUB").unwrap_or_else(|_| "xpub661MyMwAqRbcFtXgS5sYJABqqG9YLmC4Q1Rdap9gSE8NqtwybGhePY2gZ29ESFehEdMTxnPTgVCrgbeG7K6AhEnREakCAZDJBgLnGL9ZSuL".to_string());
-        let hot_wallet_wif = std::env::var("HOT_WALLET_WIF")
-            .ok()
-            .or_else(|| std::env::var("HOT_WALLET_PRIVATE_KEY").ok())
-            .or_else(|| std::env::var("POL_HOT_WALLET_KEY").ok());
 
         let evm_deposit_lookback_blocks: u64 = std::env::var("EVM_DEPOSIT_LOOKBACK_BLOCKS")
             .ok()
@@ -104,8 +130,8 @@ impl ChainRegistry {
                 bitcore_base_url,
                 evm_rpc_url,
                 bsc_rpc_url,
-                deposit_xpub,
-                hot_wallet_wif,
+                wallet,
+                hot_wallet_wif: keys.hot_wallet_key,
                 evm_deposit_lookback_blocks,
                 fee_confirmation_target,
                 network,
@@ -115,8 +141,8 @@ impl ChainRegistry {
                 zer_explorer_url: std::env::var("ZER_EXPLORER_API").unwrap_or_else(|_| "https://zerochain.info/api".to_string()),
                 zer_explorer_api_key: std::env::var("ZER_EXPLORER_API_KEY").ok().filter(|s| !s.trim().is_empty()),
                 zer_rpc_url: std::env::var("ZER_RPC_URL").ok().filter(|s| !s.trim().is_empty()),
-                deposit_mnemonic: std::env::var("DEPOSIT_MNEMONIC").ok().filter(|s| !s.trim().is_empty()),
-                hot_mnemonic: std::env::var("HOT_MNEMONIC").ok().filter(|s| !s.trim().is_empty()),
+                deposit_mnemonic: keys.deposit_mnemonic,
+                hot_mnemonic: keys.hot_mnemonic,
             },
         ))
     }

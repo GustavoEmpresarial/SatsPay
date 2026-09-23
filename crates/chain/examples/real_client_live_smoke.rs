@@ -24,7 +24,9 @@ async fn main() {
         // A real, published BIP32 xpub — Bitcoin Wiki's BIP32 test vector 1
         // master xpub. Used here only to prove address derivation works;
         // production would use a wallet-specific xpub from real cold storage.
-        deposit_xpub: "xpub661MyMwAqRbcFtXgS5sYJABqqG9YLmC4Q1Rdap9gSE8NqtwybGhePY2gZ29ESFjqJoCu1Rupje8YtGqsefD265TMg7usUDFdp6W1EGMcet8".to_string(),
+        wallet: chain::PublicWalletConfig::single_xpub(
+            "xpub661MyMwAqRbcFtXgS5sYJABqqG9YLmC4Q1Rdap9gSE8NqtwybGhePY2gZ29ESFjqJoCu1Rupje8YtGqsefD265TMg7usUDFdp6W1EGMcet8",
+        ),
         hot_wallet_wif: None,
         evm_deposit_lookback_blocks: 5,
         fee_confirmation_target: 2,

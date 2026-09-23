@@ -118,7 +118,7 @@ async fn run() -> Result<ExitCode, ExitCode> {
         bitcore_base_url: bitcore_base_url.clone(),
         evm_rpc_url: evm_rpc_url.clone(),
         bsc_rpc_url: "https://bsc-rpc.publicnode.com".into(),
-        deposit_xpub,
+        wallet: chain::PublicWalletConfig::single_xpub(&deposit_xpub),
         hot_wallet_wif: Some(wif.clone()),
         evm_deposit_lookback_blocks,
         fee_confirmation_target,
