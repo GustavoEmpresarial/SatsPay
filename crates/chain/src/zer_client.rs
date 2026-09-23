@@ -1,4 +1,4 @@
-//! Zero (ZER) — public Insight/explorer first, local `zerod` for signing.
+//! Zero (ZER) — public Insight/ZeroChain for reads and broadcast, local `zerod` for signing.
 //! Transparent `t1` only. Broadcast prefers public Insight `tx/send` until the
 //! private node is fully synced (no public JSON-RPC exists for ZER).
 
@@ -104,37 +104,44 @@ impl ZerClient {
     }
 
     async fn explorer_txs(&self, address: &str) -> Result<Vec<OnchainTx>, ChainError> {
-        let v = self.explorer_json(&format!("txs/{address}/0")).await?;
-        let rows = v
-            .as_array()
-            .cloned()
-            .or_else(|| v.get("txs").and_then(Value::as_array).cloned())
-            .or_else(|| v.get("data").and_then(Value::as_array).cloned())
-            .unwrap_or_default();
-        Ok(rows
-            .into_iter()
-            .filter_map(|tx| {
-                let tx_hash = tx
-                    .get("txid")
-                    .or_else(|| tx.get("hash"))
-                    .and_then(Value::as_str)?
-                    .to_string();
-                let confirmations =
-                    tx.get("confirmations").and_then(Value::as_u64).unwrap_or(0) as u32;
-                let amount = tx
-                    .get("amount")
-                    .and_then(value_to_sats)
-                    .or_else(|| tx.get("value").and_then(value_to_sats))
-                    .unwrap_or(0);
-                Some(OnchainTx {
-                    tx_hash,
-                    vout: tx.get("vout").and_then(Value::as_u64).unwrap_or(0) as u32,
-                    amount,
-                    confirmations,
-                    address: address.to_string(),
-                })
-            })
-            .collect())
+        let history = self.explorer_history(address).await?;
+        let mut deposits = Vec::new();
+        for page in &history {
+            deposits.extend(parse_zerochain_deposits(page, address)?);
+        }
+        Ok(deposits)
+    }
+
+    async fn explorer_history(&self, address: &str) -> Result<Vec<Value>, ChainError> {
+        const MAX_PAGES: u64 = 100;
+        let first = self.explorer_json(&format!("txs/{address}/0")).await?;
+        let pages = first
+            .get("pagesTotal")
+            .and_then(Value::as_u64)
+            .ok_or_else(|| ChainError {
+                message: "ZER explorer tx history missing pagesTotal".into(),
+            })?;
+        if pages > MAX_PAGES {
+            return Err(ChainError {
+                message: "ZER explorer tx history exceeds safe page limit".into(),
+            });
+        }
+        if first.get("txs").and_then(Value::as_array).is_none() {
+            return Err(ChainError {
+                message: "ZER explorer tx history missing txs".into(),
+            });
+        }
+        let mut history = vec![first];
+        for page in 1..pages {
+            let body = self.explorer_json(&format!("txs/{address}/{page}")).await?;
+            if body.get("txs").and_then(Value::as_array).is_none() {
+                return Err(ChainError {
+                    message: "ZER explorer tx history missing txs".into(),
+                });
+            }
+            history.push(body);
+        }
+        Ok(history)
     }
 
     pub async fn get_balance(&self, address: &str) -> Result<u128, ChainError> {
@@ -149,18 +156,15 @@ impl ZerClient {
         let v = self
             .explorer_json(&format!("addressinfo/{address}"))
             .await?;
-        if let Some(sats) = v.get("balanceSat").and_then(value_to_sats) {
+        if let Some(sats) = v.get("balanceSat").and_then(atomic_to_sats) {
             return Ok(sats);
         }
-        if let Some(sats) = v.get("balance").and_then(value_to_sats) {
+        if let Some(sats) = v.get("balance").and_then(coins_to_sats) {
             return Ok(sats);
         }
-        Ok(self
-            .fetch_deposits(address)
-            .await?
-            .into_iter()
-            .map(|d| d.amount)
-            .sum())
+        Err(ChainError {
+            message: "ZER explorer balance missing valid balanceSat or balance".into(),
+        })
     }
 
     pub async fn fetch_utxos(&self, address: &str) -> Result<Vec<Utxo>, ChainError> {
@@ -176,16 +180,19 @@ impl ZerClient {
         self.explorer_utxos(address).await
     }
 
-    /// Build spendable UTXOs from zerochain.info `txs/{addr}/0` (Insight-style).
+    /// Build spendable UTXOs from all zerochain.info history pages.
     /// Used when zerod has no `scantxoutset` and Insight addressindex is off.
     async fn explorer_utxos(&self, address: &str) -> Result<Vec<Utxo>, ChainError> {
-        let v = self.explorer_json(&format!("txs/{address}/0")).await?;
-        let rows = v
-            .as_array()
-            .cloned()
-            .or_else(|| v.get("txs").and_then(Value::as_array).cloned())
-            .or_else(|| v.get("data").and_then(Value::as_array).cloned())
-            .unwrap_or_default();
+        let history = self.explorer_history(address).await?;
+        let rows: Vec<&Value> = history
+            .iter()
+            .flat_map(|page| {
+                page.get("txs")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+            })
+            .collect();
 
         let mut spent = std::collections::HashSet::<(String, u32)>::new();
         let mut candidates = Vec::new();
@@ -200,8 +207,13 @@ impl ZerClient {
                     let Some(prev) = vin.get("txid").and_then(Value::as_str) else {
                         continue;
                     };
-                    let vout = vin.get("vout").and_then(Value::as_u64).unwrap_or(0) as u32;
-                    spent.insert((prev.to_string(), vout));
+                    if let Some(vout) = vin
+                        .get("vout")
+                        .and_then(Value::as_u64)
+                        .and_then(|v| u32::try_from(v).ok())
+                    {
+                        spent.insert((prev.to_string(), vout));
+                    }
                 }
             }
             let confs = tx.get("confirmations").and_then(Value::as_u64).unwrap_or(0);
@@ -211,7 +223,7 @@ impl ZerClient {
             let Some(vouts) = tx.get("vout").and_then(Value::as_array) else {
                 continue;
             };
-            for (vout, out) in vouts.iter().enumerate() {
+            for (index, out) in vouts.iter().enumerate() {
                 let spk = out.get("scriptPubKey").cloned().unwrap_or(Value::Null);
                 let owned = spk
                     .get("addresses")
@@ -222,23 +234,45 @@ impl ZerClient {
                 if !owned {
                     continue;
                 }
+                if out
+                    .get("spentTxId")
+                    .and_then(Value::as_str)
+                    .is_some_and(|v| !v.is_empty())
+                {
+                    continue;
+                }
                 let value_sats = out
                     .get("valueSat")
-                    .and_then(value_to_sats)
-                    .or_else(|| out.get("value").and_then(value_to_sats))
+                    .and_then(atomic_to_sats)
+                    .or_else(|| out.get("value").and_then(coins_to_sats))
                     .unwrap_or(0);
                 let script_pubkey_hex = spk
                     .get("hex")
                     .and_then(Value::as_str)
                     .unwrap_or("")
                     .to_string();
-                if value_sats == 0 || txid.is_empty() {
+                if value_sats == 0
+                    || txid.len() != 64
+                    || !txid.bytes().all(|b| b.is_ascii_hexdigit())
+                    || script_pubkey_hex.is_empty()
+                {
                     continue;
                 }
+                let vout = out
+                    .get("n")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(index as u64)
+                    .try_into()
+                    .map_err(|_| ChainError {
+                        message: "ZER explorer vout out of range".into(),
+                    })?;
+                let value = u64::try_from(value_sats).map_err(|_| ChainError {
+                    message: "ZER explorer UTXO amount out of range".into(),
+                })?;
                 candidates.push(Utxo {
                     txid: txid.to_string(),
-                    vout: vout as u32,
-                    value: value_sats as u64,
+                    vout,
+                    value,
                     script_pubkey_hex,
                 });
             }
@@ -300,11 +334,14 @@ impl ZerClient {
                             .unwrap_or("")
                             .to_string();
                         let vout = u.get("vout").and_then(Value::as_u64).unwrap_or(0) as u32;
-                        let value = u
+                        let value_sats = u
                             .get("satoshis")
-                            .and_then(value_to_sats)
-                            .or_else(|| u.get("amount").and_then(value_to_sats))
-                            .unwrap_or(0) as u64;
+                            .and_then(atomic_to_sats)
+                            .or_else(|| u.get("amount").and_then(coins_to_sats))
+                            .unwrap_or(0);
+                        let value = u64::try_from(value_sats).map_err(|_| ChainError {
+                            message: "ZER Insight UTXO amount out of range".into(),
+                        })?;
                         let script_pubkey_hex = u
                             .get("scriptPubKey")
                             .and_then(Value::as_str)
@@ -401,7 +438,8 @@ impl ZerClient {
         Ok((txid, fee))
     }
 
-    /// Public Insight first (synced tip), then local zerod. No public JSON-RPC for ZER.
+    /// Public Insight first, then ZeroChain `rawtx` with a configured API key,
+    /// then local zerod. Only an already-signed transaction leaves the worker.
     async fn broadcast_signed_hex(&self, raw_hex: &str) -> Result<String, ChainError> {
         let mut last = String::new();
         for base in PUBLIC_BROADCAST_BASES {
@@ -444,6 +482,15 @@ impl ZerClient {
                 Err(e) => last = e.to_string(),
             }
         }
+        if let Some(key) = self.explorer_key.as_deref() {
+            match self.broadcast_zerochain_raw(raw_hex, key).await {
+                Ok(txid) => return Ok(txid),
+                Err(e) => {
+                    tracing::warn!(error = %e.message, "ZER ZeroChain rawtx broadcast failed");
+                    last = format!("{last}; ZeroChain={}", e.message);
+                }
+            }
+        }
         if let Some(rpc) = &self.rpc {
             match rpc.broadcast(raw_hex).await {
                 Ok(txid) => {
@@ -461,9 +508,51 @@ impl ZerClient {
             }
         }
         Err(ChainError {
-            message: format!("ZER broadcast failed (public Insight + local): {last}"),
+            message: format!("ZER broadcast failed (public providers + local): {last}"),
         })
     }
+
+    async fn broadcast_zerochain_raw(
+        &self,
+        raw_hex: &str,
+        key: &str,
+    ) -> Result<String, ChainError> {
+        if raw_hex.is_empty() || !raw_hex.bytes().all(|b| b.is_ascii_hexdigit()) {
+            return Err(ChainError {
+                message: "ZER raw transaction is not hex".into(),
+            });
+        }
+        let url = format!("{}/rawtx/{raw_hex}/{key}", self.explorer_base);
+        let response = self.http.get(url).send().await.map_err(|_| ChainError {
+            message: "ZER ZeroChain rawtx request failed".into(),
+        })?;
+        if !response.status().is_success() {
+            return Err(ChainError {
+                message: format!("ZER ZeroChain rawtx HTTP {}", response.status()),
+            });
+        }
+        let body = response.text().await.map_err(|_| ChainError {
+            message: "ZER ZeroChain rawtx response unreadable".into(),
+        })?;
+        parse_zerochain_txid(&body).ok_or_else(|| ChainError {
+            message: "ZER ZeroChain rawtx response has no txid".into(),
+        })
+    }
+}
+
+fn parse_zerochain_txid(body: &str) -> Option<String> {
+    let parsed = serde_json::from_str::<Value>(body).ok();
+    let candidate = match parsed.as_ref() {
+        Some(Value::String(txid)) => txid.as_str(),
+        Some(Value::Object(map)) => map
+            .get("txid")
+            .or_else(|| map.get("hash"))
+            .or_else(|| map.get("result"))?
+            .as_str()?,
+        _ => body.trim(),
+    };
+    (candidate.len() == 64 && candidate.bytes().all(|b| b.is_ascii_hexdigit()))
+        .then(|| candidate.to_ascii_lowercase())
 }
 
 /// ZER's signing RPC receives a WIF. It must never point at a public API.
@@ -490,28 +579,118 @@ fn trusted_signer_rpc(raw: &str) -> bool {
     !host.contains('.') && host.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'-')
 }
 
-fn value_to_sats(v: &Value) -> Option<u128> {
-    match v {
-        Value::Number(n) => {
-            if let Some(u) = n.as_u64() {
-                // Heuristic: integers >= 1e6 are already sats; smaller floats are coins.
-                if n.as_f64().is_some_and(|f| f.fract() == 0.0) && u >= 1_000_000 {
-                    return Some(u as u128);
-                }
-            }
-            n.as_f64()
-                .map(|f| (f * 100_000_000.0).round().max(0.0) as u128)
+fn parse_zerochain_deposits(body: &Value, address: &str) -> Result<Vec<OnchainTx>, ChainError> {
+    let rows = body
+        .get("txs")
+        .and_then(Value::as_array)
+        .ok_or_else(|| ChainError {
+            message: "ZER explorer tx history missing txs".into(),
+        })?;
+    let mut deposits = Vec::new();
+    for tx in rows {
+        let txid = tx
+            .get("txid")
+            .and_then(Value::as_str)
+            .ok_or_else(|| ChainError {
+                message: "ZER explorer transaction missing txid".into(),
+            })?;
+        if txid.len() != 64 || !txid.bytes().all(|b| b.is_ascii_hexdigit()) {
+            return Err(ChainError {
+                message: "ZER explorer transaction has invalid txid".into(),
+            });
         }
-        Value::String(s) => {
-            if s.contains('.') {
-                s.parse::<f64>()
-                    .ok()
-                    .map(|f| (f * 100_000_000.0).round().max(0.0) as u128)
-            } else {
-                s.parse().ok()
+        let confirmations = tx
+            .get("confirmations")
+            .and_then(Value::as_u64)
+            .unwrap_or(0)
+            .min(u32::MAX as u64) as u32;
+        let outputs = tx
+            .get("vout")
+            .and_then(Value::as_array)
+            .ok_or_else(|| ChainError {
+                message: "ZER explorer transaction missing vout".into(),
+            })?;
+        for (index, output) in outputs.iter().enumerate() {
+            let spk = output.get("scriptPubKey");
+            let owned = spk
+                .and_then(|s| s.get("addresses"))
+                .and_then(Value::as_array)
+                .is_some_and(|addresses| addresses.iter().any(|v| v.as_str() == Some(address)))
+                || spk.and_then(|s| s.get("address")).and_then(Value::as_str) == Some(address);
+            if !owned {
+                continue;
             }
+            let amount = output
+                .get("valueSat")
+                .and_then(atomic_to_sats)
+                .or_else(|| output.get("value").and_then(coins_to_sats))
+                .ok_or_else(|| ChainError {
+                    message: "ZER explorer output has invalid amount".into(),
+                })?;
+            if amount == 0 {
+                continue;
+            }
+            let vout = output
+                .get("n")
+                .and_then(Value::as_u64)
+                .unwrap_or(index as u64)
+                .try_into()
+                .map_err(|_| ChainError {
+                    message: "ZER explorer vout out of range".into(),
+                })?;
+            deposits.push(OnchainTx {
+                tx_hash: txid.to_owned(),
+                vout,
+                amount,
+                confirmations,
+                address: address.to_owned(),
+            });
+        }
+    }
+    Ok(deposits)
+}
+
+fn atomic_to_sats(v: &Value) -> Option<u128> {
+    match v {
+        Value::Number(n) => n.as_u64().map(u128::from),
+        Value::String(s) if !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()) => {
+            s.parse().ok()
         }
         _ => None,
+    }
+}
+
+fn coins_to_sats(v: &Value) -> Option<u128> {
+    let number = match v {
+        Value::Number(n) => n.to_string(),
+        Value::String(s) => s.trim().to_owned(),
+        _ => return None,
+    };
+    let (mantissa, exponent) = number
+        .split_once(['e', 'E'])
+        .map_or((number.as_str(), 0), |(m, e)| {
+            (m, e.parse::<i32>().ok().unwrap_or(i32::MIN))
+        });
+    if exponent == i32::MIN {
+        return None;
+    }
+    let (whole, fraction) = mantissa.split_once('.').unwrap_or((mantissa, ""));
+    if (whole.is_empty() && fraction.is_empty())
+        || !whole.bytes().all(|b| b.is_ascii_digit())
+        || !fraction.bytes().all(|b| b.is_ascii_digit())
+    {
+        return None;
+    }
+    let digits = format!("{whole}{fraction}");
+    let coefficient: u128 = digits.parse().ok()?;
+    let scale = 8i32
+        .checked_add(exponent)?
+        .checked_sub(fraction.len() as i32)?;
+    if scale >= 0 {
+        coefficient.checked_mul(10u128.checked_pow(scale as u32)?)
+    } else {
+        let divisor = 10u128.checked_pow(scale.unsigned_abs())?;
+        (coefficient % divisor == 0).then_some(coefficient / divisor)
     }
 }
 
@@ -552,6 +731,117 @@ mod signer_rpc_tests {
         assert!(err.message.contains("429"));
         assert!(!err.message.contains("secret-test-key"));
         assert!(!err.message.contains(&addr.to_string()));
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn zerochain_broadcast_sends_only_signed_hex_and_hides_api_key_on_error() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut request = [0u8; 1024];
+            let n = socket.read(&mut request).await.unwrap();
+            let request = String::from_utf8_lossy(&request[..n]);
+            assert!(request.starts_with("GET /api/rawtx/deadbeef/test-api-key HTTP/1.1"));
+            socket
+                .write_all(b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+                .await
+                .unwrap();
+        });
+        let client = ZerClient::with_rpc(&format!("http://{addr}/api"), Some("test-api-key"), None);
+        let err = client
+            .broadcast_zerochain_raw("deadbeef", "test-api-key")
+            .await
+            .unwrap_err();
+        assert!(err.message.contains("503"));
+        assert!(!err.message.contains("test-api-key"));
+        server.await.unwrap();
+    }
+
+    #[test]
+    fn zerochain_broadcast_requires_a_real_txid() {
+        let txid = "a".repeat(64);
+        assert_eq!(parse_zerochain_txid(&txid), Some(txid.clone()));
+        assert_eq!(
+            parse_zerochain_txid(&format!(r#"{{"txid":"{txid}"}}"#)),
+            Some(txid)
+        );
+        assert_eq!(parse_zerochain_txid(r#"{"error":"rejected"}"#), None);
+    }
+
+    #[test]
+    fn zerochain_output_parser_credits_only_matching_vout_in_atomic_units() {
+        let txid = "a".repeat(64);
+        let body = json!({"pagesTotal": 1, "txs": [{
+            "txid": txid, "confirmations": 6,
+            "vout": [
+                {"n": 0, "valueSat": 25000, "value": 0.00025,
+                 "scriptPubKey": {"addresses": ["mine"]}},
+                {"n": 1, "valueSat": 30000,
+                 "scriptPubKey": {"addresses": ["other"]}}
+            ]
+        }]});
+        let deposits = parse_zerochain_deposits(&body, "mine").unwrap();
+        assert_eq!(deposits.len(), 1);
+        assert_eq!(deposits[0].amount, 25_000);
+        assert_eq!(deposits[0].vout, 0);
+        assert_eq!(deposits[0].confirmations, 6);
+        assert!(parse_zerochain_deposits(&json!({"error":"rate limited"}), "mine").is_err());
+    }
+
+    #[test]
+    fn zerochain_amounts_keep_satoshis_and_coins_distinct() {
+        assert_eq!(atomic_to_sats(&json!(25_000)), Some(25_000));
+        assert_eq!(coins_to_sats(&json!(0.00025)), Some(25_000));
+        assert_eq!(coins_to_sats(&json!("1e-8")), Some(1));
+        assert_eq!(coins_to_sats(&json!("0.000000001")), None);
+        assert_eq!(atomic_to_sats(&json!("0.00025")), None);
+    }
+
+    #[tokio::test]
+    async fn zerochain_utxos_account_for_spends_on_later_pages() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let spent_txid = "a".repeat(64);
+        let live_txid = "b".repeat(64);
+        let first = json!({"pagesTotal": 2, "txs": [{
+            "txid": spent_txid, "confirmations": 3,
+            "vout": [{"n": 0, "valueSat": 25_000,
+                "scriptPubKey": {"addresses": ["mine"], "hex": "76a91400"}}]
+        }, {
+            "txid": live_txid, "confirmations": 3,
+            "vout": [{"n": 2, "valueSat": 30_000,
+                "scriptPubKey": {"addresses": ["mine"], "hex": "76a91411"}}]
+        }]});
+        let second = json!({"pagesTotal": 2, "txs": [{
+            "txid": "c".repeat(64), "confirmations": 2,
+            "vin": [{"txid": "a".repeat(64), "vout": 0}],
+            "vout": []
+        }]});
+        let server = tokio::spawn(async move {
+            for (page, body) in [(0, first), (1, second)] {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let mut request = [0u8; 1024];
+                let n = socket.read(&mut request).await.unwrap();
+                assert!(String::from_utf8_lossy(&request[..n])
+                    .starts_with(&format!("GET /api/txs/mine/{page}/test-key HTTP/1.1")));
+                let body = body.to_string();
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                socket.write_all(response.as_bytes()).await.unwrap();
+            }
+        });
+        let client = ZerClient::with_rpc(&format!("http://{addr}/api"), Some("test-key"), None);
+        let utxos = client.explorer_utxos("mine").await.unwrap();
+        assert_eq!(utxos.len(), 1);
+        assert_eq!(utxos[0].txid, live_txid);
+        assert_eq!(utxos[0].vout, 2);
+        assert_eq!(utxos[0].value, 30_000);
         server.await.unwrap();
     }
 }

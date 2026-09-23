@@ -21,6 +21,8 @@
 | C5 | Alta | Falha HTTP/JSON do explorador ZER podia incluir URL com chave de API no texto do erro. | Mensagem de erro agora contém só o tipo da falha ou status HTTP, sem URL nem resposta de transporte. |
 | C6 | Alta (CodeQL) | O boot da API escrevia a descrição de `SignerSecretInApi` no log; ela contém nomes de variáveis de chave, nunca o valor. | O boot registra apenas o código estável `SIGNER_SECRET_IN_API` e encerra. |
 | C7 | Alta (CodeQL, falso positivo) | O helper operacional de custódia imprime xpubs e endereços hot derivados; o analisador os classificou como segredo em log. | Saída é deliberadamente pública para popular `DEPOSIT_XPUB_*` e `HOT_ADDRESS_*`; nenhuma seed ou chave privada é impressa. Manter stdout sob controle operacional. |
+| C8 | Alta | A API pública ZeroChain documenta `rawtxbuild` com chave privada na URL, inadequado para a hot sob custódia. | O cliente não chama `rawtxbuild`; usa ZeroChain para consulta e agora aceita `rawtx` como reserva de broadcast apenas para hex já assinado. `ZER_RPC_URL` público continua rejeitado no signer. |
+| C9 | Alta | A resposta real de `txs` coloca valores em `vout[].valueSat`; o parser anterior ignorava as saídas, e a heurística de unidade podia multiplicar pequenos valores em satoshis por 100 milhões. UTXOs eram reconstruídos apenas da primeira página; saldo podia cair no total histórico recebido. | Depósitos são associados à saída e ao endereço correto, com conversão exata de satoshis/coins; histórico e gastos percorrem até 100 páginas e falham se o limite for excedido; saldo sem campo válido retorna erro. Teste cobre gasto na página seguinte. |
 
 ## Testes executados
 
@@ -34,6 +36,7 @@
 - O gate `db --lib --tests --fail-under-lines 90` passou com 90,17% de linhas (8.996 instrumentadas, 884 não cobertas) após o teste de resolução de alerta. A medição anterior, antes desse teste, era 89,94%.
 - Compose validou com variáveis fictícias; a sintaxe do script de deploy passou. Não há `DEPLOY_SSH_KEY` nem `DEPLOY_SSH_PASSWORD` no ambiente, mas há uma chave `bitcosats-deploy` carregada no agente SSH e o host está no `known_hosts`; `--check-auth` passou. Nenhum deploy foi executado até esta etapa.
 - Inspeção remota sem mostrar valores confirmou que `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `ZER_RPC_URL` e `DOGE_BLOCKBOOK_API_KEY` ainda não estão configuradas em `/root/bitcosats/.env` na VM. A entrega de alerta Telegram, assinatura ZER e reserva DOGE não podem ser validadas no deploy enquanto estiverem ausentes.
+- Após a documentação pública ZeroChain ser fornecida, a suíte `chain --lib` completa (71 testes) passou, incluindo parsing de saída, unidades, paginação de UTXOs e broadcast assinado. `cargo check -p worker -p api-server --offline` passou. Nenhuma transação real foi transmitida. `ZER_EXPLORER_API_KEY` também será necessária para usar `rawtx` como reserva em produção.
 
 ## Pendente de validação operacional
 

@@ -33,6 +33,8 @@
 - [ ] DOGE e DGB saltam provedores após três falhas, retomam após 60 s e não tratam HTML 200 como sucesso.
 - [ ] Blockbook DOGE credenciado detecta saída destinada ao endereço correto, sem repassar chave em URL/log.
 - [ ] ZER recusa RPC público de assinatura; `zerod` local assina enquanto leitura e broadcast usam provedor público.
+- [ ] ZeroChain `rawtx` recebe apenas hex já assinado; rejeição HTTP não vaza a chave de API e resposta sem txid não é sucesso.
+- [ ] Histórico ZeroChain usa `vout[].valueSat` e endereço da saída para depósitos; a busca de UTXOs percorre as páginas e exclui saídas gastas. Saldo sem campo válido falha em vez de somar depósitos históricos.
 - [ ] Falha de detecção não impede a tentativa de sweep, mas gera alerta persistente após três ciclos.
 
 - [ ] Rotas documentadas batem com `App.tsx`
