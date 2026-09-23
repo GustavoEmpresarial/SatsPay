@@ -36,7 +36,7 @@ pub use state::{AppSettings, AppState};
 
 use axum::extract::{Request, State};
 use axum::middleware::Next;
-use axum::response::Response;
+use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::Router;
 use domain::auth::AuthRepo;
@@ -93,6 +93,9 @@ fn route_tree<R: AuthRepo + 'static>() -> Router<AppState<R>> {
 
 fn finish_router<R: AuthRepo + 'static>(router: Router<AppState<R>>, state: AppState<R>) -> Router {
     router
+        // Innermost: normalize axum extractor rejections (bad JSON / wrong type)
+        // into the stable `{ error, code }` contract before anything else sees them.
+        .layer(axum::middleware::from_fn(normalize_extractor_rejections))
         .layer(axum::middleware::from_fn_with_state(state.clone(), record_server_errors::<R>))
         // Rate limiting sits outside the metrics layer on purpose: rejected
         // floods should not inflate the per-route histograms.
@@ -170,4 +173,67 @@ async fn record_server_errors<R: AuthRepo + 'static>(
 
 async fn healthz() -> &'static str {
     "ok"
+}
+
+/// axum's built-in `Json`/`Path`/`Query` extractors reject malformed input with
+/// a `text/plain` body that describes the parser internals (e.g. "Failed to
+/// deserialize the JSON body into the target type: email: invalid type:
+/// integer `123`..."). That leaks field/parser detail and, more importantly,
+/// breaks the `{ error, code }` contract every other 4xx honors — the client's
+/// `adaptRustError` cannot read it. This rewrites only those framework
+/// rejections (400/422 with a `text/plain` body from the extractor) into the
+/// stable JSON shape. App handlers already emit JSON, so they pass through
+/// untouched.
+async fn normalize_extractor_rejections(request: Request, next: Next) -> Response {
+    use axum::http::{header, StatusCode};
+    let response = next.run(request).await;
+    let status = response.status();
+    if status != StatusCode::BAD_REQUEST
+        && status != StatusCode::UNPROCESSABLE_ENTITY
+        && status != StatusCode::UNSUPPORTED_MEDIA_TYPE
+        && status != StatusCode::LENGTH_REQUIRED
+    {
+        return response;
+    }
+    // Only touch plain-text bodies: our own errors are already `application/json`.
+    let is_text = response
+        .headers()
+        .get(header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .map(|ct| ct.starts_with("text/plain"))
+        .unwrap_or(false);
+    if !is_text {
+        return response;
+    }
+
+    let (mut parts, body) = response.into_parts();
+    // Extractor rejections are tiny; cap defensively.
+    let bytes = match axum::body::to_bytes(body, 16 * 1024).await {
+        Ok(b) => b,
+        Err(_) => return StatusCode::BAD_REQUEST.into_response(),
+    };
+    let raw = String::from_utf8_lossy(&bytes);
+    let code = if raw.contains("Failed to parse the request body")
+        || raw.contains("Failed to deserialize")
+        || raw.contains("Expected request with `Content-Type: application/json`")
+    {
+        "INVALID_JSON"
+    } else if raw.contains("Failed to deserialize the query string")
+        || raw.contains("Invalid URL")
+        || raw.contains("Cannot parse")
+    {
+        "VALIDATION_ERROR"
+    } else {
+        // Some other framework rejection (e.g. body-too-large) — normalize the
+        // shape without guessing a specific code.
+        "BAD_REQUEST"
+    };
+    // Do not echo the parser's message (it names fields/types/offsets).
+    let payload = serde_json::json!({
+        "error": "invalid request body or parameters",
+        "code": code,
+    });
+    parts.headers.remove(header::CONTENT_TYPE);
+    parts.headers.remove(header::CONTENT_LENGTH);
+    (parts.status, axum::Json(payload)).into_response()
 }
