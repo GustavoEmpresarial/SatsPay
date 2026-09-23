@@ -63,7 +63,7 @@ _sem overview em docs/pages_
 - `POST /v1/auth/sessions/revoke-others` revoga todos os refresh tokens e reemite o do chamador (CSRF gate). O botão
   "Desconectar outros aparelhos" era falso (só esperava 600 ms e mostrava sucesso).
 - `ClientIp` ausente → `400 CLIENT_IP_UNAVAILABLE` (era 500).
-- Detecção de reuso é agressiva: depois do revoke-others, se o aparelho antigo tentar `/auth/refresh` com o token já revogado, isso é tratado como roubo e revoga **todas** as sessões (inclusive a atual). Produção suaviza com `refresh_reuse_grace_secs > 0`; nos testes é 0.
+- revoke-others **apaga** os refresh tokens (não só marca `revoked_at`). Marcar causava dois bugs: o aparelho antigo, ao tentar renovar, disparava a detecção de roubo e derrubava também a sessão de quem clicou; e dentro da janela `refresh_reuse_grace_secs` (60 s em produção) o token revogado ainda era aceito — um invasor que renovasse no primeiro minuto continuava logado. Token apagado é só desconhecido: `401` simples, sem cascata, sem janela. Teste roda com grace = 60.
 
 ## Bugs / armadilhas conhecidas
 

@@ -49,6 +49,13 @@ pub async fn seed_price_cache(pool: &PgPool) {
 }
 
 pub fn test_state(pool: PgPool) -> AppState<PgAuthRepo> {
+    test_state_with_reuse_grace(pool, 0)
+}
+
+/// Same as [`test_state`] with a refresh-reuse grace window (production
+/// default is 60s), for flows whose behaviour depends on it.
+#[allow(dead_code)]
+pub fn test_state_with_reuse_grace(pool: PgPool, refresh_reuse_grace_secs: i64) -> AppState<PgAuthRepo> {
     let jwt = JwtService::new("test-jwt-secret-for-http-oneshot!!").expect("test jwt");
     let config = AuthConfig {
         jwt_access_ttl_secs: 900,
@@ -58,7 +65,7 @@ pub fn test_state(pool: PgPool) -> AppState<PgAuthRepo> {
         otp_code_ttl_secs: 600,
         otp_resend_cooldown_secs: 30,
         otp_max_attempts: 5,
-        refresh_reuse_grace_secs: 0,
+        refresh_reuse_grace_secs,
     };
     let email: Arc<dyn domain::auth::EmailSender> = Arc::new(NoopEmailSender);
     let secrets = Arc::new(SecretsService::from_hex(&"ab".repeat(32)).unwrap());

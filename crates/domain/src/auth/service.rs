@@ -270,14 +270,21 @@ impl<R: AuthRepo> AuthService<R> {
         Ok(())
     }
 
-    /// "Sign out other devices": revokes every refresh token of the user and
+    /// "Sign out other devices": deletes every refresh token of the user and
     /// mints a fresh pair for the caller, so only the current browser keeps a
     /// session. Access tokens already issued elsewhere die at their short TTL.
+    ///
+    /// Deleted, not revoked: an old device presenting a *revoked* token would
+    /// trip reuse detection and revoke the caller's new session too, and a
+    /// token revoked less than `refresh_reuse_grace_secs` ago is still
+    /// honoured — an attacker refreshing in that first minute would keep a
+    /// session while the UI says "disconnected". A deleted token is just
+    /// unknown: plain `Unauthorized`, no cascade, no grace.
     pub async fn revoke_other_sessions(&self, user_id: uuid::Uuid) -> Result<AuthTokens, AuthError> {
         let Some(user) = self.repo.find_user_by_id(user_id).await? else {
             return Err(AuthError::NotFound);
         };
-        self.repo.revoke_all_user_refresh_tokens(user_id, Utc::now()).await?;
+        self.repo.delete_all_user_refresh_tokens(user_id).await?;
         self.issue_tokens(&user).await
     }
 

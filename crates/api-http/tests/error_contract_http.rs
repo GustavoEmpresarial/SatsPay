@@ -80,3 +80,27 @@ async fn valid_json_still_reaches_the_handler(pool: PgPool) {
     // Auth uses the nested error envelope.
     assert_eq!(body["error"]["code"], "INVALID_CREDENTIALS");
 }
+
+#[sqlx::test(migrations = "../db/migrations")]
+async fn bad_query_string_is_validation_error_not_invalid_json(pool: PgPool) {
+    // axum's query rejection also starts with "Failed to deserialize"; it must
+    // not be reported as INVALID_JSON (review finding).
+    let (state, token, _, _) = common::register_user(pool, "badquery").await;
+    let res = api_http::app_without_metrics(state.clone())
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/v1/withdrawals/history?limit=abc")
+                .header("x-real-ip", "203.0.113.201")
+                .header("authorization", format!("Bearer {token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    let body: Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(body["code"], "VALIDATION_ERROR", "{body}");
+    assert!(!body.to_string().contains("limit"), "must not echo the field name: {body}");
+}

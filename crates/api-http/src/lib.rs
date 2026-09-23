@@ -213,16 +213,22 @@ async fn normalize_extractor_rejections(request: Request, next: Next) -> Respons
         Err(_) => return StatusCode::BAD_REQUEST.into_response(),
     };
     let raw = String::from_utf8_lossy(&bytes);
-    let code = if raw.contains("Failed to parse the request body")
-        || raw.contains("Failed to deserialize")
-        || raw.contains("Expected request with `Content-Type: application/json`")
-    {
-        "INVALID_JSON"
-    } else if raw.contains("Failed to deserialize the query string")
-        || raw.contains("Invalid URL")
-        || raw.contains("Cannot parse")
+    // Order matters: axum's query/form messages also start with "Failed to
+    // deserialize", so the specific non-JSON rejections are matched first
+    // (texts from axum 0.7 `extract::rejection` / `path`).
+    let code = if raw.starts_with("Failed to deserialize query string")
+        || raw.starts_with("Failed to deserialize form")
+        || raw.starts_with("Form requests must have")
+        || raw.starts_with("Invalid URL")
+        || raw.starts_with("Cannot parse")
+        || raw.starts_with("Wrong number of path arguments")
     {
         "VALIDATION_ERROR"
+    } else if raw.starts_with("Failed to parse the request body as JSON")
+        || raw.starts_with("Failed to deserialize the JSON body")
+        || raw.starts_with("Expected request with `Content-Type: application/json`")
+    {
+        "INVALID_JSON"
     } else {
         // Some other framework rejection (e.g. body-too-large) — normalize the
         // shape without guessing a specific code.

@@ -59,19 +59,29 @@ impl DgbClient {
         Self { http, bases, rpc }
     }
 
+    /// First host that answers 2xx **with a body that parses as `T`** wins.
+    /// A 200 carrying HTML (maintenance page, SPA catch-all) is a failure of
+    /// that host, not of the whole call: record it and try the next one.
+    /// Explicit host list, no built-in fallbacks: tests must never reach a real explorer.
+    #[cfg(test)]
+    fn with_bases_for_test(bases: Vec<String>) -> Self {
+        Self { http: reqwest::Client::new(), bases, rpc: None }
+    }
+
     async fn get_json<T: for<'de> Deserialize<'de>>(&self, suffix: &str) -> Result<T, ChainError> {
-        let mut last = String::new();
+        let mut errors: Vec<String> = Vec::new();
         for base in &self.bases {
             let url = format!("{base}{suffix}");
             match self.http.get(&url).send().await {
-                Ok(resp) if resp.status().is_success() => {
-                    return resp.json().await.map_err(|e| ChainError { message: e.to_string() });
-                }
-                Ok(resp) => last = format!("{url} HTTP {}", resp.status()),
-                Err(e) => last = e.to_string(),
+                Ok(resp) if resp.status().is_success() => match resp.json::<T>().await {
+                    Ok(v) => return Ok(v),
+                    Err(e) => errors.push(format!("{url}: bad body ({e})")),
+                },
+                Ok(resp) => errors.push(format!("{url} HTTP {}", resp.status())),
+                Err(e) => errors.push(e.to_string()),
             }
         }
-        Err(ChainError { message: format!("DGB insight failed: {last}") })
+        Err(ChainError { message: format!("DGB indexers failed: {}", errors.join("; ")) })
     }
 
     pub async fn fetch_deposits(&self, address: &str) -> Result<Vec<OnchainTx>, ChainError> {
@@ -232,29 +242,36 @@ impl DgbClient {
         for base in &self.bases {
             let url = format!("{base}/tx/send");
             match self.http.post(&url).json(&json!({ "rawtx": raw_hex })).send().await {
-                Ok(resp) if resp.status().is_success() => {
-                    let v: serde_json::Value = resp.json().await.map_err(|e| ChainError { message: e.to_string() })?;
-                    if let Some(txid) = v.get("txid").and_then(|t| t.as_str()) {
-                        return Ok(txid.to_string());
+                // Non-JSON 200 (maintenance page, SPA catch-all): record it and
+                // fall through to this host's Blockbook route, then the next
+                // host. Re-sending the same signed tx is idempotent (same txid).
+                Ok(resp) if resp.status().is_success() => match resp.json::<serde_json::Value>().await {
+                    Ok(v) => {
+                        if let Some(txid) = v.get("txid").and_then(|t| t.as_str()) {
+                            return Ok(txid.to_string());
+                        }
+                        if let Some(txid) = v.as_str() {
+                            return Ok(txid.to_string());
+                        }
+                        errors.push(format!("{url}: {v}"));
                     }
-                    if let Some(txid) = v.as_str() {
-                        return Ok(txid.to_string());
-                    }
-                    errors.push(format!("{url}: {v}"));
-                }
+                    Err(e) => errors.push(format!("{url}: bad body ({e})")),
+                },
                 Ok(resp) => errors.push(format!("{url} HTTP {}", resp.status())),
                 Err(e) => errors.push(e.to_string()),
             }
             // Blockbook: POST /v2/sendtx/ with the raw hex as body → {"result": txid}.
             let bb = format!("{base}/v2/sendtx/");
             match self.http.post(&bb).body(raw_hex.to_string()).send().await {
-                Ok(resp) if resp.status().is_success() => {
-                    let v: serde_json::Value = resp.json().await.map_err(|e| ChainError { message: e.to_string() })?;
-                    if let Some(txid) = v.get("result").and_then(|t| t.as_str()) {
-                        return Ok(txid.to_string());
+                Ok(resp) if resp.status().is_success() => match resp.json::<serde_json::Value>().await {
+                    Ok(v) => {
+                        if let Some(txid) = v.get("result").and_then(|t| t.as_str()) {
+                            return Ok(txid.to_string());
+                        }
+                        errors.push(format!("{bb}: {v}"));
                     }
-                    errors.push(format!("{bb}: {v}"));
-                }
+                    Err(e) => errors.push(format!("{bb}: bad body ({e})")),
+                },
                 Ok(resp) => errors.push(format!("{bb} HTTP {}", resp.status())),
                 Err(e) => errors.push(e.to_string()),
             }
@@ -335,6 +352,98 @@ mod tests {
         fill_missing_scripts(&mut utxos, "0014aa");
         assert_eq!(utxos[0].script_pubkey_hex, "0014aa");
         assert_eq!(utxos[1].script_pubkey_hex, "0014ff");
+    }
+
+    /// Tiny HTTP/1.1 responder: `routes` maps "METHOD /path" → (status, body).
+    /// Anything unmapped answers 404. One response per connection.
+    async fn mock_host(routes: Vec<(&'static str, u16, &'static str)>) -> String {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            loop {
+                let Ok((mut sock, _)) = listener.accept().await else { return };
+                let routes = routes.clone();
+                tokio::spawn(async move {
+                    let mut buf = Vec::new();
+                    let mut chunk = [0u8; 4096];
+                    // Read headers, then the declared body, so the client never sees a reset.
+                    loop {
+                        let n = sock.read(&mut chunk).await.unwrap_or(0);
+                        if n == 0 { break; }
+                        buf.extend_from_slice(&chunk[..n]);
+                        if let Some(end) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
+                            let head = String::from_utf8_lossy(&buf[..end]).to_ascii_lowercase();
+                            let len = head
+                                .lines()
+                                .find_map(|l| l.strip_prefix("content-length:"))
+                                .and_then(|v| v.trim().parse::<usize>().ok())
+                                .unwrap_or(0);
+                            if buf.len() >= end + 4 + len { break; }
+                        }
+                    }
+                    let req = String::from_utf8_lossy(&buf);
+                    let mut first = req.lines().next().unwrap_or("").split_whitespace();
+                    let key = format!("{} {}", first.next().unwrap_or(""), first.next().unwrap_or(""));
+                    let (status, body) = routes
+                        .iter()
+                        .find(|(k, _, _)| *k == key)
+                        .map(|(_, st, b)| (*st, *b))
+                        .unwrap_or((404, "not found"));
+                    let ct = if body.starts_with('<') { "text/html" } else { "application/json" };
+                    let resp = format!(
+                        "HTTP/1.1 {status} X\r\ncontent-type: {ct}\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                        body.len()
+                    );
+                    let _ = sock.write_all(resp.as_bytes()).await;
+                });
+            }
+        });
+        format!("http://{addr}/api")
+    }
+
+    const HTML: &str = "<html>maintenance</html>";
+
+    #[tokio::test]
+    async fn fetch_utxos_skips_a_host_that_answers_200_with_html() {
+        let a = mock_host(vec![
+            ("GET /api/addr/DADDR/utxo", 200, HTML),
+            ("GET /api/v2/utxo/DADDR?confirmed=true", 200, HTML),
+        ])
+        .await;
+        let b = mock_host(vec![(
+            "GET /api/v2/utxo/DADDR?confirmed=true",
+            200,
+            r#"[{"txid":"ff","vout":2,"value":"5000","confirmations":3}]"#,
+        )])
+        .await;
+        let utxos = DgbClient::with_bases_for_test(vec![a, b]).fetch_utxos("DADDR").await.unwrap();
+        assert_eq!(utxos.len(), 1);
+        assert_eq!(utxos[0].value, 5000);
+    }
+
+    #[tokio::test]
+    async fn broadcast_reaches_blockbook_on_the_same_host_after_an_html_200() {
+        // Same host: Insight route is an SPA catch-all (200 HTML), Blockbook route works.
+        let host = mock_host(vec![
+            ("POST /api/tx/send", 200, HTML),
+            ("POST /api/v2/sendtx/", 200, r#"{"result":"txid-bb"}"#),
+        ])
+        .await;
+        let txid = DgbClient::with_bases_for_test(vec![host]).broadcast("00ff").await.unwrap();
+        assert_eq!(txid, "txid-bb");
+    }
+
+    #[tokio::test]
+    async fn broadcast_moves_to_the_next_host_and_reports_every_failure() {
+        let a = mock_host(vec![("POST /api/tx/send", 200, HTML), ("POST /api/v2/sendtx/", 200, HTML)]).await;
+        let b = mock_host(vec![("POST /api/tx/send", 200, r#"{"txid":"txid-b"}"#)]).await;
+        let txid = DgbClient::with_bases_for_test(vec![a.clone(), b]).broadcast("00ff").await.unwrap();
+        assert_eq!(txid, "txid-b");
+
+        let err = DgbClient::with_bases_for_test(vec![a]).broadcast("00ff").await.unwrap_err();
+        assert!(err.message.contains("/tx/send: bad body"), "{}", err.message);
+        assert!(err.message.contains("/v2/sendtx/: bad body"), "{}", err.message);
     }
 
     #[test]

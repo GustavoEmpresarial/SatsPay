@@ -163,8 +163,10 @@ Sem nenhum deles, rotas que usam o IP respondem `400 CLIENT_IP_UNAVAILABLE` (ant
 
 ### `POST /v1/auth/sessions/revoke-others`
 - **Autenticação**: Bearer JWT (+ gate CSRF de navegador, pois reemite o cookie).
-- **Descrição**: "Desconectar outros aparelhos". Revoga **todos** os refresh tokens do
-  usuário e emite um novo par para quem chamou. Access tokens já emitidos em outros
+- **Descrição**: "Desconectar outros aparelhos". **Apaga** todos os refresh tokens do
+  usuário e emite um novo par para quem chamou. Apagar (e não só revogar) é de propósito:
+  o aparelho antigo recebe `401` simples — sem disparar a detecção de reuso (que derrubaria
+  também a sessão nova) e sem passar pela janela de tolerância de reuso. Access tokens já emitidos em outros
   aparelhos morrem no TTL curto do JWT. Audita `AUTH_SESSIONS_REVOKED`.
 - **Resposta `200`**: `{ "revoked": true, "accessToken": "..." }` + novo cookie de refresh.
 

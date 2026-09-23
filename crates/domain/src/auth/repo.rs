@@ -66,6 +66,12 @@ pub trait AuthRepo: Send + Sync {
     async fn find_refresh_token_with_user(&self, token_hash: &str) -> Result<Option<(RefreshTokenRow, UserRow)>, RepoError>;
     async fn find_refresh_token(&self, token_hash: &str) -> Result<Option<RefreshTokenRow>, RepoError>;
     async fn revoke_all_user_refresh_tokens(&self, user_id: Uuid, now: DateTime<Utc>) -> Result<(), RepoError>;
+    /// Deletes every refresh token of the user. Used by the user-initiated
+    /// "sign out other devices": a deleted row is simply unknown on the next
+    /// refresh, whereas a revoked row trips reuse detection (which would then
+    /// revoke the caller's fresh session too) and is honoured inside the
+    /// reuse grace window (which would let an attacker keep a session).
+    async fn delete_all_user_refresh_tokens(&self, user_id: Uuid) -> Result<(), RepoError>;
     async fn revoke_refresh_token_by_hash(&self, token_hash: &str, now: DateTime<Utc>) -> Result<(), RepoError>;
 
     async fn find_recent_otp(&self, user_id: Uuid, purpose: &str, since: DateTime<Utc>) -> Result<Option<EmailOtpRow>, RepoError>;
