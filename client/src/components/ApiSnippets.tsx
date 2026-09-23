@@ -81,7 +81,7 @@ export function MultiLangCodeBlock({ snippets }: { snippets: Partial<Record<Code
   );
 }
 
-export function MethodBadge({ method }: { method: 'GET' | 'POST' | 'DELETE' }) {
+function MethodBadge({ method }: { method: 'GET' | 'POST' | 'DELETE' }) {
   const color =
     method === 'GET'
       ? 'bg-blue-500/15 text-blue-600 border-blue-500/30'

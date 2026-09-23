@@ -22,7 +22,11 @@ const publicDocs = readFileSync(path.join(clientRoot, 'src/pages/ApiDocsPage.tsx
 function declaredRoutes(): string[] {
   const routes = new Set<string>();
   for (const file of readdirSync(httpSrc).filter((f) => f.endsWith('.rs'))) {
-    const src = readFileSync(path.join(httpSrc, file), 'utf8');
+    const raw = readFileSync(path.join(httpSrc, file), 'utf8');
+    // Ignore inline `#[cfg(test)]` modules: their `.route(...)` calls build
+    // throwaway routers for tests, not real API surface. Every crate here
+    // keeps the test module at the end of the file.
+    const src = raw.split(/#\[cfg\(test\)\]/)[0];
     for (const m of src.matchAll(/\.route\(\s*"([^"]+)"/g)) routes.add(m[1]);
   }
   return [...routes].sort();

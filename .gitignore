@@ -53,3 +53,8 @@ lcov.info
 # Playwright (e2e runs against a live base URL and drops artifacts here)
 client/test-results/
 client/playwright-report/
+
+# Build/coverage artifacts
+*.tsbuildinfo
+client/coverage-logic/
+*.stale-backup

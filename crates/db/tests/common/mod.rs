@@ -1,4 +1,6 @@
 //! Shared helpers for `#[sqlx::test]` integration tests in this crate.
+//! Each test binary uses a different subset, hence the crate-wide allow.
+#![allow(dead_code)]
 
 use bigdecimal::BigDecimal;
 use shared::Coin;

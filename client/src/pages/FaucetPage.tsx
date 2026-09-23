@@ -105,7 +105,7 @@ export function FaucetPage() {
 
   useEffect(() => {
     if (!statusReady) return;
-    if (!isCoinCooling(selectedCoin)) return;
+    if (!(now < (cooldowns[selectedCoin] || 0))) return;
     const next = availableCoins[0];
     if (next && next !== selectedCoin) {
       setSelectedCoin(next);

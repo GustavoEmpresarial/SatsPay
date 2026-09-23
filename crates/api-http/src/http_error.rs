@@ -6,20 +6,23 @@ use axum::Json;
 use serde_json::json;
 use uuid::Uuid;
 
-/// Log `err` server-side and return `{ code: INTERNAL, requestId }` with no debug text.
+/// Log `err` server-side and return `{ error, code: INTERNAL, requestId }` with no debug text.
 pub fn internal_error(err: impl std::fmt::Display) -> Response {
     internal_error_parts(err).into_response()
 }
 
 /// Same body as [`internal_error`] for handlers that return `Result<_, (StatusCode, Json<Value>)>`.
 pub fn internal_error_parts(err: impl std::fmt::Display) -> (StatusCode, Json<serde_json::Value>) {
-    let request_id = Uuid::new_v4();
-    tracing::error!(%request_id, error = %err, "internal error");
+    // Same id as the access-log span / `X-Request-Id`, so support can go from
+    // the id a user reports straight to this log line.
+    let request_id = crate::access_log::current_request_id().unwrap_or_else(|| Uuid::new_v4().to_string());
+    tracing::error!(%request_id, error = %err, code = "INTERNAL", "internal error");
     (
         StatusCode::INTERNAL_SERVER_ERROR,
         Json(json!({
+            "error": "internal error",
             "code": "INTERNAL",
-            "requestId": request_id.to_string(),
+            "requestId": request_id,
         })),
     )
 }

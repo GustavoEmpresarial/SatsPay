@@ -80,6 +80,20 @@ describe('adaptRustError', () => {
     expect(adaptRustError({}, 'Bad Gateway')).toEqual({ code: 'UNKNOWN', message: 'Bad Gateway' });
   });
 
+  it('reads the flat { error, code } shape most Rust handlers return', () => {
+    expect(adaptRustError({ error: 'cannot send to yourself', code: 'SEND_TO_SELF' }, 'x')).toEqual({
+      code: 'SEND_TO_SELF',
+      message: 'cannot send to yourself',
+      details: undefined,
+    });
+    expect(
+      adaptRustError({ error: 'paused', code: 'WITHDRAWAL_MERCHANT_BLOCKED', coin: 'BTC' }, 'x'),
+    ).toEqual({ code: 'WITHDRAWAL_MERCHANT_BLOCKED', message: 'paused', details: { coin: 'BTC' } });
+    // Non-string / empty code falls back to the legacy generic code.
+    expect(adaptRustError({ error: 'x', code: 42 }, 'y').code).toBe('ERROR');
+    expect(adaptRustError({ error: 'x', code: '' }, 'y').code).toBe('ERROR');
+  });
+
   it('maps legacy faucet cooldown string to FAUCET_COOLDOWN', () => {
     const out = adaptRustError(
       { error: 'next claim available at 2026-09-10 16:20:20.474071 UTC' },

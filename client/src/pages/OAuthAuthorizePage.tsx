@@ -3,6 +3,7 @@ import { useSearchParams, useNavigate, Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useAuthStore } from '../stores/auth.js';
 import { api } from '../lib/api.js';
+import { formatApiError } from '../lib/formatError.js';
 import { reportAuthFailure } from '../lib/reportError.js';
 
 interface AuthorizeInfo {
@@ -94,8 +95,8 @@ export function OAuthAuthorizePage() {
         setLogoBroken(false);
         setLoading(false);
       })
-      .catch((err: any) => {
-        const msg = err.message || 'Falha ao carregar dados do aplicativo.';
+      .catch((err: unknown) => {
+        const msg = formatApiError(err, 'Falha ao carregar dados do aplicativo.');
         setError(msg);
         setLoading(false);
         reportAuthFailure('oauth', `Authorize info failed: ${msg}`, { clientId });
@@ -164,8 +165,8 @@ export function OAuthAuthorizePage() {
       }
 
       finishOAuth(res.redirect_url, decision);
-    } catch (err: any) {
-      const msg = err.message || 'Erro ao processar autorização.';
+    } catch (err) {
+      const msg = formatApiError(err, 'Erro ao processar autorização.');
       setError(msg);
       setSubmitting(false);
       reportAuthFailure('oauth', `Authorize decision failed: ${msg}`, {

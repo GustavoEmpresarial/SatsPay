@@ -270,6 +270,17 @@ impl<R: AuthRepo> AuthService<R> {
         Ok(())
     }
 
+    /// "Sign out other devices": revokes every refresh token of the user and
+    /// mints a fresh pair for the caller, so only the current browser keeps a
+    /// session. Access tokens already issued elsewhere die at their short TTL.
+    pub async fn revoke_other_sessions(&self, user_id: uuid::Uuid) -> Result<AuthTokens, AuthError> {
+        let Some(user) = self.repo.find_user_by_id(user_id).await? else {
+            return Err(AuthError::NotFound);
+        };
+        self.repo.revoke_all_user_refresh_tokens(user_id, Utc::now()).await?;
+        self.issue_tokens(&user).await
+    }
+
     pub async fn get_user_by_id(&self, user_id: uuid::Uuid) -> Result<Option<UserRow>, AuthError> {
         Ok(self.repo.find_user_by_id(user_id).await?)
     }

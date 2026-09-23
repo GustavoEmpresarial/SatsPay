@@ -158,18 +158,18 @@ export function SettingsPage() {
   });
 
   const revokeAllSessions = useMutation({
-    mutationFn: async () => {
-      await new Promise((res) => setTimeout(res, 600));
-      return { success: true };
-    },
-    onSuccess: () => {
+    mutationFn: () =>
+      api<{ revoked: boolean; accessToken: string }>('/auth/sessions/revoke-others', { method: 'POST' }),
+    onSuccess: (res) => {
+      // Server revoked every refresh token and re-issued ours (cookie + new access token).
+      useAuthStore.getState().setSession({ accessToken: res.accessToken });
       setSessionMsg({
         type: 'success',
         text: 'Todas as outras sessões e aparelhos foram desconectados com sucesso. Sua sessão atual permanece segura.',
       });
     },
-    onError: () => {
-      setSessionMsg({ type: 'error', text: 'Erro ao revogar sessões remotas.' });
+    onError: (err) => {
+      setSessionMsg({ type: 'error', text: formatApiError(err, 'Erro ao revogar sessões remotas.') });
     },
   });
 

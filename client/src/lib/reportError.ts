@@ -1,8 +1,5 @@
 import { useAuthStore } from '../stores/auth.js';
 
-/** Same service name stored in `system_error_logs.service` (migration 0014). */
-export const CLIENT_ERROR_SERVICE = 'client-frontend';
-
 export const CLIENT_ERROR_KINDS = [
   'js',
   'promise',
@@ -153,7 +150,7 @@ const THROTTLE_MS = 12_000;
 const MAX_QUEUE = 40;
 const FLUSH_MS = 2_500;
 
-let queue: QueuedReport[] = [];
+const queue: QueuedReport[] = [];
 let flushTimer: ReturnType<typeof setTimeout> | null = null;
 let collectorsInstalled = false;
 
@@ -373,7 +370,10 @@ export function installErrorCollectors(): void {
     { capture: true, passive: true },
   );
 
+  // Deliberate console wrap: console.error output becomes a breadcrumb + report.
+  // eslint-disable-next-line no-console
   const originalConsoleError = console.error;
+  // eslint-disable-next-line no-console
   console.error = (...args: unknown[]) => {
     try {
       const msg = args

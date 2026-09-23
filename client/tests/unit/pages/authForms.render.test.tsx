@@ -53,8 +53,8 @@ vi.mock('../../../src/lib/api.js', async () => {
   };
 });
 
-vi.mock('../../../src/components/Turnstile.js', () => {
-  const { forwardRef, useImperativeHandle } = require('react') as typeof import('react');
+vi.mock('../../../src/components/Turnstile.js', async () => {
+  const { forwardRef, useImperativeHandle } = await vi.importActual<typeof import('react')>('react');
   return {
     Turnstile: forwardRef(function MockTurnstile(
       { onVerify, onReset }: { onVerify?: (t: string) => void; onReset?: () => void },

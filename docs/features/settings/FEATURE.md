@@ -31,6 +31,8 @@
 ## APIs usadas (client → `/v1…`)
 
 - `/auth/2fa/request` (prefixo `/v1` no servidor)
+- `/auth/2fa/enable`, `/auth/2fa/disable` (prefixo `/v1` no servidor)
+- `/auth/sessions/revoke-others` (prefixo `/v1` no servidor) — «Desconectar outros aparelhos»; revoga todos os refresh tokens e reemite o atual
 - `/auth/me` (prefixo `/v1` no servidor)
 - `/auth/security-logs` (prefixo `/v1` no servidor)
 - `/auth/username` (prefixo `/v1` no servidor)

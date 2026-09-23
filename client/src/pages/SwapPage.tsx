@@ -365,7 +365,7 @@ export function SwapPage() {
     staleTime: 10_000,
   });
 
-  const routes = quoteQ.data?.routes ?? [];
+  const routes = useMemo(() => quoteQ.data?.routes ?? [], [quoteQ.data]);
   const selected =
     routes.find((r) => r.routeId === selectedRouteId) ?? pickPreferredRoute(routes);
 

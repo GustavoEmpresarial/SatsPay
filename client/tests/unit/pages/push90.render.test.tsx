@@ -175,7 +175,9 @@ describe('reportError edge collectors', () => {
     document.body.innerHTML = '<button id="x" role="button">Go</button>';
     document.getElementById('x')?.click();
 
+    // eslint-disable-next-line no-console -- exercising the console.error collector
     console.error('synthetic console error for coverage', { a: 1 });
+    // eslint-disable-next-line no-console -- exercising the console.error collector
     console.error(new Error('err-obj'));
 
     window.dispatchEvent(

@@ -34,7 +34,23 @@ comum elas respondem `403`, não `404`.
 
 **Erros.** Corpo JSON com `error` (mensagem legível) e, nas superfícies novas, `code`
 (constante estável — `AMOUNT_NOT_INTEGER`, `COIN_LOCKED`, `DUPLICATE_ORDER_ID`…).
-Integre contra o `code`, nunca contra o texto.
+Integre contra o `code`, nunca contra o texto. Formato plano: `{ "error": "...", "code": "..." }`.
+As rotas de `/v1/auth/*` ainda usam o formato aninhado `{ "error": { "code", "message" } }`;
+o client (`adaptRustError`) lê os dois.
+
+**Correlação (`X-Request-Id`).** Toda resposta traz `X-Request-Id`. Se a requisição
+enviar um `X-Request-Id` com 8–64 caracteres `[A-Za-z0-9_-]`, ele é mantido; senão a API
+gera `req_<uuid>`. O nginx do client sempre gera o seu (`$request_id`) e não repassa o do
+navegador. Um `500` responde `{ "error": "internal error", "code": "INTERNAL",
+"requestId": "<o mesmo id>" }` — é esse id que o suporte procura nos logs.
+
+**Log de acesso.** Uma linha JSON por requisição (`target: http_access`): método, rota
+*template* (`/v1/wallet/:coin`, nunca o caminho cru), status, `duration_ms` e `request_id`.
+Não entram query string, corpo, headers nem IP. `>= 2 s` sai como `WARN`
+`PERFORMANCE_DEGRADATION`; `5xx` como `ERROR`; `/healthz` e `/metrics` em `DEBUG`.
+
+**IP do cliente.** A API exige `X-Real-IP` (ou `X-Forwarded-For`/peer) vindo do proxy.
+Sem nenhum deles, rotas que usam o IP respondem `400 CLIENT_IP_UNAVAILABLE` (antes: `500`).
 
 ---
 
@@ -102,9 +118,11 @@ Integre contra o `code`, nunca contra o texto.
   *(Define também o cookie `refresh_token` HttpOnly)*.
 
 ### `POST /v1/auth/refresh`
-- **Autenticação**: Cookie `refresh_token` ou body `{"refreshToken": "..."}`
-- **Descrição**: Rotação do refresh token com detecção de reuso.
-- **Resposta `200 OK`**: Novos pares de `accessToken` e `refreshToken`.
+- **Autenticação**: Cookie `HttpOnly` `__Host-refresh_token` (produção) / `refresh_token`.
+  O body é ignorado; refresh token nunca trafega em JSON. Passa pelo gate CSRF de navegador.
+- **Descrição**: Rotação do refresh token com detecção de reuso (token revogado
+  reapresentado fora da janela de graça revoga todas as sessões do usuário).
+- **Resposta `200 OK`**: `{ "accessToken" }` + novo cookie de refresh.
 
 ### `POST /v1/auth/logout`
 - **Autenticação**: Bearer JWT ou Cookie de Refresh
@@ -123,6 +141,32 @@ Integre contra o `code`, nunca contra o texto.
 - **Autenticação**: Bearer JWT
 - **Descrição**: Histórico de eventos de segurança da própria conta (logins, trocas de
   senha, emissão de chaves), com IP e user-agent. Só os do usuário autenticado.
+
+### `POST /v1/auth/2fa/request`
+- **Autenticação**: Bearer JWT
+- **Body**: `{ "purpose": "ENABLE_2FA" | "DISABLE_2FA" }`
+- **Descrição**: Envia por e-mail o código de 6 dígitos que `/2fa/enable` ou
+  `/2fa/disable` consome. Outros `purpose` (LOGIN, WITHDRAWAL) têm fluxo próprio.
+- **Resposta `200`**: `{ "codeSent": true }`.
+- **Erros**: `400 VALIDATION_ERROR` (purpose inválido); `409 TWO_FACTOR_ALREADY_ENABLED` /
+  `TWO_FACTOR_NOT_ENABLED` (pedido que não muda nada); `429 RATE_LIMITED` (pedido
+  repetido cedo demais).
+
+### `POST /v1/auth/2fa/enable` · `POST /v1/auth/2fa/disable`
+- **Autenticação**: Bearer JWT
+- **Body**: `{ "code": "123456" }`
+- **Descrição**: Liga/desliga o 2FA por e-mail. O código é de uso único, expira, e tem
+  limite de tentativas (`otp_max_attempts`). Grava `AUTH_2FA_ENABLED` / `AUTH_2FA_DISABLED`
+  (ou `*_FAILED`) no log de auditoria.
+- **Resposta `200`**: `{ "twoFactorEnabled": true | false }`.
+- **Erros**: `401 INVALID_2FA`; `409` como em `/2fa/request`.
+
+### `POST /v1/auth/sessions/revoke-others`
+- **Autenticação**: Bearer JWT (+ gate CSRF de navegador, pois reemite o cookie).
+- **Descrição**: "Desconectar outros aparelhos". Revoga **todos** os refresh tokens do
+  usuário e emite um novo par para quem chamou. Access tokens já emitidos em outros
+  aparelhos morrem no TTL curto do JWT. Audita `AUTH_SESSIONS_REVOKED`.
+- **Resposta `200`**: `{ "revoked": true, "accessToken": "..." }` + novo cookie de refresh.
 
 ### `POST /v1/auth/admin/login`
 - **Autenticação**: Pública, mas só conclui para usuário com `role = "ADMIN"`.

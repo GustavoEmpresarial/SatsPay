@@ -37,10 +37,13 @@
 - `client/src/pages/AdminTelemetryPage.tsx`
 - `docs/quality/error-observability.md`
 - `crates/db/migrations/0014_telemetry_and_error_logs.sql`
+- `crates/api-http/src/access_log.rs`
+- `crates/api-http/src/http_error.rs`
+- `client/nginx.conf`
 
 ## Comportamento (bruto)
 
-Filtros de ruído: inventory faucet, login 400, React #311 legado, CDN icons.
+Filtros de ruído: inventory faucet, login 400, React #311 legado, CDN icons. Log de acesso: 1 linha JSON por request (`http_access`: rota template, status, duration_ms, request_id), sem query/corpo/IP. `X-Request-Id` em toda resposta; 500 devolve o mesmo `requestId`. nginx: log JSON com `$uri` (sem query) e `X-Request-Id: $request_id` para a API. RUST_LOG padrão = info.
 
 ## Notas de overview legado
 

@@ -3,8 +3,8 @@ import { Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api.js';
 import { coinLogo } from '../lib/coinAssets.js';
-import { COINS, formatLedgerAmount, toLedgerUnits, type Coin } from '@/shared';
-import { CodeBlock, EndpointHeader, MultiLangCodeBlock } from '../components/ApiSnippets.js';
+import { COINS, formatLedgerAmount, type Coin } from '@/shared';
+import { CodeBlock } from '../components/ApiSnippets.js';
 import { clsx } from 'clsx';
 
 interface InvoiceItem {

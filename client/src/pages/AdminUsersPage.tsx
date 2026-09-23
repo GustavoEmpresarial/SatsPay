@@ -62,7 +62,7 @@ export function AdminUsersPage() {
     refetchInterval: 30_000,
   });
 
-  const users = listQ.data?.users ?? [];
+  const users = useMemo(() => listQ.data?.users ?? [], [listQ.data]);
 
   const stats = useMemo(() => {
     const total = users.length;

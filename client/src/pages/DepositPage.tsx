@@ -130,7 +130,7 @@ export function DepositPage() {
     staleTime: 60_000,
   });
 
-  const { data, isLoading, isError, refetch } = useQuery({
+  const { data, isLoading, refetch } = useQuery({
     queryKey: ['deposit-address', coin],
     queryFn: () => api<AddressResp>(`/deposits/address/${coin}`),
     enabled: Boolean(user) && !depositPaused,

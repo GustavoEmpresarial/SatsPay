@@ -1,6 +1,5 @@
 import { useState, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Link } from 'react-router-dom';
 import QRCode from 'qrcode';
 import { api } from '../lib/api.js';
 import { useAuthStore } from '../stores/auth.js';
@@ -46,7 +45,7 @@ export function ReferralPage() {
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const user = useAuthStore((s) => s.user);
 
-  const { data: stats, isLoading: isStatsLoading } = useQuery<ReferralStats>({
+  const { data: stats } = useQuery<ReferralStats>({
     queryKey: ['referral-stats'],
     queryFn: async () => {
       const res = await api<ReferralStats>('/referral/stats');

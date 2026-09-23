@@ -55,6 +55,16 @@ Doc gerado à mão — `scripts/generate_feature_docs.py` **não** sobrescreve e
 
 _sem overview em docs/pages_
 
+## 2FA e sessões (HTTP)
+
+- `POST /v1/auth/2fa/request {purpose: ENABLE_2FA|DISABLE_2FA}` → `{codeSent}`; `POST /v1/auth/2fa/enable|disable {code}` → `{twoFactorEnabled}`.
+  Antes dessas rotas a aba Segurança do Settings sempre recebia 404 (o domínio tinha `enable_2fa`/`disable_2fa`, mas nada no HTTP).
+- `409 TWO_FACTOR_ALREADY_ENABLED` / `TWO_FACTOR_NOT_ENABLED`; `401 INVALID_2FA`; `429 RATE_LIMITED`. Auditoria `AUTH_2FA_*`.
+- `POST /v1/auth/sessions/revoke-others` revoga todos os refresh tokens e reemite o do chamador (CSRF gate). O botão
+  "Desconectar outros aparelhos" era falso (só esperava 600 ms e mostrava sucesso).
+- `ClientIp` ausente → `400 CLIENT_IP_UNAVAILABLE` (era 500).
+- Detecção de reuso é agressiva: depois do revoke-others, se o aparelho antigo tentar `/auth/refresh` com o token já revogado, isso é tratado como roubo e revoga **todas** as sessões (inclusive a atual). Produção suaviza com `refresh_reuse_grace_secs > 0`; nos testes é 0.
+
 ## Bugs / armadilhas conhecidas
 
 - Não short-circuit hooks (`useA() || useB()`) — React #311.
