@@ -43,8 +43,10 @@ async fn main() {
     // ADR 0012: this process faces the internet and signs nothing. Refuse to
     // boot in production if any wallet key reached its env.
     if let Err(e) = crypto::assert_no_signer_env() {
-        tracing::error!(code = e.code(), severity = "FATAL", "{e}");
-        panic!("{}: {e}", e.code());
+        // Only the stable code belongs in logs: this branch is reached when
+        // key-related environment variables are present.
+        tracing::error!(code = e.code(), severity = "FATAL", "api-server signer env rejected");
+        panic!("{}", e.code());
     }
 
     let database_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");

@@ -19,6 +19,8 @@
 | C3 | Média | O client ignorava erros se a mensagem apenas mencionasse um domínio de analytics. | O filtro verifica o host do script de origem; teste cobre domínio real e domínio semelhante malicioso. |
 | C4 | Alta | O fallback SoChain para DOGE retornava lista vazia após qualquer HTTP 200, sem ler transações; isso mascarava a falha dos provedores anteriores como ausência de depósitos. | Removido do caminho DOGE e apagada a função sem uso. O Blockbook com chave é a reserva funcional; sem chave, a falha total agora é visível ao alerta. |
 | C5 | Alta | Falha HTTP/JSON do explorador ZER podia incluir URL com chave de API no texto do erro. | Mensagem de erro agora contém só o tipo da falha ou status HTTP, sem URL nem resposta de transporte. |
+| C6 | Alta (CodeQL) | O boot da API escrevia a descrição de `SignerSecretInApi` no log; ela contém nomes de variáveis de chave, nunca o valor. | O boot registra apenas o código estável `SIGNER_SECRET_IN_API` e encerra. |
+| C7 | Alta (CodeQL, falso positivo) | O helper operacional de custódia imprime xpubs e endereços hot derivados; o analisador os classificou como segredo em log. | Saída é deliberadamente pública para popular `DEPOSIT_XPUB_*` e `HOT_ADDRESS_*`; nenhuma seed ou chave privada é impressa. Manter stdout sob controle operacional. |
 
 ## Testes executados
 
