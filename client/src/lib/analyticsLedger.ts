@@ -3,7 +3,7 @@
  * Admin seeds (ADJUSTMENT) and pure bookkeeping noise stay out of the chart.
  */
 
-export const ANALYTICS_INFLOW = new Set([
+const ANALYTICS_INFLOW = new Set([
   'DEPOSIT',
   'FAUCET',
   'TRANSFER_IN',
@@ -15,7 +15,7 @@ export const ANALYTICS_INFLOW = new Set([
   'SWAP_IN',
 ]);
 
-export const ANALYTICS_OUTFLOW = new Set([
+const ANALYTICS_OUTFLOW = new Set([
   'WITHDRAWAL',
   'WITHDRAWAL_FEE',
   'TRANSFER_OUT',
@@ -26,7 +26,7 @@ export const ANALYTICS_OUTFLOW = new Set([
 ]);
 
 /** Skip entirely (admin seed / internal noise). */
-export const ANALYTICS_SKIP = new Set(['ADJUSTMENT']);
+const ANALYTICS_SKIP = new Set(['ADJUSTMENT']);
 
 /**
  * Map raw ledger type → display bucket.

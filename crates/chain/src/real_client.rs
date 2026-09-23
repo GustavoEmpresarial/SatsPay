@@ -535,7 +535,10 @@ impl ChainClient for RealChainClient {
             }
             Coin::Dgb => {
                 let client = self.dgb();
-                let utxos = client.fetch_utxos(&from).await.map_err(|e| BroadcastError { message: e.to_string(), safe_to_reverse: true })?;
+                let mut utxos = client.fetch_utxos(&from).await.map_err(|e| BroadcastError { message: e.to_string(), safe_to_reverse: true })?;
+                let from_script = address_to_script_pubkey(self.coin, self.config.network, &from)
+                    .map_err(|e| BroadcastError { message: e, safe_to_reverse: true })?;
+                crate::dgb_client::fill_missing_scripts(&mut utxos, &hex::encode(from_script.as_bytes()));
                 if utxos.is_empty() {
                     return Ok(None);
                 }
@@ -745,10 +748,11 @@ impl RealChainClient {
                 continue;
             }
             let evm = EvmClient::new(rpc_url);
+            let rpc_host = crate::evm_client::rpc_host(rpc_url);
             let nonce = match evm.get_transaction_count(&from_hex).await {
                 Ok(n) => n,
                 Err(e) => {
-                    last_error = format!("nonce failed on {rpc_url}: {e}");
+                    last_error = format!("nonce failed on {rpc_host}: {e}");
                     continue;
                 }
             };
@@ -758,7 +762,7 @@ impl RealChainClient {
                     .max(call.gas_price_hint.unwrap_or(0))
                     .max(30_000_000_000),
                 Err(e) => {
-                    last_error = format!("gas_price failed on {rpc_url}: {e}");
+                    last_error = format!("gas_price failed on {rpc_host}: {e}");
                     continue;
                 }
             };
@@ -773,7 +777,7 @@ impl RealChainClient {
                     .max(call.gas_limit_hint.unwrap_or(0))
                     .max(100_000),
                 Err(e) => {
-                    last_error = format!("estimateGas failed on {rpc_url}: {e}");
+                    last_error = format!("estimateGas failed on {rpc_host}: {e}");
                     // Do not fall back to a stale quote gas hint — that caused
                     // on-chain reverts after missing ERC-20 allowance.
                     continue;
@@ -784,7 +788,7 @@ impl RealChainClient {
                 .simulate_call(&from_hex, &call.to, data_hex, call.value_wei)
                 .await
             {
-                last_error = format!("eth_call simulation reverted on {rpc_url}: {e}");
+                last_error = format!("eth_call simulation reverted on {rpc_host}: {e}");
                 continue;
             }
 
@@ -803,7 +807,7 @@ impl RealChainClient {
                     }
                 }
                 Err(e) => {
-                    last_error = format!("balance failed on {rpc_url}: {e}");
+                    last_error = format!("balance failed on {rpc_host}: {e}");
                     continue;
                 }
             }
@@ -839,7 +843,7 @@ impl RealChainClient {
                                 tx_hash = %txid,
                                 from = %from_hex,
                                 to = %call.to,
-                                rpc = %rpc_url,
+                                rpc = %rpc_host,
                                 "EVM contractCall broadcasted + confirmed"
                             );
                             return Ok(BroadcastResult {
@@ -865,7 +869,7 @@ impl RealChainClient {
                     }
                 }
                 Err(e) => {
-                    last_error = format!("broadcast failed on {rpc_url}: {e}");
+                    last_error = format!("broadcast failed on {rpc_host}: {e}");
                 }
             }
         }
@@ -904,19 +908,21 @@ impl RealChainClient {
             "https://polygon-mainnet.public.blastapi.io",
         ];
 
-        let mut last_error = String::new();
+        // One entry per failed RPC step, so the final error names every endpoint tried.
+        let mut errors: Vec<String> = Vec::new();
         let mut seen = std::collections::HashSet::new();
         for &rpc_url in &rpc_endpoints {
             if rpc_url.is_empty() || !seen.insert(rpc_url) {
                 continue;
             }
             let evm = EvmClient::new(rpc_url);
+            let rpc_host = crate::evm_client::rpc_host(rpc_url);
             // If allowance cannot be read, assume 0 and attempt approve (fail-open toward approve).
             let allowance = match evm.erc20_allowance(token, from_hex, spender).await {
                 Ok(a) => a,
                 Err(e) => {
-                    tracing::warn!(rpc = %rpc_url, error = %e, "ERC-20 allowance read failed; trying approve");
-                    last_error = format!("allowance failed on {rpc_url}: {e}");
+                    tracing::warn!(rpc = %rpc_host, error = %e, "ERC-20 allowance read failed; trying approve");
+                    errors.push(format!("allowance failed on {rpc_host}: {e}"));
                     0
                 }
             };
@@ -941,7 +947,7 @@ impl RealChainClient {
                 {
                     Ok(fee) => fee_total = fee_total.saturating_add(fee),
                     Err(e) => {
-                        last_error = e.message;
+                        errors.push(format!("{rpc_host}: {}", e.message));
                         continue;
                     }
                 }
@@ -960,17 +966,17 @@ impl RealChainClient {
                 .await
             {
                 Ok(fee) => {
-                    tracing::info!(token, spender, need, rpc = %rpc_url, "ERC-20 approve(max) confirmed for DEX router");
+                    tracing::info!(token, spender, need, rpc = %rpc_host, "ERC-20 approve(max) confirmed for DEX router");
                     return Ok(fee_total.saturating_add(fee));
                 }
                 Err(e) => {
-                    last_error = e.message;
+                    errors.push(format!("{rpc_host}: {}", e.message));
                 }
             }
         }
 
         Err(BroadcastError {
-            message: format!("ERC-20 approve falhou: {last_error}"),
+            message: format!("ERC-20 approve falhou: {}", errors.join("; ")),
             safe_to_reverse: true,
         })
     }
@@ -985,17 +991,18 @@ impl RealChainClient {
         chain_id: u64,
         rpc_url: &str,
     ) -> Result<u128, BroadcastError> {
+        let rpc_host = crate::evm_client::rpc_host(rpc_url);
         let token_hex = format!("0x{}", hex::encode(token));
         let data_hex = format!("0x{}", hex::encode(&data));
         let nonce = evm.get_transaction_count(from_hex).await.map_err(|e| BroadcastError {
-            message: format!("approve nonce failed on {rpc_url}: {e}"),
+            message: format!("approve nonce failed on {rpc_host}: {e}"),
             safe_to_reverse: true,
         })?;
         let gas_price = evm
             .gas_price()
             .await
             .map_err(|e| BroadcastError {
-                message: format!("approve gas_price failed on {rpc_url}: {e}"),
+                message: format!("approve gas_price failed on {rpc_host}: {e}"),
                 safe_to_reverse: true,
             })?
             .max(30_000_000_000);
@@ -1022,7 +1029,7 @@ impl RealChainClient {
         })?;
         let fee_amount = (gas_price.saturating_mul(gas_limit as u128)) / 10_000_000_000;
         let txid = evm.broadcast(&raw).await.map_err(|e| BroadcastError {
-            message: format!("approve broadcast failed on {rpc_url}: {e}"),
+            message: format!("approve broadcast failed on {rpc_host}: {e}"),
             safe_to_reverse: true,
         })?;
         match evm.wait_receipt_success(&txid, 30, 2).await {
@@ -1061,10 +1068,11 @@ impl RealChainClient {
         let mut last_error = String::new();
         for &rpc_url in &rpc_endpoints {
             let evm = EvmClient::new(rpc_url);
+            let rpc_host = crate::evm_client::rpc_host(rpc_url);
             let nonce = match evm.get_transaction_count(&from_hex).await {
                 Ok(n) => n,
                 Err(e) => {
-                    last_error = format!("nonce failed on {rpc_url}: {e}");
+                    last_error = format!("nonce failed on {rpc_host}: {e}");
                     continue;
                 }
             };
@@ -1072,7 +1080,7 @@ impl RealChainClient {
             let gas_price = match evm.gas_price().await {
                 Ok(g) => g.max(30_000_000_000), // minimum 30 Gwei for Polygon
                 Err(e) => {
-                    last_error = format!("gas_price failed on {rpc_url}: {e}");
+                    last_error = format!("gas_price failed on {rpc_host}: {e}");
                     continue;
                 }
             };
@@ -1101,11 +1109,11 @@ impl RealChainClient {
             let fee_amount = (gas_price.saturating_mul(gas_limit as u128)) / 10_000_000_000;
             match evm.broadcast(&raw).await {
                 Ok(txid) => {
-                    tracing::info!(tx_hash = %txid, from = %from_hex, to = %to_address, rpc = %rpc_url, "POL withdrawal broadcasted on-chain successfully");
+                    tracing::info!(tx_hash = %txid, from = %from_hex, to = %to_address, rpc = %rpc_host, "POL withdrawal broadcasted on-chain successfully");
                     return Ok(BroadcastResult { tx_hash: txid, fee_amount });
                 }
                 Err(e) => {
-                    last_error = format!("broadcast failed on {rpc_url}: {e}");
+                    last_error = format!("broadcast failed on {rpc_host}: {e}");
                 }
             }
         }
@@ -1135,17 +1143,18 @@ impl RealChainClient {
         let mut last_error = String::new();
         for rpc_url in &rpc_endpoints {
             let evm = EvmClient::new(rpc_url);
+            let rpc_host = crate::evm_client::rpc_host(rpc_url);
             let nonce = match evm.get_transaction_count(&from_hex).await {
                 Ok(n) => n,
                 Err(e) => {
-                    last_error = format!("nonce failed on {rpc_url}: {e}");
+                    last_error = format!("nonce failed on {rpc_host}: {e}");
                     continue;
                 }
             };
             let gas_price = match evm.gas_price().await {
                 Ok(g) => g.max(min_gas),
                 Err(e) => {
-                    last_error = format!("gas_price failed on {rpc_url}: {e}");
+                    last_error = format!("gas_price failed on {rpc_host}: {e}");
                     continue;
                 }
             };
@@ -1166,7 +1175,7 @@ impl RealChainClient {
                 }
                 Ok(_) => {}
                 Err(e) => {
-                    last_error = format!("native balance failed on {rpc_url}: {e}");
+                    last_error = format!("native balance failed on {rpc_host}: {e}");
                     continue;
                 }
             }
@@ -1188,7 +1197,7 @@ impl RealChainClient {
             let fee_amount = gas_cost / 10_000_000_000;
             match evm.broadcast(&raw).await {
                 Ok(txid) => return Ok(BroadcastResult { tx_hash: txid, fee_amount }),
-                Err(e) => last_error = format!("broadcast failed on {rpc_url}: {e}"),
+                Err(e) => last_error = format!("broadcast failed on {rpc_host}: {e}"),
             }
         }
         Err(BroadcastError {
@@ -1226,6 +1235,7 @@ impl RealChainClient {
         let mut last_error = String::new();
         for rpc_url in &rpc_endpoints {
             let evm = EvmClient::new(rpc_url);
+            let rpc_host = crate::evm_client::rpc_host(rpc_url);
 
             // Pre-flight: hot wallet must hold the tokens. Never broadcast a doomed transfer.
             match evm.erc20_balance(token, &from_hex).await {
@@ -1243,7 +1253,7 @@ impl RealChainClient {
                 }
                 Ok(_) => {}
                 Err(e) => {
-                    last_error = format!("balance check failed on {rpc_url}: {e}");
+                    last_error = format!("balance check failed on {rpc_host}: {e}");
                     continue;
                 }
             }
@@ -1251,14 +1261,14 @@ impl RealChainClient {
             let nonce = match evm.get_transaction_count(&from_hex).await {
                 Ok(n) => n,
                 Err(e) => {
-                    last_error = format!("nonce failed on {rpc_url}: {e}");
+                    last_error = format!("nonce failed on {rpc_host}: {e}");
                     continue;
                 }
             };
             let gas_price = match evm.gas_price().await {
                 Ok(g) => g.max(min_gas),
                 Err(e) => {
-                    last_error = format!("gas_price failed on {rpc_url}: {e}");
+                    last_error = format!("gas_price failed on {rpc_host}: {e}");
                     continue;
                 }
             };
@@ -1285,7 +1295,7 @@ impl RealChainClient {
                 }
                 Ok(_) => {}
                 Err(e) => {
-                    last_error = format!("native balance failed on {rpc_url}: {e}");
+                    last_error = format!("native balance failed on {rpc_host}: {e}");
                     continue;
                 }
             }
@@ -1325,7 +1335,7 @@ impl RealChainClient {
                         }
                     }
                 }
-                Err(e) => last_error = format!("broadcast failed on {rpc_url}: {e}"),
+                Err(e) => last_error = format!("broadcast failed on {rpc_host}: {e}"),
             }
         }
         Err(BroadcastError { message: format!("ERC-20 broadcast falhou: {last_error}"), safe_to_reverse: true })
@@ -1346,17 +1356,19 @@ impl RealChainClient {
             .estimate_fee_sat_per_byte()
             .await
             .map_err(|e| BroadcastError { message: e.to_string(), safe_to_reverse: true })?;
-        let utxos = client
+        let mut utxos = client
             .fetch_utxos(&hot_address)
             .await
             .map_err(|e| BroadcastError { message: e.to_string(), safe_to_reverse: true })?;
-        let n_in = utxos.len();
-        let vsize = 11 + n_in * 68 + 2 * 31;
-        let fee = (vsize as u64) * fee_per_byte;
         let to_script = address_to_script_pubkey(self.coin, self.config.network, to_address)
             .map_err(|e| BroadcastError { message: e, safe_to_reverse: true })?;
         let change_script = address_to_script_pubkey(self.coin, self.config.network, &hot_address)
             .map_err(|e| BroadcastError { message: e, safe_to_reverse: true })?;
+        // The key's own address: its script is the change script.
+        crate::dgb_client::fill_missing_scripts(&mut utxos, &hex::encode(change_script.as_bytes()));
+        let n_in = utxos.len();
+        let vsize = 11 + n_in * 68 + 2 * 31;
+        let fee = (vsize as u64) * fee_per_byte;
         let amount_sats: u64 = amount.try_into().map_err(|_| BroadcastError { message: "amount exceeds u64".into(), safe_to_reverse: true })?;
         let tx = build_and_sign_p2wpkh(wif, &utxos, &to_script, amount_sats, fee, &change_script)
             .map_err(|e| BroadcastError { message: e.to_string(), safe_to_reverse: true })?;

@@ -563,7 +563,7 @@ export function asWalletBalances(
  * (7.2 units of 1e-8, not 7.2 coins). Showing the raw value told the merchant
  * they had charged 7.2 POL when the invoice actually asked for 0.000000072.
  */
-export function formatLedgerAmount(raw: string | number | null | undefined, coin: Coin): string {
+export function formatLedgerAmount(raw: string | number | null | undefined, _coin: Coin): string {
   const text = String(raw ?? '').trim();
   if (!text || !/^\d*\.?\d*$/.test(text)) return '0';
 

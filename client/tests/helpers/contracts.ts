@@ -12,7 +12,7 @@ function isObject(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
 }
 
-export function assertPublicUser(raw: unknown, path = 'user'): ContractIssue[] {
+function assertPublicUser(raw: unknown, path = 'user'): ContractIssue[] {
   const issues: ContractIssue[] = [];
   if (!isObject(raw)) {
     issues.push({ path, message: 'expected object' });

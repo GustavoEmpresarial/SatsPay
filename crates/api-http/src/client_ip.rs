@@ -62,12 +62,29 @@ impl<S> FromRequestParts<S> for ClientIp
 where
     S: Send + Sync,
 {
-    type Rejection = (StatusCode, &'static str);
+    type Rejection = axum::response::Response;
 
+    /// No usable IP means the request bypassed our proxy (or the proxy stopped
+    /// setting `X-Real-IP`). That is a malformed request, not a server fault:
+    /// answer 400 with a stable code instead of the old 500 `INTERNAL_ERROR`.
     async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
-        resolve_client_ip(parts)
-            .map(ClientIp)
-            .ok_or((StatusCode::INTERNAL_SERVER_ERROR, "client IP unavailable"))
+        use axum::response::IntoResponse;
+        resolve_client_ip(parts).map(ClientIp).ok_or_else(|| {
+            tracing::warn!(
+                method = %parts.method,
+                path = %parts.uri.path(),
+                code = "CLIENT_IP_UNAVAILABLE",
+                "request without X-Real-IP / X-Forwarded-For / peer address; check the reverse proxy"
+            );
+            (
+                StatusCode::BAD_REQUEST,
+                axum::Json(serde_json::json!({
+                    "error": "client IP unavailable: request must come through the SatsPay proxy",
+                    "code": "CLIENT_IP_UNAVAILABLE"
+                })),
+            )
+                .into_response()
+        })
     }
 }
 
@@ -85,6 +102,26 @@ mod tests {
 
     fn hdr(map: &mut HeaderMap, name: &'static str, value: &str) {
         map.insert(name, HeaderValue::from_str(value).unwrap());
+    }
+
+    #[tokio::test]
+    async fn missing_ip_is_a_400_with_stable_code_not_a_500() {
+        let mut parts = parts_with(HeaderMap::new());
+        let rejection = ClientIp::from_request_parts(&mut parts, &()).await.unwrap_err();
+        assert_eq!(rejection.status(), StatusCode::BAD_REQUEST);
+        let bytes = axum::body::to_bytes(rejection.into_body(), 1024).await.unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(body["code"], "CLIENT_IP_UNAVAILABLE");
+        assert!(body["error"].as_str().unwrap().contains("client IP unavailable"));
+    }
+
+    #[tokio::test]
+    async fn resolved_ip_is_extracted() {
+        let mut h = HeaderMap::new();
+        hdr(&mut h, "x-real-ip", "203.0.113.7");
+        let mut parts = parts_with(h);
+        let ClientIp(ip) = ClientIp::from_request_parts(&mut parts, &()).await.unwrap();
+        assert_eq!(ip, "203.0.113.7");
     }
 
     #[test]

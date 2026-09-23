@@ -165,7 +165,7 @@ export function AdminTelemetryPage() {
 
   const overview = overviewQ.data;
   const server = statsQ.data?.server;
-  const snapshots = metricsQ.data?.snapshots ?? [];
+  const snapshots = useMemo(() => metricsQ.data?.snapshots ?? [], [metricsQ.data]);
   const errors = useMemo(() => {
     const list = errorsQ.data?.errors ?? [];
     const filtered = hideNoise ? list.filter((e) => !isNoiseError(e)) : list;

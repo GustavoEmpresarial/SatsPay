@@ -97,7 +97,7 @@ export function AdminSupportPage() {
     },
   });
 
-  const tickets = listQ.data?.tickets ?? [];
+  const tickets = useMemo(() => listQ.data?.tickets ?? [], [listQ.data]);
   const detail = detailQ.data;
 
   const openCount = useMemo(

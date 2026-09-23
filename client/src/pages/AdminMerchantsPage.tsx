@@ -291,7 +291,7 @@ export function AdminMerchantsPage() {
     },
   });
 
-  const merchants = merchantsData?.merchants ?? [];
+  const merchants = useMemo(() => merchantsData?.merchants ?? [], [merchantsData]);
   const stats = statsQ.data;
 
   const accountCounts = useMemo(() => {

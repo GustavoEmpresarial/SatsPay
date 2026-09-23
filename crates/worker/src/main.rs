@@ -29,7 +29,11 @@ fn required_env_millis(name: &str) -> Duration {
 
 #[tokio::main]
 async fn main() {
-    tracing_subscriber::fmt().json().with_env_filter(tracing_subscriber::EnvFilter::from_default_env()).init();
+    // Default to INFO when RUST_LOG is unset: from_default_env() alone means ERROR-only,
+    // which silently drops the access log and job lifecycle lines.
+    let filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
+    tracing_subscriber::fmt().json().with_env_filter(filter).init();
     db::telemetry::install_panic_hook("worker");
 
     let database_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useImperativeHandle, forwardRef } from 'react';
+import { reportClientError } from '../lib/reportError.js';
 
 declare global {
   interface Window {
@@ -104,7 +105,11 @@ export const Turnstile = forwardRef<TurnstileRef, TurnstileProps>(function Turns
         });
         widgetIdRef.current = id;
       } catch (err) {
-        console.warn('Turnstile render warning:', err);
+        reportClientError({
+          kind: 'captcha',
+          level: 'WARN',
+          message: `Turnstile render failed: ${err instanceof Error ? err.message : String(err)}`,
+        });
       }
     }
 

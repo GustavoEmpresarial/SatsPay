@@ -20,6 +20,15 @@ pub enum EvmError {
     UnexpectedShape(String),
 }
 
+/// `scheme://host[:port]` of an RPC URL, for logs and error messages.
+/// Drops userinfo, path and query — where providers put API keys.
+pub fn rpc_host(url: &str) -> String {
+    let (scheme, rest) = url.split_once("://").unwrap_or(("", url));
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+    let host = authority.rsplit_once('@').map_or(authority, |(_, h)| h);
+    if scheme.is_empty() { host.to_string() } else { format!("{scheme}://{host}") }
+}
+
 pub struct EvmClient {
     http: reqwest::Client,
     rpc_url: String,
@@ -40,7 +49,13 @@ impl EvmClient {
 
     async fn call(&self, method: &str, params: Value) -> Result<Value, EvmError> {
         let body = json!({ "jsonrpc": "2.0", "method": method, "params": params, "id": 1 });
-        let resp: Value = self.http.post(&self.rpc_url).json(&body).send().await?.error_for_status()?.json().await?;
+        // `without_url`: RPC URLs often carry an API key in the path, and
+        // reqwest's Display would otherwise print it into logs and failure reasons.
+        let resp: Value = async {
+            self.http.post(&self.rpc_url).json(&body).send().await?.error_for_status()?.json().await
+        }
+        .await
+        .map_err(|e: reqwest::Error| EvmError::Http(e.without_url()))?;
         if let Some(err) = resp.get("error") {
             return Err(EvmError::Rpc(err.to_string()));
         }
@@ -60,11 +75,6 @@ impl EvmClient {
             return Ok(0);
         }
         u128::from_str_radix(hex, 16).map_err(|e| EvmError::UnexpectedShape(e.to_string()))
-    }
-
-    #[cfg(test)]
-    pub(crate) fn parse_hex_u128_for_test(v: &Value) -> Result<u128, EvmError> {
-        Self::parse_hex_u128(v)
     }
 
     fn parse_hex_u64(v: &Value) -> Result<u64, EvmError> {
@@ -296,4 +306,18 @@ pub fn erc20_approve_max_data(spender: [u8; 20]) -> Vec<u8> {
     data.extend_from_slice(&spender);
     data.extend_from_slice(&[0xff; 32]);
     data
+}
+
+#[cfg(test)]
+mod rpc_host_tests {
+    use super::rpc_host;
+
+    #[test]
+    fn strips_path_query_and_userinfo() {
+        assert_eq!(rpc_host("https://polygon-mainnet.g.alchemy.com/v2/SECRETKEY"), "https://polygon-mainnet.g.alchemy.com");
+        assert_eq!(rpc_host("https://user:pass@rpc.example:8545/?key=abc"), "https://rpc.example:8545");
+        assert_eq!(rpc_host("https://1rpc.io/matic"), "https://1rpc.io");
+        assert_eq!(rpc_host("rpc.local:8545/x"), "rpc.local:8545");
+        assert_eq!(rpc_host(""), "");
+    }
 }

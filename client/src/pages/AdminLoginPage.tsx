@@ -59,11 +59,13 @@ export function AdminLoginPage() {
           user: {
             id: res.user.id,
             email: res.user.email,
-            role: res.user.role as any,
+            // /v1/auth/admin/login only returns { id, email, role }.
+            username: '',
+            role: res.user.role,
             twoFactorEnabled: false,
-            balance: 0,
+            merchantStatus: 'NONE',
             createdAt: new Date().toISOString(),
-          } as any,
+          },
           accessToken: res.accessToken,
         });
         navigate('/admin');

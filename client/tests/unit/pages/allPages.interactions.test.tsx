@@ -129,7 +129,6 @@ describe('allPages interactions', () => {
   });
 
   it('Dashboard Analytics Lend submit', async () => {
-    const user = userEvent.setup();
     const dash = renderWithProviders(<DashboardPage />, { route: '/dashboard', loggedIn: true });
     await waitFor(() => expect(dash.container.innerHTML.length).toBeGreaterThan(120), { timeout: 5000 });
     await clickSomeButtons(dash.container, 12);

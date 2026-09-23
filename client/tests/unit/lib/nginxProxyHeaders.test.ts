@@ -22,6 +22,29 @@ describe('nginx reverse-proxy IP headers', () => {
   });
 });
 
+describe('nginx access log', () => {
+  it('logs the path without the query string (OAuth code/state, e-mails, keys)', () => {
+    expect(nginxConf).toContain('log_format satspay_json');
+    expect(nginxConf).toContain('access_log /dev/stdout satspay_json;');
+    // $uri is the normalized path; $request_uri would leak the query string.
+    expect(nginxConf).toMatch(/"path":"\$uri"/);
+    // Ignore comments; assert no directive line references the query string.
+    const directives = nginxConf
+      .split('\n')
+      .filter((l) => !l.trimStart().startsWith('#'))
+      .join('\n');
+    expect(directives).not.toContain('$request_uri');
+    expect(directives).not.toContain('$args');
+    // No raw client IP in the log line (LGPD): the API keeps an HMAC fingerprint.
+    expect(nginxConf).not.toMatch(/"ip":"\$(remote_addr|client_ip)"/);
+  });
+
+  it('generates its own request id and forwards it to the API', () => {
+    expect(nginxConf).toContain('proxy_set_header X-Request-Id $request_id;');
+    expect(nginxConf).not.toContain('$http_x_request_id');
+  });
+});
+
 describe('nginx /sdk/ delivery', () => {
   it('short-circuits /sdk/ before immutable asset regex', () => {
     const sdkIdx = nginxConf.indexOf('location ^~ /sdk/');

@@ -222,7 +222,7 @@ export function AdminStakePage() {
     refetchInterval: 30_000,
   });
 
-  const wallets = treasuryQ.data?.wallets ?? [];
+  const wallets = useMemo(() => treasuryQ.data?.wallets ?? [], [treasuryQ.data]);
   const explorers = treasuryQ.data?.explorers ?? {};
   const all = econQ.data?.all_time;
   const h24 = econQ.data?.last_24h;
@@ -309,7 +309,10 @@ export function AdminStakePage() {
     }));
   }, [wallets]);
 
-  const series = health?.fee_series_7d?.length ? health.fee_series_7d : health?.fee_series_30d ?? [];
+  const series = useMemo(
+    () => (health?.fee_series_7d?.length ? health.fee_series_7d : health?.fee_series_30d ?? []),
+    [health],
+  );
   const seriesMaxUsd = useMemo(() => {
     let m = 1n;
     for (const d of series) {

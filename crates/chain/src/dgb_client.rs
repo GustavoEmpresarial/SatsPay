@@ -1,10 +1,18 @@
 //! DigiByte client — self-hosted JSON-RPC (`scantxoutset`) first, Insight/Blockbook fallback.
+//!
+//! Every indexer call has a timeout and every operation the sweep needs
+//! (UTXOs, fee, broadcast) falls back to Blockbook: when the Insight hosts
+//! went down, UTXO listing and broadcast were Insight-only, so deposits sat
+//! on their addresses unswept.
 
 use crate::btc_sign::Utxo;
 use crate::types::{ChainError, OnchainTx};
 use crate::utxo_node_rpc::UtxoNodeRpc;
 use serde::Deserialize;
 use serde_json::json;
+
+/// Blockbook explorer used when the Insight hosts are down.
+pub const BLOCKBOOK_FALLBACK: &str = "https://digibyte.atomicwallet.io/api";
 
 pub struct DgbClient {
     http: reqwest::Client,
@@ -22,6 +30,8 @@ impl DgbClient {
         for extra in [
             "https://digiexplorer.info/api",
             "https://explorer.digibyte.host/api",
+            // Blockbook (`/v2/...`), independent operator — reserve for the Insight hosts.
+            BLOCKBOOK_FALLBACK,
         ] {
             if !bases.iter().any(|b| b == extra) {
                 bases.push(extra.to_string());
@@ -40,7 +50,13 @@ impl DgbClient {
                 }
             }
         });
-        Self { http: reqwest::Client::new(), bases, rpc }
+        let http = reqwest::Client::builder()
+            .user_agent("SatsPay-Dgb/1.0")
+            .connect_timeout(std::time::Duration::from_secs(5))
+            .timeout(std::time::Duration::from_secs(15))
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new());
+        Self { http, bases, rpc }
     }
 
     async fn get_json<T: for<'de> Deserialize<'de>>(&self, suffix: &str) -> Result<T, ChainError> {
@@ -163,16 +179,24 @@ impl DgbClient {
                 Err(e) => tracing::warn!(error = %e.message, address, "DGB node UTXOs failed; trying Insight"),
             }
         }
-        let raw: Vec<InsightUtxo> = self.get_json(&format!("/addr/{address}/utxo")).await?;
-        Ok(raw
-            .into_iter()
-            .map(|u| Utxo {
-                txid: u.txid,
-                vout: u.vout,
-                value: u.satoshis.unwrap_or_else(|| ((u.amount.unwrap_or(0.0)) * 100_000_000.0).round() as u128) as u64,
-                script_pubkey_hex: u.script_pub_key.unwrap_or_default(),
-            })
-            .collect())
+        match self.get_json::<Vec<InsightUtxo>>(&format!("/addr/{address}/utxo")).await {
+            Ok(raw) => Ok(raw
+                .into_iter()
+                .map(|u| Utxo {
+                    txid: u.txid,
+                    vout: u.vout,
+                    value: u.satoshis.unwrap_or_else(|| ((u.amount.unwrap_or(0.0)) * 100_000_000.0).round() as u128) as u64,
+                    script_pubkey_hex: u.script_pub_key.unwrap_or_default(),
+                })
+                .collect()),
+            Err(insight_err) => {
+                tracing::warn!(error = %insight_err.message, address, "DGB Insight UTXOs failed; trying Blockbook");
+                // Blockbook has no scriptPubKey per UTXO: the caller derives it
+                // from the address (see `fill_missing_scripts`).
+                let book: BlockbookUtxos = self.get_json(&format!("/v2/utxo/{address}?confirmed=true")).await?;
+                blockbook_to_utxos(book)
+            }
+        }
     }
 
     pub async fn estimate_fee_sat_per_byte(&self) -> Result<u64, ChainError> {
@@ -185,6 +209,14 @@ impl DgbClient {
         if fee_per_kb > 0.0 {
             return Ok(((fee_per_kb * 100_000_000.0) / 1000.0).max(1.0) as u64);
         }
+        // Blockbook: {"result":"0.0001"} (DGB per kB).
+        if let Ok(v) = self.get_json::<serde_json::Value>("/v2/estimatefee/2").await {
+            if let Some(per_kb) = v.get("result").and_then(|r| r.as_str()).and_then(|s| s.parse::<f64>().ok()) {
+                if per_kb > 0.0 {
+                    return Ok(((per_kb * 100_000_000.0) / 1000.0).max(1.0) as u64);
+                }
+            }
+        }
         // DigiByte floors at 1 sat/vB; keep withdrawals unblocked if indexers are down.
         Ok(1)
     }
@@ -196,7 +228,7 @@ impl DgbClient {
                 Err(e) => tracing::warn!(error = %e.message, "DGB sendrawtransaction failed; trying Insight"),
             }
         }
-        let mut last = String::new();
+        let mut errors: Vec<String> = Vec::new();
         for base in &self.bases {
             let url = format!("{base}/tx/send");
             match self.http.post(&url).json(&json!({ "rawtx": raw_hex })).send().await {
@@ -208,13 +240,26 @@ impl DgbClient {
                     if let Some(txid) = v.as_str() {
                         return Ok(txid.to_string());
                     }
-                    last = v.to_string();
+                    errors.push(format!("{url}: {v}"));
                 }
-                Ok(resp) => last = format!("{url} HTTP {}", resp.status()),
-                Err(e) => last = e.to_string(),
+                Ok(resp) => errors.push(format!("{url} HTTP {}", resp.status())),
+                Err(e) => errors.push(e.to_string()),
+            }
+            // Blockbook: POST /v2/sendtx/ with the raw hex as body → {"result": txid}.
+            let bb = format!("{base}/v2/sendtx/");
+            match self.http.post(&bb).body(raw_hex.to_string()).send().await {
+                Ok(resp) if resp.status().is_success() => {
+                    let v: serde_json::Value = resp.json().await.map_err(|e| ChainError { message: e.to_string() })?;
+                    if let Some(txid) = v.get("result").and_then(|t| t.as_str()) {
+                        return Ok(txid.to_string());
+                    }
+                    errors.push(format!("{bb}: {v}"));
+                }
+                Ok(resp) => errors.push(format!("{bb} HTTP {}", resp.status())),
+                Err(e) => errors.push(e.to_string()),
             }
         }
-        Err(ChainError { message: format!("DGB broadcast failed: {last}") })
+        Err(ChainError { message: format!("DGB broadcast failed: {}", errors.join("; ")) })
     }
 }
 
@@ -242,3 +287,60 @@ struct BlockbookUtxo {
 }
 
 type BlockbookUtxos = Vec<BlockbookUtxo>;
+
+fn blockbook_to_utxos(book: BlockbookUtxos) -> Result<Vec<Utxo>, ChainError> {
+    book.into_iter()
+        .map(|u| {
+            let value = u.value.parse::<u64>().map_err(|_| ChainError {
+                message: format!("DGB Blockbook bad UTXO value {:?} for {}:{}", u.value, u.txid, u.vout),
+            })?;
+            Ok(Utxo { txid: u.txid, vout: u.vout, value, script_pubkey_hex: String::new() })
+        })
+        .collect()
+}
+
+/// Indexers without a per-UTXO script (Blockbook) leave `script_pubkey_hex`
+/// empty; every UTXO of a single-key address pays to that address's script.
+pub fn fill_missing_scripts(utxos: &mut [Utxo], address_script_hex: &str) {
+    for u in utxos.iter_mut().filter(|u| u.script_pubkey_hex.is_empty()) {
+        u.script_pubkey_hex = address_script_hex.to_string();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn blockbook_utxos_parse_and_reject_bad_values() {
+        let book: BlockbookUtxos = serde_json::from_str(
+            r#"[{"txid":"aa","vout":1,"value":"24696746902","height":5,"confirmations":21,"coinbase":true}]"#,
+        )
+        .unwrap();
+        let utxos = blockbook_to_utxos(book).unwrap();
+        assert_eq!(utxos[0].value, 24_696_746_902);
+        assert_eq!(utxos[0].vout, 1);
+        assert!(utxos[0].script_pubkey_hex.is_empty());
+
+        let bad: BlockbookUtxos = serde_json::from_str(r#"[{"txid":"bb","vout":0,"value":"1.5"}]"#).unwrap();
+        assert!(blockbook_to_utxos(bad).is_err());
+    }
+
+    #[test]
+    fn fill_missing_scripts_only_touches_empty_ones() {
+        let mut utxos = vec![
+            Utxo { txid: "a".into(), vout: 0, value: 1, script_pubkey_hex: String::new() },
+            Utxo { txid: "b".into(), vout: 0, value: 1, script_pubkey_hex: "0014ff".into() },
+        ];
+        fill_missing_scripts(&mut utxos, "0014aa");
+        assert_eq!(utxos[0].script_pubkey_hex, "0014aa");
+        assert_eq!(utxos[1].script_pubkey_hex, "0014ff");
+    }
+
+    #[test]
+    fn blockbook_is_always_in_the_fallback_list() {
+        let c = DgbClient::new("https://my-insight.example/api/");
+        assert_eq!(c.bases[0], "https://my-insight.example/api");
+        assert!(c.bases.iter().any(|b| b == BLOCKBOOK_FALLBACK));
+    }
+}

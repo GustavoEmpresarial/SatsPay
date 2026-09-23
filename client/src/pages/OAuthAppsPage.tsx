@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../lib/api.js';
+import { formatApiError } from '../lib/formatError.js';
 import { Modal } from '../components/Modal.js';
 import { clsx } from 'clsx';
 
@@ -46,27 +47,28 @@ export function OAuthAppsPage() {
   const [selectedAppId, setSelectedAppId] = useState<string | null>(null);
   const [codeTab, setCodeTab] = useState<'html' | 'node' | 'python' | 'curl'>('html');
   const [previewTheme, setPreviewTheme] = useState<'bitcoin' | 'dark' | 'light'>('light');
-  const [previewSize, setPreviewSize] = useState<'small' | 'medium' | 'large'>('large');
   const [previewText, setPreviewText] = useState<'signin_with' | 'continue_with' | 'en_signin'>('signin_with');
   const [previewMode, setPreviewMode] = useState<'redirect' | 'popup'>('redirect');
 
   const fetchApps = async () => {
     try {
       setLoading(true);
+      setError(null);
       const data = await api<OauthApp[]>('/oauth/apps');
       setApps(data);
       if (data.length > 0 && !selectedAppId && data[0]) {
         setSelectedAppId(data[0].id);
       }
       setLoading(false);
-    } catch (err: any) {
-      setError(err.message || 'Erro ao carregar aplicativos OAuth.');
+    } catch (err) {
+      setError(formatApiError(err, 'Erro ao carregar aplicativos OAuth.'));
       setLoading(false);
     }
   };
 
   useEffect(() => {
     fetchApps();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- load once on mount; fetchApps is re-created every render
   }, []);
 
   const openCreateModal = () => {
@@ -133,8 +135,8 @@ export function OAuthAppsPage() {
         });
         fetchApps();
       }
-    } catch (err: any) {
-      alert(err.message || 'Erro ao salvar aplicativo.');
+    } catch (err) {
+      alert(formatApiError(err, 'Erro ao salvar aplicativo.'));
     } finally {
       setSubmitting(false);
     }
@@ -147,8 +149,8 @@ export function OAuthAppsPage() {
     try {
       await api(`/oauth/apps/${appId}`, { method: 'DELETE' });
       fetchApps();
-    } catch (err: any) {
-      alert(err.message || 'Erro ao excluir aplicativo.');
+    } catch (err) {
+      alert(formatApiError(err, 'Erro ao excluir aplicativo.'));
     }
   };
 
@@ -163,8 +165,8 @@ export function OAuthAppsPage() {
         secret: res.client_secret,
       });
       fetchApps();
-    } catch (err: any) {
-      alert(err.message || 'Erro ao rotacionar secret.');
+    } catch (err) {
+      alert(formatApiError(err, 'Erro ao rotacionar secret.'));
     }
   };
 
@@ -240,6 +242,15 @@ export function OAuthAppsPage() {
                 <div className="h-8 w-8 animate-spin rounded-full border-3 border-bitcoin border-t-transparent" />
                 <span className="text-xs font-semibold text-ink-muted">Carregando aplicações...</span>
               </div>
+            </div>
+          ) : error ? (
+            <div role="alert" className="flex min-h-[200px] flex-col items-center justify-center gap-3 rounded-3xl border border-rose-200 bg-paper p-6 text-center shadow-xs">
+              <i className="bi bi-exclamation-triangle text-2xl text-amber-500" />
+              <p className="text-xs font-medium text-rose-600">{error}</p>
+              <button type="button" onClick={() => fetchApps()} className="btn-secondary inline-flex items-center gap-1.5 rounded-xl px-3.5 py-1.5 text-xs">
+                <i className="bi bi-arrow-clockwise text-xs" />
+                <span>Tentar novamente</span>
+              </button>
             </div>
           ) : apps.length === 0 ? (
             <div className="rounded-3xl border border-dashed border-border bg-paper p-8 text-center shadow-xs space-y-5">
@@ -487,7 +498,7 @@ export function OAuthAppsPage() {
                       <button
                         key={t.id}
                         type="button"
-                        onClick={() => setPreviewTheme(t.id as any)}
+                        onClick={() => setPreviewTheme(t.id as typeof previewTheme)}
                         className={`rounded-xl py-2 px-1 text-center text-[11px] font-bold transition-all ${
                           previewTheme === t.id
                             ? 'ring-2 ring-bitcoin shadow-xs scale-102'
@@ -512,7 +523,7 @@ export function OAuthAppsPage() {
                       <button
                         key={tx.id}
                         type="button"
-                        onClick={() => setPreviewText(tx.id as any)}
+                        onClick={() => setPreviewText(tx.id as typeof previewText)}
                         className={`rounded-xl py-1.5 px-1 text-center text-[10px] font-bold transition-all border ${
                           previewText === tx.id
                             ? 'bg-paper text-ink border-bitcoin shadow-2xs'
@@ -610,7 +621,7 @@ export function OAuthAppsPage() {
                     <button
                       key={t.id}
                       type="button"
-                      onClick={() => setCodeTab(t.id as any)}
+                      onClick={() => setCodeTab(t.id as typeof codeTab)}
                       className={`rounded-xl px-3 py-1.5 text-xs font-bold transition-all ${
                         codeTab === t.id
                           ? 'bg-emerald-600 text-white shadow-xs'

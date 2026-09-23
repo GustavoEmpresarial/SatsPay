@@ -36,7 +36,7 @@
 
 ## Comportamento (bruto)
 
-Clientes RPC / explorers; hot + deposit addresses; DGB Insight; ZER só t1 via zerod (sem z-addr, sem SwapKit).
+Clientes RPC / explorers; hot + deposit addresses; ZER só t1 via zerod (sem z-addr, sem SwapKit). DGB: node RPC → Insight (digiexplorer, digibyte.host) → Blockbook (digibyte.atomicwallet.io) para UTXO, taxa, saldo e broadcast; Blockbook não traz scriptPubKey — `fill_missing_scripts` deriva do endereço. Mensagens de erro EVM usam `rpc_host()` (sem path/query: chaves de provedor ficam fora de logs).
 
 ## Notas de overview legado
 

@@ -2,6 +2,7 @@
 //! `domain::<mod>::service` or `db::<mod>` (for transactional orchestration
 //! that doesn't fit the repository-trait pattern), serialize response.
 
+pub mod access_log;
 pub mod admin;
 pub mod airdrop;
 pub mod auth;
@@ -99,6 +100,9 @@ fn finish_router<R: AuthRepo + 'static>(router: Router<AppState<R>>, state: AppS
         // Outermost: no request gets to hold a connection (and a Postgres
         // pool slot) indefinitely.
         .layer(TimeoutLayer::new(REQUEST_TIMEOUT))
+        // Outside everything else so 408/429/5xx get an access line and every
+        // log below carries the request's correlation id.
+        .layer(axum::middleware::from_fn(access_log::layer))
         .with_state(state)
 }
 
@@ -109,8 +113,9 @@ async fn record_server_errors<R: AuthRepo + 'static>(
 ) -> Response {
     let method = request.method().to_string();
     let path = request.uri().path().to_string();
-    let query = request.uri().query().map(|q| format!("?{q}")).unwrap_or_default();
-    let full_endpoint = format!("{path}{query}");
+    // Path only: query strings carry OAuth `code`/`state`, e-mails, callback keys.
+    let full_endpoint = path.clone();
+    let request_id = access_log::current_request_id();
     
     // Same trust model as `client_ip::resolve_client_ip` (do not trust CF-* from clients).
     let ip_address = request
@@ -141,7 +146,7 @@ async fn record_server_errors<R: AuthRepo + 'static>(
                 method = %method,
                 endpoint = %full_endpoint,
                 status = status_code,
-                ip = ?ip_address,
+                request_id = ?request_id,
                 "HTTP 5xx Server Error intercepted"
             );
             let payload = db::telemetry::NewErrorPayload {

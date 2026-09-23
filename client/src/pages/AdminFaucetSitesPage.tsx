@@ -55,7 +55,7 @@ export function AdminFaucetSitesPage() {
     },
   });
 
-  const sites = faucetsData?.sites ?? [];
+  const sites = useMemo(() => faucetsData?.sites ?? [], [faucetsData]);
 
   const stats = useMemo(() => {
     const total = sites.length;

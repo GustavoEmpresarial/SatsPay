@@ -1,6 +1,7 @@
 import js from '@eslint/js';
 import tseslint from 'typescript-eslint';
 import reactHooks from 'eslint-plugin-react-hooks';
+import globals from 'globals';
 
 export default tseslint.config(
   {
@@ -8,6 +9,18 @@ export default tseslint.config(
   },
   js.configs.recommended,
   ...tseslint.configs.recommended,
+  {
+    // Plain browser scripts served as-is (merchant SDK + pre-paint theme boot).
+    // They are public URLs embedded by third parties: lint them, but as ES5-ish
+    // browser code, and let them swallow storage/DOM errors on purpose.
+    files: ['public/**/*.js'],
+    languageOptions: { sourceType: 'script', globals: { ...globals.browser } },
+    rules: {
+      '@typescript-eslint/no-unused-vars': ['error', { caughtErrors: 'none', varsIgnorePattern: '^_' }],
+      '@typescript-eslint/no-this-alias': 'off',
+      'no-empty': ['error', { allowEmptyCatch: true }],
+    },
+  },
   {
     files: ['src/**/*.{ts,tsx}', 'tests/**/*.{ts,tsx}'],
     languageOptions: {

@@ -1,7 +1,6 @@
 /**
  * Shared API stub returning rich fixtures so pages can paint async UI branches.
  */
-import { vi } from 'vitest';
 
 const airdropProfile = {
   season_id: 's1',
@@ -394,14 +393,6 @@ const oauthAppsFixture = [
     updated_at: '2024-02-01T00:00:00.000Z',
   },
 ];
-
-export function installApiMock() {
-  return vi.mock('../../../src/lib/api.js', () => ({
-    api: vi.fn(async (path: string) => mockApi(path)),
-    bootstrapSession: vi.fn(async () => null),
-    forceReauth: vi.fn(),
-  }));
-}
 
 export async function mockApi(path: string): Promise<unknown> {
   const p = path.split('?')[0] || path;

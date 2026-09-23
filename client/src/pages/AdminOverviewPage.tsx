@@ -149,14 +149,6 @@ function shortHash(h: string): string {
   return h.length > 14 ? `${h.slice(0, 6)}…${h.slice(-6)}` : h;
 }
 
-function sumFees(rows: EconCoinFlow[]): bigint {
-  return rows.reduce((acc, r) => acc + safeBigInt(r.fees), 0n);
-}
-
-function sumVolume(rows: EconCoinFlow[]): bigint {
-  return rows.reduce((acc, r) => acc + safeBigInt(r.volume), 0n);
-}
-
 function fmtCoin(amount: string | number | bigint, coin: string): string {
   if (isCoin(coin)) return formatAmount(amount.toString(), coin as Coin);
   return amount.toString();

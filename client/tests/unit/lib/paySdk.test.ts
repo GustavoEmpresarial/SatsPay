@@ -14,7 +14,6 @@ const sdk = readFileSync(path.join(root, 'public/sdk/satspay-pay.js'), 'utf8');
 
 function load(markup: string) {
   document.body.innerHTML = markup;
-  // eslint-disable-next-line no-new-func
   new Function(sdk)();
   return document.body;
 }

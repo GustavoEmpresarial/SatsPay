@@ -38,7 +38,7 @@ Este documento cataloga todas as variáveis de ambiente utilizadas pelos serviç
 | `BTC_HOT_WIF`, `POL_PRIVATE_KEY` | `worker` | Se real=true | WIF / Hex Key | Chaves privadas para assinatura e broadcast de saques |
 | `POL_RPC_URL` | `api-server`, `worker` | Se real=true | `https://polygon-rpc.com` | Endpoint JSON-RPC da rede Polygon |
 | `DGB_RPC_URL` | `api-server`, `worker` | Não | `http://user:pass@host:14022` | Node DigiByte próprio (`scantxoutset` / `sendrawtransaction`). Sem valor, cai no Insight. |
-| `DGB_INSIGHT_API` | `api-server`, `worker` | Não | `https://digiexplorer.info/api` | Fallback indexer DGB quando o node RPC falha |
+| `DGB_INSIGHT_API` | `api-server`, `worker` | Não | `https://digiexplorer.info/api` | Indexer DGB primário quando o node RPC (`DGB_RPC_URL`) falha. Depois dele a API tenta `explorer.digibyte.host` (Insight) e `digibyte.atomicwallet.io` (Blockbook) para UTXOs, taxa, saldo e broadcast — timeout 15 s cada |
 | `ZER_RPC_URL` | `api-server`, `worker` | Prod (saque) | `http://user:pass@host:23801` | Node `zerod` (`scantxoutset` / `createrawtransaction` / `signrawtransactionwithkey` / `sendrawtransaction`). Sem URL, depósito cai no explorer; saque falha fechado. |
 | `ZER_EXPLORER_API` | `api-server`, `worker` | Não | `https://zerochain.info/api` | Fallback de saldo/txs para ZER |
 | `ZER_EXPLORER_API_KEY` | `api-server`, `worker` | Não | — | Key pedida pelos paths públicos `addressinfo` / `txs` do zerochain.info |
@@ -135,3 +135,8 @@ python3 scripts/deploy_to_vm.py --backend      # + api/worker
 
 Rotacionar a senha de root se ela já esteve no repositório. Preferir chave e `PasswordAuthentication no`.
 
+## Logs
+
+| Variável | Serviço | Obrigatória | Padrão | Função |
+|---|---|---|---|---|
+| `RUST_LOG` | `api-server`, `worker` | Não | `info` | Filtro do `tracing` (JSON em stdout). Sem ela o padrão agora é `info` — antes era só `ERROR`, o que escondia o log de acesso. `http_access=warn` corta as linhas de acesso 2xx/4xx |

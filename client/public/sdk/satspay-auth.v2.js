@@ -137,7 +137,6 @@
       options = options || {};
       var self = this;
       var mode = options.mode || this.config.mode || 'redirect';
-      var redirectUri = options.redirectUri || this.config.redirectUri;
       var state = options.state || this.config.state || randomState();
       var onSuccess = options.onSuccess;
       var onError = options.onError;

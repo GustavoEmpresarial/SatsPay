@@ -56,7 +56,12 @@ DOMAINS: list[dict] = [
             "docs/architecture/chain-integration.md",
         ],
         "apis": [],
-        "notes": "Clientes RPC / explorers; hot + deposit addresses; DGB Insight; ZER só t1 via zerod (sem z-addr, sem SwapKit).",
+        "notes": (
+            "Clientes RPC / explorers; hot + deposit addresses; ZER só t1 via zerod (sem z-addr, sem SwapKit). "
+            "DGB: node RPC → Insight (digiexplorer, digibyte.host) → Blockbook (digibyte.atomicwallet.io) para UTXO, taxa, "
+            "saldo e broadcast; Blockbook não traz scriptPubKey — `fill_missing_scripts` deriva do endereço. "
+            "Mensagens de erro EVM usam `rpc_host()` (sem path/query: chaves de provedor ficam fora de logs)."
+        ),
     },
     {
         "slug": "domain-treasury-health",
@@ -156,13 +161,21 @@ DOMAINS: list[dict] = [
             "client/src/pages/AdminTelemetryPage.tsx",
             "docs/quality/error-observability.md",
             "crates/db/migrations/0014_telemetry_and_error_logs.sql",
+            "crates/api-http/src/access_log.rs",
+            "crates/api-http/src/http_error.rs",
+            "client/nginx.conf",
         ],
         "apis": [
             "POST /v1/telemetry/client-errors",
             "GET /v1/admin/telemetry/overview",
             "GET /v1/admin/telemetry/errors",
         ],
-        "notes": "Filtros de ruído: inventory faucet, login 400, React #311 legado, CDN icons.",
+        "notes": (
+            "Filtros de ruído: inventory faucet, login 400, React #311 legado, CDN icons. "
+            "Log de acesso: 1 linha JSON por request (`http_access`: rota template, status, duration_ms, request_id), "
+            "sem query/corpo/IP. `X-Request-Id` em toda resposta; 500 devolve o mesmo `requestId`. "
+            "nginx: log JSON com `$uri` (sem query) e `X-Request-Id: $request_id` para a API. RUST_LOG padrão = info."
+        ),
     },
     {
         "slug": "domain-faucet-house",

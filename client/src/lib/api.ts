@@ -148,6 +148,9 @@ export function adaptRustResponse(path: string, data: unknown): unknown {
 
 export function adaptRustError(data: unknown, statusText: string): { code: string; message: string; details?: unknown } {
   const err = (data as { error?: unknown } | null)?.error;
+  // Most Rust handlers answer `{ "error": "<message>", "code": "<CODE>" }` (flat).
+  const flatCode = (data as { code?: unknown } | null)?.code;
+  const topCode = typeof flatCode === 'string' && flatCode ? flatCode : undefined;
   if (typeof err === 'string') {
     // Legacy string errors (e.g. raw cooldown timestamp dumps).
     if (/next claim available at/i.test(err)) {
@@ -157,6 +160,11 @@ export function adaptRustError(data: unknown, statusText: string): { code: strin
         message: 'Aguarde o cooldown de 11 horas do faucet.',
         details: match?.[1] ? { nextClaimAt: match[1].trim() } : undefined,
       };
+    }
+    if (topCode) {
+      // Keep the rest of the body (coin, nextClaimAt, …) for callers that render details.
+      const { error: _e, code: _c, ...rest } = data as Record<string, unknown>;
+      return { code: topCode, message: err, details: Object.keys(rest).length ? rest : undefined };
     }
     return { code: 'ERROR', message: err };
   }

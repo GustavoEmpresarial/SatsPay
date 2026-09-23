@@ -36,6 +36,10 @@ pub fn routes<R: AuthRepo + 'static>() -> Router<AppState<R>> {
         .route("/v1/auth/me", get(me::<R>))
         .route("/v1/auth/username", patch(update_username::<R>))
         .route("/v1/auth/security-logs", get(security_logs::<R>))
+        .route("/v1/auth/2fa/request", post(twofa_request::<R>))
+        .route("/v1/auth/2fa/enable", post(twofa_enable::<R>))
+        .route("/v1/auth/2fa/disable", post(twofa_disable::<R>))
+        .route("/v1/auth/sessions/revoke-others", post(revoke_other_sessions::<R>))
         .route("/v1/me/export", get(export_me::<R>))
         .route("/v1/me/erase", post(erase_me::<R>))
 }
@@ -563,6 +567,147 @@ async fn update_username<R: AuthRepo>(
                 })),
             );
             Json(serde_json::json!({ "user": user_response(&u) })).into_response()
+        }
+        Err(err) => auth_error_response(err),
+    }
+}
+
+#[derive(Deserialize)]
+struct TwofaRequestBody {
+    purpose: String,
+}
+
+#[derive(Deserialize)]
+struct TwofaCodeBody {
+    code: String,
+}
+
+fn twofa_state_conflict(enabled: bool) -> Response {
+    let (code, message) = if enabled {
+        ("TWO_FACTOR_ALREADY_ENABLED", "two-factor authentication is already enabled")
+    } else {
+        ("TWO_FACTOR_NOT_ENABLED", "two-factor authentication is not enabled")
+    };
+    (StatusCode::CONFLICT, Json(serde_json::json!({ "error": message, "code": code }))).into_response()
+}
+
+/// Sends the email code that `/2fa/enable` or `/2fa/disable` will consume.
+/// Only the two toggle purposes are accepted here — LOGIN/WITHDRAWAL codes are
+/// requested by their own flows.
+async fn twofa_request<R: AuthRepo>(
+    State(state): State<AppState<R>>,
+    user: AuthUser,
+    Json(body): Json<TwofaRequestBody>,
+) -> Response {
+    let purpose = body.purpose.trim();
+    let wants_enabled = match purpose {
+        "ENABLE_2FA" => true,
+        "DISABLE_2FA" => false,
+        _ => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({ "error": "purpose must be ENABLE_2FA or DISABLE_2FA", "code": "VALIDATION_ERROR" })),
+            )
+                .into_response()
+        }
+    };
+    match state.auth.get_user_by_id(user.id).await {
+        Ok(Some(u)) if u.two_factor_enabled == wants_enabled => return twofa_state_conflict(wants_enabled),
+        Ok(Some(_)) => {}
+        Ok(None) => return auth_error_response(AuthError::NotFound),
+        Err(err) => return auth_error_response(err),
+    }
+    match state.auth.request_otp(user.id, purpose).await {
+        Ok(()) => Json(serde_json::json!({ "codeSent": true })).into_response(),
+        Err(err) => auth_error_response(err),
+    }
+}
+
+async fn twofa_toggle<R: AuthRepo>(
+    state: AppState<R>,
+    ip: String,
+    headers: &HeaderMap,
+    user: AuthUser,
+    code: &str,
+    enable: bool,
+) -> Response {
+    match state.auth.get_user_by_id(user.id).await {
+        Ok(Some(u)) if u.two_factor_enabled == enable => return twofa_state_conflict(enable),
+        Ok(Some(_)) => {}
+        Ok(None) => return auth_error_response(AuthError::NotFound),
+        Err(err) => return auth_error_response(err),
+    }
+    let result = if enable {
+        state.auth.enable_2fa(user.id, code.trim()).await
+    } else {
+        state.auth.disable_2fa(user.id, code.trim()).await
+    };
+    let ua = extract_user_agent(headers);
+    let action = match (&result, enable) {
+        (Ok(()), true) => "AUTH_2FA_ENABLED",
+        (Ok(()), false) => "AUTH_2FA_DISABLED",
+        (Err(_), true) => "AUTH_2FA_ENABLE_FAILED",
+        (Err(_), false) => "AUTH_2FA_DISABLE_FAILED",
+    };
+    db::audit::record_log_spawned(
+        state.pool.clone(),
+        Some(user.id),
+        action.into(),
+        "User".into(),
+        Some(user.id),
+        Some(state.secrets.ip_fingerprint(&ip)),
+        Some(serde_json::json!({ "userAgent": ua })),
+    );
+    match result {
+        Ok(()) => Json(serde_json::json!({ "twoFactorEnabled": enable })).into_response(),
+        Err(err) => auth_error_response(err),
+    }
+}
+
+async fn twofa_enable<R: AuthRepo>(
+    State(state): State<AppState<R>>,
+    ClientIp(ip): ClientIp,
+    headers: HeaderMap,
+    user: AuthUser,
+    Json(body): Json<TwofaCodeBody>,
+) -> Response {
+    twofa_toggle(state, ip, &headers, user, &body.code, true).await
+}
+
+async fn twofa_disable<R: AuthRepo>(
+    State(state): State<AppState<R>>,
+    ClientIp(ip): ClientIp,
+    headers: HeaderMap,
+    user: AuthUser,
+    Json(body): Json<TwofaCodeBody>,
+) -> Response {
+    twofa_toggle(state, ip, &headers, user, &body.code, false).await
+}
+
+/// Revokes every refresh token of the caller and re-issues the current
+/// browser's cookie. Cookie-bearing, so it goes through the browser CSRF gate.
+async fn revoke_other_sessions<R: AuthRepo>(
+    State(state): State<AppState<R>>,
+    ClientIp(ip): ClientIp,
+    headers: HeaderMap,
+    user: AuthUser,
+) -> Response {
+    if let Err(err) = crate::csrf::assert_browser_csrf(&headers, &state.settings.captcha_expected_hostnames) {
+        return err.into_response();
+    }
+    match state.auth.revoke_other_sessions(user.id).await {
+        Ok(tokens) => {
+            db::audit::record_log_spawned(
+                state.pool.clone(),
+                Some(user.id),
+                "AUTH_SESSIONS_REVOKED".into(),
+                "Session".into(),
+                Some(user.id),
+                Some(state.secrets.ip_fingerprint(&ip)),
+                Some(serde_json::json!({ "userAgent": extract_user_agent(&headers) })),
+            );
+            let payload = serde_json::json!({ "revoked": true, "accessToken": tokens.access_token });
+            json_with_refresh_cookie(StatusCode::OK, payload, &tokens.refresh_token)
         }
         Err(err) => auth_error_response(err),
     }
