@@ -269,6 +269,15 @@ impl AuthRepo for PgAuthRepo {
         Ok(())
     }
 
+    async fn delete_all_user_refresh_tokens(&self, user_id: Uuid) -> Result<(), RepoError> {
+        sqlx::query("DELETE FROM refresh_tokens WHERE user_id = $1")
+            .bind(user_id)
+            .execute(&self.pool)
+            .await
+            .map_err(map_err)?;
+        Ok(())
+    }
+
     async fn revoke_refresh_token_by_hash(&self, token_hash: &str, now: DateTime<Utc>) -> Result<(), RepoError> {
         sqlx::query("UPDATE refresh_tokens SET revoked_at = $2 WHERE token_hash = $1 AND revoked_at IS NULL")
             .bind(token_hash)

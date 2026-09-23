@@ -128,6 +128,11 @@ impl AuthRepo for FakeAuthRepo {
         Ok(())
     }
 
+    async fn delete_all_user_refresh_tokens(&self, user_id: Uuid) -> Result<(), RepoError> {
+        self.state.lock().unwrap().refresh_tokens.retain(|t| t.user_id != user_id);
+        Ok(())
+    }
+
     async fn revoke_refresh_token_by_hash(&self, token_hash: &str, now: DateTime<Utc>) -> Result<(), RepoError> {
         let mut s = self.state.lock().unwrap();
         if let Some(t) = s.refresh_tokens.iter_mut().find(|t| t.token_hash == token_hash && t.revoked_at.is_none()) {

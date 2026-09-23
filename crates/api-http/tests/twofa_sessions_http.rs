@@ -206,7 +206,9 @@ async fn twofa_code_is_locked_after_max_attempts(pool: PgPool) {
 
 #[sqlx::test(migrations = "../db/migrations")]
 async fn revoke_others_kills_other_refresh_tokens_and_keeps_caller(pool: PgPool) {
-    let state = common::test_state(pool.clone());
+    // Production grace window: this is where a *revoked* (instead of deleted)
+    // token would still be honoured for an attacker.
+    let state = common::test_state_with_reuse_grace(pool.clone(), 60);
     let email = format!("rev-{}@bitcosats.test", Uuid::new_v4());
     let username = format!("u{}", &Uuid::new_v4().as_simple().to_string()[..12]);
     let reg = send(
@@ -259,20 +261,31 @@ async fn revoke_others_kills_other_refresh_tokens_and_keeps_caller(pool: PgPool)
     assert!(!cookie_c.is_empty() && cookie_c != cookie_a);
     assert!(audit_count(&pool, user_id, "AUTH_SESSIONS_REVOKED").await >= 1);
 
-    // The caller's re-issued cookie still refreshes normally…
-    let r = send(&state, "POST", "/v1/auth/refresh", None, Some(&cookie_c), Some("http://localhost:5173"), None).await;
-    assert_eq!(r.status, StatusCode::OK, "current session must survive: {}", r.body);
-    let cookie_c = r.cookie;
-
-    // …the other device's now-revoked token is rejected. Replaying a revoked
-    // token is indistinguishable from theft, so it trips reuse detection and
-    // revokes every session — including this one. That is the intended
-    // security posture (production softens it with `refresh_reuse_grace_secs`).
+    // The other device (e.g. an attacker who stole it) refreshes right away,
+    // inside the grace window: it must NOT get a session.
     let r = send(&state, "POST", "/v1/auth/refresh", None, Some(&cookie_b), Some("http://localhost:5173"), None).await;
-    assert_eq!(r.status, StatusCode::UNAUTHORIZED, "{}", r.body);
-    assert_eq!(r.body["error"]["code"], "UNAUTHORIZED");
+    assert_eq!(r.status, StatusCode::UNAUTHORIZED, "old device must be out even inside the grace window: {}", r.body);
+    assert!(r.cookie.is_empty(), "no session may be minted for the old device");
+    // …and its attempt must not look like theft that cascades to the caller.
+    assert_ne!(
+        r.body["error"]["message"], "refresh token reuse detected; session revoked",
+        "a user-initiated sign-out must not trip reuse detection"
+    );
+
+    // The caller survives the old device's attempt and keeps refreshing.
     let r = send(&state, "POST", "/v1/auth/refresh", None, Some(&cookie_c), Some("http://localhost:5173"), None).await;
-    assert_eq!(r.status, StatusCode::UNAUTHORIZED, "reuse detection revokes all after a revoked token is replayed: {}", r.body);
+    assert_eq!(r.status, StatusCode::OK, "caller must stay logged in after the old device retries: {}", r.body);
+    let cookie_c = r.cookie;
+    let r = send(&state, "POST", "/v1/auth/refresh", None, Some(&cookie_c), Some("http://localhost:5173"), None).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.body);
+
+    // Exactly one live refresh token remains: the caller's.
+    let live: i64 = sqlx::query_scalar("SELECT count(*) FROM refresh_tokens WHERE user_id = $1 AND revoked_at IS NULL")
+        .bind(user_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(live, 1);
 }
 
 #[sqlx::test(migrations = "../db/migrations")]
