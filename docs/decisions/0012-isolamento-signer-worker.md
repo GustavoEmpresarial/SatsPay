@@ -43,7 +43,11 @@ Até aqui o bloco `&app_env` do compose entregava **o mesmo env** ao
 - **Coerência**: o worker recusa subir se `DEPOSIT_XPUB_<COIN>` ≠ xpub do
   `DEPOSIT_MNEMONIC` (`CHAIN_DEPOSIT_KEY_MISMATCH`) ou `HOT_ADDRESS_<COIN>` ≠
   endereço da hot key (`HOT_ADDRESS_MISMATCH`). Assim a API nunca entrega
-  endereço que o worker não consegue varrer.
+  endereço que o worker não consegue varrer. O mnemonic de depósito é
+  obrigatório no signer de produção. Após validar, o worker publica no banco
+  um heartbeat ligado ao SHA-256 da configuração pública e da rede; `/healthz`
+  e toda emissão de endereço falham com 503 se o marcador divergir ou passar
+  90 segundos sem renovação.
 - **SOL** (ed25519 não tem derivação pública): o worker pré-deriva endereços em
   `deposit_address_pool` (migration 0036, `DEPOSIT_POOL_TARGET`, padrão 50);
   a API reivindica com `FOR UPDATE SKIP LOCKED`. Pool vazio →

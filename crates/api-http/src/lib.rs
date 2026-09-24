@@ -86,7 +86,7 @@ pub fn app_without_metrics<R: AuthRepo + 'static>(state: AppState<R>) -> Router 
 
 fn route_tree<R: AuthRepo + 'static>() -> Router<AppState<R>> {
     Router::<AppState<R>>::new()
-        .route("/healthz", get(healthz))
+        .route("/healthz", get(healthz::<R>))
         .merge(auth::routes::<R>())
         .merge(wallet::routes::<R>())
         .merge(deposits::routes::<R>())
@@ -215,8 +215,29 @@ async fn record_server_errors<R: AuthRepo + 'static>(
     response
 }
 
-async fn healthz() -> &'static str {
-    "ok"
+async fn healthz<R: AuthRepo>(State(state): State<AppState<R>>) -> Response {
+    match state.custody_signer_ready().await {
+        Ok(true) => "ok".into_response(),
+        Ok(false) => (
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            axum::Json(serde_json::json!({
+                "error": "custody signer validation is missing or stale",
+                "code": "CUSTODY_SIGNER_NOT_VALIDATED"
+            })),
+        )
+            .into_response(),
+        Err(e) => {
+            tracing::error!(error = %e, "custody signer readiness check failed");
+            (
+                axum::http::StatusCode::SERVICE_UNAVAILABLE,
+                axum::Json(serde_json::json!({
+                    "error": "custody signer validation is unavailable",
+                    "code": "CUSTODY_VALIDATION_UNAVAILABLE"
+                })),
+            )
+                .into_response()
+        }
+    }
 }
 
 /// axum's built-in `Json`/`Path`/`Query` extractors reject malformed input with

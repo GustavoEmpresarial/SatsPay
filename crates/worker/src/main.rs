@@ -54,6 +54,11 @@ async fn main() {
     db::run_migrations(&pool)
         .await
         .expect("failed to run migrations");
+    // Fail closed during every signer restart. A fresh marker is written only
+    // after the encrypted keys and public custody configuration match.
+    db::custody::invalidate_signer_validation(&pool)
+        .await
+        .expect("failed to invalidate custody signer validation");
     db::house::ensure_house_inventory(&pool)
         .await
         .expect("failed to ensure house inventory");
@@ -108,11 +113,38 @@ async fn main() {
             panic!("failed to build chain registry: {e}");
         }
     };
+    let custody_fingerprint = registry.custody_validation_fingerprint().map(str::to_owned);
+    let app_version = std::env::var("APP_VERSION").unwrap_or_else(|_| "unknown".to_string());
+    if let Some(fingerprint) = custody_fingerprint.as_deref() {
+        db::custody::mark_signer_validated(&pool, fingerprint, &app_version)
+            .await
+            .expect("failed to publish custody signer validation");
+    }
     let swapkit = Arc::new(SwapKitClient::from_env());
     let relay = Arc::new(RelayClient::from_env());
     let changenow = Arc::new(ChangeNowClient::from_env());
     let worker_id =
         std::env::var("HOSTNAME").unwrap_or_else(|_| format!("worker-{}", uuid::Uuid::new_v4()));
+
+    let custody_task = {
+        let pool = pool.clone();
+        let version = app_version.clone();
+        tokio::spawn(async move {
+            if let Some(fingerprint) = custody_fingerprint {
+                let mut interval = tokio::time::interval(Duration::from_secs(30));
+                loop {
+                    interval.tick().await;
+                    if let Err(e) =
+                        db::custody::mark_signer_validated(&pool, &fingerprint, &version).await
+                    {
+                        tracing::error!(error = %e, "failed to refresh custody signer validation");
+                    }
+                }
+            } else {
+                std::future::pending::<()>().await;
+            }
+        })
+    };
 
     let kafka_bootstrap = std::env::var("KAFKA_BOOTSTRAP_SERVERS").ok();
     let outbox_batch_size: i64 = std::env::var("OUTBOX_RELAY_BATCH_SIZE")
@@ -399,6 +431,7 @@ async fn main() {
         aave_task,
         metrics_task,
         retain_task,
-        deposit_pool_task
+        deposit_pool_task,
+        custody_task
     );
 }

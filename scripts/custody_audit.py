@@ -105,7 +105,8 @@ def main():
     host, user, key, password = load_ssh_config()
     require_ssh_creds(key, password)
     ssh = paramiko.SSHClient()
-    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    ssh.load_system_host_keys()
+    ssh.set_missing_host_key_policy(paramiko.RejectPolicy())
     ssh.connect(**connect_kwargs(host, user, key, password))
 
     findings = []

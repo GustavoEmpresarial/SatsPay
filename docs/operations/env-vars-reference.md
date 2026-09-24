@@ -34,7 +34,7 @@ Este documento cataloga todas as variáveis de ambiente utilizadas pelos serviç
 | `USE_REAL_CHAIN_CLIENTS` | `api-server`, `worker` | Não | `false` / `true` | Ativa clientes de blockchain reais (Bitcore/Polygon) |
 | `ALLOW_STUB_CHAIN` | `api-server`, `worker` | Não | `true` / `false` | Permite o uso de stubs de chain (proibido em produção) |
 | `CHAIN_NETWORK` | `api-server`, `worker` | Se real=true | `mainnet` / `testnet` | Rede blockchain alvo |
-| `DEPOSIT_XPUB_<COIN>` | `api-server`, `worker` | Prod (todas menos SOL) | `xpub6...` | Xpub de **conta** (`account_path`) da carteira de depósito; endereço = `…/0/{index}`. Validado no boot; o worker exige que bata com `DEPOSIT_MNEMONIC` (`CHAIN_DEPOSIT_KEY_MISMATCH`). Gerar com `custody_setup`. ADR 0012 |
+| `DEPOSIT_XPUB_<COIN>` | `api-server`, `worker` | Prod (todas menos SOL) | `xpub6...` | Xpub de **conta** (`account_path`) da carteira de depósito; endereço = `…/0/{index}`. O worker exige `DEPOSIT_MNEMONIC_ENC` e publica heartbeat do fingerprint validado; a API bloqueia readiness e emissão se divergir ou expirar. Gerar com `custody_setup`. ADR 0012 |
 | `CHAIN_DEPOSIT_XPUB` | `api-server`, `worker` | Não | `xpub6...` | Xpub único para todas as moedas — **só fora de produção** |
 | `HOT_ADDRESS_<COIN>` | `api-server`, `worker` | Prod (swap/tesouraria) | `bc1...` | Endereço público da hot (origem/destino de swap, painel). O worker exige que bata com a hot key (`HOT_ADDRESS_MISMATCH`) |
 | `DEPOSIT_MNEMONIC_ENC`, `HOT_MNEMONIC_ENC` | **só** `worker` | Prod | base64 AES-GCM | Mnemonics selados (AAD por nome). Também `*_ENC_FILE`. Texto claro (`DEPOSIT_MNEMONIC`, `HOT_MNEMONIC`) só fora de produção |

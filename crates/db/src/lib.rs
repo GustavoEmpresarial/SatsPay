@@ -3,6 +3,7 @@ pub mod admin;
 pub mod airdrop;
 pub mod audit;
 pub mod auth;
+pub mod custody;
 pub mod deposits;
 pub mod faucet;
 pub mod faucetlist;

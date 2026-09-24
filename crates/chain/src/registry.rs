@@ -18,6 +18,7 @@ use std::sync::Arc;
 pub struct ChainRegistry {
     clients: HashMap<&'static str, Arc<dyn ChainClient>>,
     wallet: PublicWalletConfig,
+    custody_fingerprint: Option<String>,
 }
 
 impl ChainRegistry {
@@ -29,7 +30,7 @@ impl ChainRegistry {
             let client = build_stub_client(coin, node_env, allow_stub_chain)?;
             clients.insert(coin.as_str(), client);
         }
-        Ok(Self { clients, wallet: PublicWalletConfig::default() })
+        Ok(Self { clients, wallet: PublicWalletConfig::default(), custody_fingerprint: None })
     }
 
     /// Real-client registry — one `RealChainClient` per coin, sharing the
@@ -40,7 +41,7 @@ impl ChainRegistry {
         for &coin in COINS.iter() {
             clients.insert(coin.as_str(), Arc::new(RealChainClient::new(coin, pool.clone(), config.clone())) as Arc<dyn ChainClient>);
         }
-        Self { clients, wallet: config.wallet }
+        Self { clients, wallet: config.wallet, custody_fingerprint: None }
     }
 
     /// Replaces the public wallet config (hot addresses) — tests and stub setups.
@@ -56,6 +57,10 @@ impl ChainRegistry {
             .hot_address(coin)
             .map(str::to_string)
             .ok_or_else(|| format!("HOT_ADDRESS_{} not configured", coin.as_str()))
+    }
+
+    pub fn custody_validation_fingerprint(&self) -> Option<&str> {
+        self.custody_fingerprint.as_deref()
     }
 
     /// Swaps in `client` for the coin it reports. For tests that need a
@@ -76,19 +81,19 @@ impl ChainRegistry {
     /// addresses come from `DEPOSIT_XPUB_<COIN>` (SOL from the worker's pool),
     /// and every signing path fails with `SIGNER_NOT_AVAILABLE`.
     pub fn from_env(pool: PgPool) -> Result<Self, String> {
-        Self::from_env_inner(pool, SignerKeys::default())
+        Self::from_env_inner(pool, SignerKeys::default(), false)
     }
 
     /// Worker registry: same public config plus the signing keys, handed in
     /// already decrypted (never read from env here).
     pub fn from_env_with_signer(pool: PgPool, keys: SignerKeys) -> Result<Self, String> {
-        Self::from_env_inner(pool, keys)
+        Self::from_env_inner(pool, keys, true)
     }
 
     /// Chooses `build` (stub) vs `build_real` based on `USE_REAL_CHAIN_CLIENTS`
     /// and reads every endpoint setting from env. Shared by `api-server`
     /// and `worker` so the two binaries can't drift on how this decision is made.
-    fn from_env_inner(pool: PgPool, keys: SignerKeys) -> Result<Self, String> {
+    fn from_env_inner(pool: PgPool, keys: SignerKeys, signer_path: bool) -> Result<Self, String> {
         let node_env = std::env::var("NODE_ENV").unwrap_or_else(|_| "development".to_string());
         let use_real = std::env::var("USE_REAL_CHAIN_CLIENTS").map(|v| v == "true").unwrap_or(true);
         let production = node_env == "production" && use_real;
@@ -104,9 +109,9 @@ impl ChainRegistry {
             Err(_) => ChainNetwork::Mainnet,
         };
 
-        if keys.deposit_mnemonic.is_some() || keys.hot_mnemonic.is_some() || keys.hot_wallet_key.is_some() {
-            crate::wallet_config::verify_signer_matches(&wallet, &keys, network).map_err(|e| format!("{}: {e}", e.code()))?;
-        }
+        validate_signer_configuration(production, signer_path, &wallet, &keys, network)
+            .map_err(|e| format!("{}: {e}", e.code()))?;
+        let custody_fingerprint = production.then(|| wallet.custody_fingerprint(network));
 
         let bitcore_base_url = std::env::var("BITCORE_API_BASE_URL").unwrap_or_else(|_| "https://api.bitcore.io".to_string());
         let evm_rpc_url = std::env::var("EVM_RPC_URL").unwrap_or_else(|_| "https://polygon-bor-rpc.publicnode.com".to_string());
@@ -124,7 +129,7 @@ impl ChainRegistry {
             .and_then(|v| v.parse().ok())
             .unwrap_or(2);
 
-        Ok(Self::build_real(
+        let mut registry = Self::build_real(
             pool,
             RealClientConfig {
                 bitcore_base_url,
@@ -144,12 +149,48 @@ impl ChainRegistry {
                 deposit_mnemonic: keys.deposit_mnemonic,
                 hot_mnemonic: keys.hot_mnemonic,
             },
-        ))
+        );
+        registry.custody_fingerprint = custody_fingerprint;
+        Ok(registry)
     }
+}
+
+fn validate_signer_configuration(
+    production: bool,
+    signer_path: bool,
+    wallet: &PublicWalletConfig,
+    keys: &SignerKeys,
+    network: ChainNetwork,
+) -> Result<(), WalletConfigError> {
+    if !signer_path {
+        return Ok(());
+    }
+    if production && keys.deposit_mnemonic.is_none() {
+        return Err(WalletConfigError::MissingDepositSigner);
+    }
+    crate::wallet_config::verify_signer_matches(wallet, keys, network)
 }
 
 fn build_stub_client(coin: Coin, node_env: &str, allow_stub_chain: bool) -> Result<Arc<dyn ChainClient>, StubPolicyError> {
     assert_stub_client_allowed(node_env, allow_stub_chain, coin.as_str())?;
     tracing::warn!(coin = coin.as_str(), "using STUB chain client — no real funds are moved");
     Ok(Arc::new(StubClient::new(coin)))
+}
+
+#[cfg(test)]
+mod custody_tests {
+    use super::*;
+
+    #[test]
+    fn production_signer_requires_deposit_mnemonic_but_watch_only_does_not() {
+        let wallet = PublicWalletConfig::default();
+        let keys = SignerKeys::default();
+        assert_eq!(
+            validate_signer_configuration(true, true, &wallet, &keys, ChainNetwork::Mainnet)
+                .unwrap_err()
+                .code(),
+            "CHAIN_DEPOSIT_SIGNER_MISSING"
+        );
+        validate_signer_configuration(true, false, &wallet, &keys, ChainNetwork::Mainnet).unwrap();
+    }
 }

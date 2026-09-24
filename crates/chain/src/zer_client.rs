@@ -690,7 +690,9 @@ fn coins_to_sats(v: &Value) -> Option<u128> {
         coefficient.checked_mul(10u128.checked_pow(scale as u32)?)
     } else {
         let divisor = 10u128.checked_pow(scale.unsigned_abs())?;
-        (coefficient % divisor == 0).then_some(coefficient / divisor)
+        coefficient
+            .is_multiple_of(divisor)
+            .then_some(coefficient / divisor)
     }
 }
 

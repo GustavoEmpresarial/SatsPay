@@ -30,6 +30,8 @@
 
 ## Critérios de aceite
 
+- [ ] Em produção, emissão de endereço retorna 503 enquanto o worker não tiver validado a configuração pública de custódia atual.
+- [ ] Pool SOL vazio retorna 503 com `code=DEPOSIT_ADDRESS_POOL_EMPTY`, sem criar ou reutilizar endereço.
 - [ ] Rotas documentadas batem com `App.tsx`
 - [ ] APIs documentadas batem com chamadas `api()` / handlers Axum
 - [ ] Sem regressão de hooks (Rules of Hooks)

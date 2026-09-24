@@ -132,6 +132,12 @@ fn load_secret_with(
     is_production: bool,
     env: &dyn Fn(&str) -> Option<String>,
 ) -> Result<(Option<SecretValue>, bool), SecretBootstrapError> {
+    // A valid ciphertext must not hide a simultaneously exposed plaintext
+    // value in the process environment or /proc.
+    let plaintext = non_empty(env(spec.name));
+    if is_production && plaintext.is_some() {
+        return Err(SecretBootstrapError::PlaintextForbidden { name: spec.name });
+    }
     let enc_name = format!("{}_ENC", spec.name);
     if let Some(ct) = read_env_or_file_with(&enc_name, env)? {
         let plain = secrets
@@ -139,8 +145,7 @@ fn load_secret_with(
             .map_err(|source| SecretBootstrapError::Decrypt { name: spec.name, source })?;
         return Ok((Some(SecretValue::new(plain)), false));
     }
-    match non_empty(env(spec.name)) {
-        Some(_) if is_production => Err(SecretBootstrapError::PlaintextForbidden { name: spec.name }),
+    match plaintext {
         Some(plain) => Ok((Some(SecretValue::new(plain)), true)),
         None => Ok((None, false)),
     }
@@ -255,13 +260,23 @@ mod tests {
     }
 
     #[test]
-    fn ciphertext_round_trips_and_wins_over_plaintext() {
+    fn ciphertext_round_trips_and_wins_over_plaintext_outside_production() {
         let s = svc();
         let ct = encrypt_secret(&s, DEPOSIT_MNEMONIC, WORDS);
         let env = env_of(&[("DEPOSIT_MNEMONIC_ENC", &ct), ("DEPOSIT_MNEMONIC", "ignored")]);
-        let (v, plain) = load_secret_with(&s, DEPOSIT_MNEMONIC, true, &env).unwrap();
+        let (v, plain) = load_secret_with(&s, DEPOSIT_MNEMONIC, false, &env).unwrap();
         assert_eq!(v.unwrap().expose(), WORDS);
         assert!(!plain);
+    }
+
+    #[test]
+    fn production_rejects_plaintext_even_when_ciphertext_exists() {
+        let s = svc();
+        let ct = encrypt_secret(&s, DEPOSIT_MNEMONIC, WORDS);
+        let env = env_of(&[("DEPOSIT_MNEMONIC_ENC", &ct), ("DEPOSIT_MNEMONIC", "exposed")]);
+        let err = load_secret_with(&s, DEPOSIT_MNEMONIC, true, &env).unwrap_err();
+        assert_eq!(err.code(), "SECRET_PLAINTEXT_FORBIDDEN");
+        assert!(!err.to_string().contains("exposed"));
     }
 
     #[test]

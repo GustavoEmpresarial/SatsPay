@@ -8,6 +8,27 @@ use sqlx::PgPool;
 use tower::ServiceExt;
 use uuid::Uuid;
 
+fn real_config_without_signer() -> chain::RealClientConfig {
+    chain::RealClientConfig {
+        bitcore_base_url: "http://127.0.0.1:9".into(),
+        evm_rpc_url: "http://127.0.0.1:9".into(),
+        bsc_rpc_url: "http://127.0.0.1:9".into(),
+        wallet: chain::PublicWalletConfig::default(),
+        hot_wallet_wif: None,
+        evm_deposit_lookback_blocks: 10,
+        fee_confirmation_target: 2,
+        network: chain::ChainNetwork::Mainnet,
+        sol_rpc_url: "http://127.0.0.1:9".into(),
+        dgb_insight_url: "http://127.0.0.1:9".into(),
+        dgb_rpc_url: None,
+        zer_explorer_url: "http://127.0.0.1:9".into(),
+        zer_explorer_api_key: None,
+        zer_rpc_url: None,
+        deposit_mnemonic: None,
+        hot_mnemonic: None,
+    }
+}
+
 #[sqlx::test(migrations = "../db/migrations")]
 async fn deposit_address_and_history(pool: PgPool) {
     let state = common::test_state(pool);
@@ -84,4 +105,39 @@ async fn deposit_address_and_history(pool: PgPool) {
     );
     let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
     assert!(body["deposits"].as_array().is_some());
+}
+
+#[sqlx::test(migrations = "../db/migrations")]
+async fn empty_sol_pool_returns_retryable_503_contract(pool: PgPool) {
+    let (mut state, token, _, _) = common::register_user(pool.clone(), "sol-empty").await;
+    let sol = std::sync::Arc::new(chain::RealChainClient::new(
+        shared::Coin::Sol,
+        pool,
+        real_config_without_signer(),
+    ));
+    state.chain_registry = std::sync::Arc::new(
+        chain::ChainRegistry::build("development", true)
+            .unwrap()
+            .with_client(sol),
+    );
+
+    let response = api_http::app_without_metrics(state)
+        .oneshot(
+            axum::http::Request::builder()
+                .uri("/v1/deposits/address/SOL")
+                .header("authorization", format!("Bearer {token}"))
+                .header("x-real-ip", "203.0.113.28")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        response.status(),
+        axum::http::StatusCode::SERVICE_UNAVAILABLE
+    );
+    let body: serde_json::Value =
+        serde_json::from_slice(&response.into_body().collect().await.unwrap().to_bytes()).unwrap();
+    assert_eq!(body["code"], chain::DEPOSIT_ADDRESS_POOL_EMPTY);
+    assert!(body["error"].as_str().is_some_and(|v| !v.is_empty()));
 }

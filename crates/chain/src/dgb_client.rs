@@ -19,6 +19,7 @@ pub struct DgbClient {
     http: reqwest::Client,
     bases: Vec<String>,
     rpc: Option<UtxoNodeRpc>,
+    rpc_provider: Option<String>,
 }
 
 impl DgbClient {
@@ -38,16 +39,20 @@ impl DgbClient {
                 bases.push(extra.to_string());
             }
         }
-        let rpc = rpc_url.and_then(|raw| {
+        let (rpc, rpc_provider) = rpc_url.map_or((None, None), |raw| {
             let raw = raw.trim();
             if raw.is_empty() {
-                return None;
+                return (None, None);
             }
             match UtxoNodeRpc::new(raw) {
-                Ok(c) => Some(c),
+                Ok(c) => {
+                    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+                    raw.hash(&mut hasher);
+                    (Some(c), Some(format!("dgb_node_rpc_{:x}", hasher.finish())))
+                }
                 Err(e) => {
                     tracing::warn!(error = %e.message, "DGB_RPC_URL invalid; Insight fallback only");
-                    None
+                    (None, None)
                 }
             }
         });
@@ -57,7 +62,7 @@ impl DgbClient {
             .timeout(std::time::Duration::from_secs(15))
             .build()
             .unwrap_or_else(|_| reqwest::Client::new());
-        Self { http, bases, rpc }
+        Self { http, bases, rpc, rpc_provider }
     }
 
     /// First host that answers 2xx **with a body that parses as `T`** wins.
@@ -70,6 +75,7 @@ impl DgbClient {
             http: reqwest::Client::new(),
             bases,
             rpc: None,
+            rpc_provider: None,
         }
     }
 
@@ -113,7 +119,8 @@ impl DgbClient {
 
     pub async fn fetch_deposits(&self, address: &str) -> Result<Vec<OnchainTx>, ChainError> {
         if let Some(rpc) = &self.rpc {
-            match rpc.scan_address(address).await {
+            let provider = self.rpc_provider.as_deref().expect("RPC provider accompanies RPC client");
+            match crate::provider_circuit::call(provider, || rpc.scan_address(address)).await {
                 Ok(txs) => return Ok(txs),
                 Err(e) => {
                     tracing::warn!(error = %e.message, address, "DGB scantxoutset failed; trying Insight")
@@ -152,7 +159,8 @@ impl DgbClient {
 
     pub async fn get_balance(&self, address: &str) -> Result<u128, ChainError> {
         if let Some(rpc) = &self.rpc {
-            match rpc.get_balance(address).await {
+            let provider = self.rpc_provider.as_deref().expect("RPC provider accompanies RPC client");
+            match crate::provider_circuit::call(provider, || rpc.get_balance(address)).await {
                 Ok(sats) => return Ok(sats),
                 Err(e) => {
                     tracing::warn!(error = %e.message, address, "DGB node balance failed; trying Insight")
@@ -244,7 +252,8 @@ impl DgbClient {
 
     pub async fn fetch_utxos(&self, address: &str) -> Result<Vec<Utxo>, ChainError> {
         if let Some(rpc) = &self.rpc {
-            match rpc.fetch_utxos(address).await {
+            let provider = self.rpc_provider.as_deref().expect("RPC provider accompanies RPC client");
+            match crate::provider_circuit::call(provider, || rpc.fetch_utxos(address)).await {
                 Ok(utxos) => return Ok(utxos),
                 Err(e) => {
                     tracing::warn!(error = %e.message, address, "DGB node UTXOs failed; trying Insight")
@@ -280,7 +289,8 @@ impl DgbClient {
 
     pub async fn estimate_fee_sat_per_byte(&self) -> Result<u64, ChainError> {
         if let Some(rpc) = &self.rpc {
-            if let Ok(fee) = rpc.estimate_fee_sat_per_byte().await {
+            let provider = self.rpc_provider.as_deref().expect("RPC provider accompanies RPC client");
+            if let Ok(fee) = crate::provider_circuit::call(provider, || rpc.estimate_fee_sat_per_byte()).await {
                 return Ok(fee.max(1));
             }
         }
@@ -312,7 +322,8 @@ impl DgbClient {
 
     pub async fn broadcast(&self, raw_hex: &str) -> Result<String, ChainError> {
         if let Some(rpc) = &self.rpc {
-            match rpc.broadcast(raw_hex).await {
+            let provider = self.rpc_provider.as_deref().expect("RPC provider accompanies RPC client");
+            match crate::provider_circuit::call(provider, || rpc.broadcast(raw_hex)).await {
                 Ok(txid) => return Ok(txid),
                 Err(e) => {
                     tracing::warn!(error = %e.message, "DGB sendrawtransaction failed; trying Insight")
@@ -450,6 +461,8 @@ pub fn fill_missing_scripts(utxos: &mut [Utxo], address_script_hex: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
 
     #[test]
     fn blockbook_utxos_parse_and_reject_bad_values() {
@@ -550,6 +563,31 @@ mod tests {
         format!("http://{addr}/api")
     }
 
+    async fn failing_rpc() -> (String, Arc<AtomicUsize>) {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let calls = Arc::new(AtomicUsize::new(0));
+        let server_calls = calls.clone();
+        tokio::spawn(async move {
+            loop {
+                let Ok((mut socket, _)) = listener.accept().await else { return };
+                server_calls.fetch_add(1, Ordering::SeqCst);
+                tokio::spawn(async move {
+                    let mut request = [0u8; 4096];
+                    let _ = socket.read(&mut request).await;
+                    let body = r#"{"result":null,"error":{"code":-1,"message":"down"}}"#;
+                    let response = format!(
+                        "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                        body.len()
+                    );
+                    let _ = socket.write_all(response.as_bytes()).await;
+                });
+            }
+        });
+        (format!("http://{addr}"), calls)
+    }
+
     const HTML: &str = "<html>maintenance</html>";
 
     #[tokio::test]
@@ -616,6 +654,23 @@ mod tests {
             "{}",
             err.message
         );
+    }
+
+    #[tokio::test]
+    async fn configured_node_opens_circuit_after_three_failures() {
+        let (rpc, calls) = failing_rpc().await;
+        let insight = mock_host(vec![(
+            "GET /api/addr/DADDR/utxo",
+            200,
+            r#"[{"txid":"ff","vout":0,"satoshis":42,"confirmations":2}]"#,
+        )])
+        .await;
+        let client = DgbClient::with_rpc(&insight, Some(&rpc));
+        for _ in 0..4 {
+            let deposits = client.fetch_deposits("DADDR").await.unwrap();
+            assert_eq!(deposits[0].amount, 42);
+        }
+        assert_eq!(calls.load(Ordering::SeqCst), 3, "fourth wallet must skip the open 120s RPC path");
     }
 
     #[test]

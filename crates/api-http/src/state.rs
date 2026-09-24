@@ -3,10 +3,10 @@ use chain::ChainRegistry;
 use changenow::ChangeNowClient;
 use crypto::SecretsService;
 use domain::auth::{AuthRepo, AuthService, EmailSender};
+use relay::RelayClient;
 use sqlx::PgPool;
 use std::sync::Arc;
 use std::time::Duration;
-use relay::RelayClient;
 use swapkit::SwapKitClient;
 
 /// App-level settings that would otherwise show up as magic numbers scattered
@@ -72,5 +72,16 @@ impl<R: AuthRepo> Clone for AppState<R> {
             relay: self.relay.clone(),
             changenow: self.changenow.clone(),
         }
+    }
+}
+
+impl<R: AuthRepo> AppState<R> {
+    /// Production real-chain APIs are ready to issue addresses only while the
+    /// worker is alive and has validated the exact public custody config.
+    pub async fn custody_signer_ready(&self) -> Result<bool, sqlx::Error> {
+        let Some(fingerprint) = self.chain_registry.custody_validation_fingerprint() else {
+            return Ok(true);
+        };
+        db::custody::signer_validation_is_current(&self.pool, fingerprint).await
     }
 }

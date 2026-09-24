@@ -16,6 +16,7 @@ use crate::hd_wallet::{account_xpub, hot_address_from_mnemonic};
 use crate::params::ChainNetwork;
 use crate::real_client::hot_wallet_address;
 use bitcoin::bip32::Xpub;
+use sha2::{Digest, Sha256};
 use shared::{Coin, COINS};
 use std::collections::HashMap;
 use std::str::FromStr;
@@ -30,6 +31,8 @@ pub enum WalletConfigError {
     DepositKeyMismatch { coin: &'static str },
     #[error("HOT_ADDRESS_{coin} does not match the hot key the worker signs with")]
     HotAddressMismatch { coin: &'static str },
+    #[error("production signer requires DEPOSIT_MNEMONIC_ENC or DEPOSIT_MNEMONIC_ENC_FILE")]
+    MissingDepositSigner,
 }
 
 impl WalletConfigError {
@@ -40,6 +43,7 @@ impl WalletConfigError {
             Self::InvalidXpub { .. } => "CHAIN_CONFIG_INVALID_XPUB",
             Self::DepositKeyMismatch { .. } => "CHAIN_DEPOSIT_KEY_MISMATCH",
             Self::HotAddressMismatch { .. } => "HOT_ADDRESS_MISMATCH",
+            Self::MissingDepositSigner => "CHAIN_DEPOSIT_SIGNER_MISSING",
         }
     }
 }
@@ -109,6 +113,23 @@ impl PublicWalletConfig {
         self.hot_addresses.get(&coin).map(String::as_str)
     }
 
+    /// Non-secret identity of the public config validated by the worker.
+    pub fn custody_fingerprint(&self, network: ChainNetwork) -> String {
+        let mut hash = Sha256::new();
+        hash.update(b"bitcosats:custody-public-config:v1\0");
+        hash.update(format!("{network:?}").as_bytes());
+        hash.update([0]);
+        for &coin in COINS.iter() {
+            hash.update(coin.as_str().as_bytes());
+            hash.update([0]);
+            hash.update(self.deposit_xpub(coin).unwrap_or("").as_bytes());
+            hash.update([0]);
+            hash.update(self.hot_address(coin).unwrap_or("").as_bytes());
+            hash.update([0]);
+        }
+        hex::encode(hash.finalize())
+    }
+
     pub fn from_env(production: bool) -> Result<Self, WalletConfigError> {
         Self::from_env_with(production, &|k| std::env::var(k).ok())
     }
@@ -169,9 +190,9 @@ pub fn verify_signer_matches(
     for &coin in COINS.iter() {
         let Some(configured) = public.hot_address(coin) else { continue };
         match keys.hot_address(coin, network) {
-            Some(Ok(derived)) if derived.eq_ignore_ascii_case(configured) => {}
+            Some(Ok(derived)) if derived == configured => {}
             Some(_) => return Err(WalletConfigError::HotAddressMismatch { coin: coin.as_str() }),
-            None => {}
+            None => return Err(WalletConfigError::HotAddressMismatch { coin: coin.as_str() }),
         }
     }
     Ok(())
@@ -265,6 +286,37 @@ mod tests {
         let hot_of_deposit = hot_address_from_mnemonic(WORDS, Coin::Pol, ChainNetwork::Mainnet).unwrap();
         let cfg = PublicWalletConfig::from_env_with(true, &env_of(per_coin_env(WORDS))).unwrap().with_hot_address(Coin::Pol, &hot_of_deposit);
         assert_eq!(verify_signer_matches(&cfg, &keys, ChainNetwork::Mainnet).unwrap_err().code(), "HOT_ADDRESS_MISMATCH");
+    }
+
+    #[test]
+    fn verify_rejects_case_changed_base58_and_missing_hot_signer() {
+        let keys = SignerKeys { deposit_mnemonic: Some(WORDS.into()), hot_mnemonic: Some(OTHER.into()), hot_wallet_key: None };
+        let hot_sol = hot_address_from_mnemonic(OTHER, Coin::Sol, ChainNetwork::Mainnet).unwrap();
+        let mut changed = hot_sol.clone();
+        let (index, replacement) = changed.char_indices().find_map(|(i, c)| {
+            if c.is_ascii_lowercase() { Some((i, c.to_ascii_uppercase())) }
+            else if c.is_ascii_uppercase() { Some((i, c.to_ascii_lowercase())) }
+            else { None }
+        }).unwrap();
+        changed.replace_range(index..index + 1, &replacement.to_string());
+        let cfg = PublicWalletConfig::from_env_with(true, &env_of(per_coin_env(WORDS))).unwrap()
+            .with_hot_address(Coin::Sol, &changed);
+        assert_eq!(verify_signer_matches(&cfg, &keys, ChainNetwork::Mainnet).unwrap_err().code(), "HOT_ADDRESS_MISMATCH");
+
+        let no_hot = SignerKeys { deposit_mnemonic: Some(WORDS.into()), hot_mnemonic: None, hot_wallet_key: None };
+        let cfg = PublicWalletConfig::from_env_with(true, &env_of(per_coin_env(WORDS))).unwrap()
+            .with_hot_address(Coin::Sol, &hot_sol);
+        assert_eq!(verify_signer_matches(&cfg, &no_hot, ChainNetwork::Mainnet).unwrap_err().code(), "HOT_ADDRESS_MISMATCH");
+    }
+
+    #[test]
+    fn custody_fingerprint_changes_with_public_config_or_network() {
+        let base = PublicWalletConfig::from_env_with(true, &env_of(per_coin_env(WORDS))).unwrap();
+        let same = PublicWalletConfig::from_env_with(true, &env_of(per_coin_env(WORDS))).unwrap();
+        assert_eq!(base.custody_fingerprint(ChainNetwork::Mainnet), same.custody_fingerprint(ChainNetwork::Mainnet));
+        assert_ne!(base.custody_fingerprint(ChainNetwork::Mainnet), base.custody_fingerprint(ChainNetwork::Testnet));
+        let changed = same.with_hot_address(Coin::Btc, "bc1qchanged");
+        assert_ne!(base.custody_fingerprint(ChainNetwork::Mainnet), changed.custody_fingerprint(ChainNetwork::Mainnet));
     }
 
     #[test]
