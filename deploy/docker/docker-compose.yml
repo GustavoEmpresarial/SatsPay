@@ -142,7 +142,7 @@ services:
       api-server:
         condition: service_started
     ports:
-      - "${CLIENT_HOST_BIND:-0.0.0.0}:${CLIENT_HOST_PORT:-8080}:8080"
+      - "${CLIENT_HOST_BIND:-127.0.0.1}:${CLIENT_HOST_PORT:-8080}:8080"
     networks:
       bitcosats-net:
         aliases: [client]
