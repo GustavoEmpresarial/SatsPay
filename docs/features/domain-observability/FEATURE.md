@@ -61,3 +61,10 @@ _sem overview em docs/pages_
 - Mapa geral: [`docs/README.md`](../../README.md)
 - Índice features: [`../README.md`](../README.md)
 - Testes: [`TC.md`](TC.md)
+
+## Operação (2026-09-23)
+
+- `/metrics` mantém histogramas HTTP e acrescenta `satspay_http_requests_total{module,version,status_class}`, `satspay_http_5xx_last_minute{module,version}`, `satspay_sol_deposit_pool_available` e `satspay_withdrawal_jobs_stalled`. `APP_VERSION` deve ser o SHA do deploy. A rota deve ficar acessível só pela rede interna/loopback.
+- O worker lê eventos 5xx recentes e verifica a fila de saques, o pool SOL, depósitos `CREDITED` sem crédito correspondente e saques sem débito correspondente no ledger. Cinco ou mais 5xx/min disparam alerta. Divergência e pool vazio disparam imediatamente; fila `RUNNING`/`PENDING` atrasada por cinco minutos ou `FAILED` também.
+- Alertas `CRITICAL` são agrupados por fingerprint no banco e enviados ao Telegram com `TELEGRAM_BOT_TOKEN` e `TELEGRAM_CHAT_ID` apenas no worker. Recuperação resolve o grupo e envia aviso. `error_id` aparece nas respostas 500; `requestId` e `X-Request-Id` seguem para correlação. Não registrar corpo, token, WIF ou seed.
+- `http_failure_events` guarda apenas módulo, versão, status e horário por sete dias. O worker remove eventos antigos.

@@ -30,8 +30,8 @@ pub struct RealClientConfig {
     pub evm_rpc_url: String,
     /// BNB Smart Chain JSON-RPC. Used only for PEPE (chain id 56). Never the Polygon URL.
     pub bsc_rpc_url: String,
-    /// Watch-only BIP32 xpub used to derive deposit addresses.
-    pub deposit_xpub: String,
+    /// Watch-only deposit xpubs + public hot addresses (ADR 0012).
+    pub wallet: crate::wallet_config::PublicWalletConfig,
     /// Hot-wallet WIF. The same secp256k1 key is reused for POL (EVM address
     /// = keccak of the uncompressed pubkey). `None` disables broadcast.
     /// Testnet WIFs use a different version byte; `PrivateKey::from_wif`
@@ -55,6 +55,7 @@ pub struct RealClientConfig {
     /// Self-hosted zerod JSON-RPC. Required for ZER withdraw.
     pub zer_rpc_url: Option<String>,
     /// BIP-39 deposit seed. When set, addresses are derived at `{account}/0/{index}`.
+    /// Signer (worker) only — the api-server registry leaves every key `None`.
     pub deposit_mnemonic: Option<String>,
     /// BIP-39 hot/withdrawal seed. Index 0 of each coin. Sweeps land here.
     pub hot_mnemonic: Option<String>,
@@ -183,15 +184,59 @@ impl RealChainClient {
             let secret = crate::hd_wallet::hot_secret_from_mnemonic(m, self.coin).map_err(|e| e.to_string())?;
             return crate::hd_wallet::secret_to_wif(&secret).map_err(|e| e.to_string());
         }
-        self.config.hot_wallet_wif.clone().ok_or_else(|| "Hot wallet não configurada".into())
+        self.config.hot_wallet_wif.clone().ok_or_else(|| SIGNER_NOT_AVAILABLE.into())
     }
 
     fn hot_addr(&self) -> Result<String, String> {
         if let Some(m) = &self.config.hot_mnemonic {
             return crate::hd_wallet::hot_address_from_mnemonic(m, self.coin, self.config.network).map_err(|e| e.to_string());
         }
-        let wif = self.config.hot_wallet_wif.as_deref().ok_or_else(|| "Hot wallet não configurada".to_string())?;
+        if let Some(addr) = self.config.wallet.hot_address(self.coin) {
+            return Ok(addr.to_string());
+        }
+        let wif = self.config.hot_wallet_wif.as_deref().ok_or_else(|| SIGNER_NOT_AVAILABLE.to_string())?;
         hot_wallet_address(self.coin, self.config.network, wif)
+    }
+
+    /// SOL deposit master. ed25519 has no public derivation, so this needs a
+    /// secret: the deposit mnemonic, or (legacy, pre-ADR-0012) the hot key.
+    /// Never derived from an xpub — that is public data.
+    fn sol_deposit_master(&self) -> Option<[u8; 32]> {
+        self.config
+            .deposit_mnemonic
+            .as_deref()
+            .or(self.config.hot_wallet_wif.as_deref())
+            .map(crate::sol_client::sol_master_from_hot_key)
+    }
+
+    fn derive_sol_deposit(&self, index: u32) -> Option<String> {
+        let master = self.sol_deposit_master()?;
+        let secret = crate::sol_client::derive_sol_secret(&master, b"bitcosats-sol-deposit", index);
+        Some(crate::sol_client::sol_address_from_secret(&secret))
+    }
+
+    /// api-server path for SOL: take a worker-generated address from the pool.
+    /// `SKIP LOCKED` hands concurrent requests distinct rows; a claimed row is
+    /// never reissued even if the caller's transaction later rolls back.
+    async fn claim_pooled_address(&self) -> Result<crate::GeneratedAddress, ChainError> {
+        let row: Option<(i64, String)> = sqlx::query_as(
+            "UPDATE deposit_address_pool SET claimed_at = now() \
+             WHERE coin = $1::coin AND hd_index = ( \
+                 SELECT hd_index FROM deposit_address_pool \
+                 WHERE coin = $1::coin AND claimed_at IS NULL \
+                 ORDER BY hd_index LIMIT 1 FOR UPDATE SKIP LOCKED) \
+             RETURNING hd_index, address",
+        )
+        .bind(self.coin.as_str())
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| ChainError { message: format!("deposit pool query failed: {e}") })?;
+        let Some((hd_index, address)) = row else {
+            tracing::warn!(code = DEPOSIT_ADDRESS_POOL_EMPTY, coin = %self.coin.as_str(), "no pre-generated deposit address left");
+            return Err(ChainError { message: format!("{DEPOSIT_ADDRESS_POOL_EMPTY}: no {} deposit address available", self.coin.as_str()) });
+        };
+        let hd_index = u32::try_from(hd_index).map_err(|_| ChainError { message: "pooled hd_index out of range".into() })?;
+        Ok(crate::GeneratedAddress { address, hd_index: Some(hd_index) })
     }
 
     async fn next_hd_index(&self) -> Result<u32, ChainError> {
@@ -247,26 +292,54 @@ impl ChainClient for RealChainClient {
     }
 
     async fn generate_address(&self, _user_id: &str) -> Result<crate::GeneratedAddress, ChainError> {
+        if self.coin == Coin::Sol && self.sol_deposit_master().is_none() {
+            return self.claim_pooled_address().await;
+        }
         let index = self.next_hd_index().await?;
         if let Some(mnemonic) = &self.config.deposit_mnemonic {
             let address = crate::hd_wallet::address_from_mnemonic(mnemonic, self.coin, self.config.network, index)
                 .map_err(|e| ChainError { message: e.to_string() })?;
             return Ok(crate::GeneratedAddress { address, hd_index: Some(index) });
         }
-        let pubkey = derive_receive_pubkey(&self.config.deposit_xpub, index).map_err(|e| ChainError { message: e.to_string() })?;
-        let address = match self.coin_params().address_kind {
-            AddressKind::Bech32Segwit { hrp, .. } => bech32_p2wpkh_encode(hrp, &hash160(&compressed_bytes(&pubkey))),
-            AddressKind::Base58Only { version } => base58check_encode(version, &hash160(&compressed_bytes(&pubkey))),
-            AddressKind::CashAddr { prefix } => cashaddr_encode(prefix, &hash160(&compressed_bytes(&pubkey))),
-            AddressKind::Evm => eip55_encode(&evm_address_from_uncompressed_pubkey(&uncompressed_xy_bytes(&pubkey))),
-            AddressKind::Solana => {
-                let master = self.config.hot_wallet_wif.as_deref().map(crate::sol_client::sol_master_from_hot_key).unwrap_or_else(|| crate::sol_client::sol_master_from_hot_key(&self.config.deposit_xpub));
-                let secret = crate::sol_client::derive_sol_secret(&master, b"bitcosats-sol-deposit", index);
-                crate::sol_client::sol_address_from_secret(&secret)
-            }
-            AddressKind::ZcashTransparent { version } => crate::encoding::zcash_t1_encode(version, &hash160(&compressed_bytes(&pubkey))),
-        };
+        if self.coin == Coin::Sol {
+            let address = self.derive_sol_deposit(index).expect("checked above");
+            return Ok(crate::GeneratedAddress { address, hd_index: Some(index) });
+        }
+        let xpub = self.config.wallet.deposit_xpub(self.coin).ok_or_else(|| ChainError {
+            message: format!("CHAIN_CONFIG_MISSING_XPUB: DEPOSIT_XPUB_{} not set", self.coin.as_str()),
+        })?;
+        let pubkey = derive_receive_pubkey(xpub, index).map_err(|e| ChainError { message: e.to_string() })?;
+        let address = address_from_pubkey(self.coin, self.config.network, &pubkey).map_err(|message| ChainError { message })?;
         Ok(crate::GeneratedAddress { address, hd_index: Some(index) })
+    }
+
+    async fn top_up_deposit_pool(&self, target: u32) -> Result<u32, ChainError> {
+        if self.coin != Coin::Sol {
+            return Ok(0);
+        }
+        if self.sol_deposit_master().is_none() {
+            return Err(ChainError { message: format!("{SIGNER_NOT_AVAILABLE}: SOL pool needs DEPOSIT_MNEMONIC") });
+        }
+        let unclaimed: i64 =
+            sqlx::query_scalar("SELECT count(*) FROM deposit_address_pool WHERE coin = $1::coin AND claimed_at IS NULL")
+                .bind(self.coin.as_str())
+                .fetch_one(&self.pool)
+                .await
+                .map_err(|e| ChainError { message: format!("deposit pool count failed: {e}") })?;
+        let mut added = 0;
+        for _ in unclaimed.max(0)..i64::from(target) {
+            let index = self.next_hd_index().await?;
+            let address = self.derive_sol_deposit(index).expect("checked above");
+            sqlx::query("INSERT INTO deposit_address_pool (coin, hd_index, address) VALUES ($1::coin, $2, $3) ON CONFLICT DO NOTHING")
+                .bind(self.coin.as_str())
+                .bind(i64::from(index))
+                .bind(&address)
+                .execute(&self.pool)
+                .await
+                .map_err(|e| ChainError { message: format!("deposit pool insert failed: {e}") })?;
+            added += 1;
+        }
+        Ok(added)
     }
 
     fn validate_address(&self, address: &str) -> bool {
@@ -1477,6 +1550,22 @@ pub fn parse_secret_key_bytes(key: &str) -> Result<[u8; 32], String> {
 }
 
 /// Derive the hot-wallet address for `coin`/`network` from a WIF or Hex private key.
+/// Stable codes carried in `ChainError::message` (prefix) for custody paths.
+pub const SIGNER_NOT_AVAILABLE: &str = "SIGNER_NOT_AVAILABLE";
+pub const DEPOSIT_ADDRESS_POOL_EMPTY: &str = "DEPOSIT_ADDRESS_POOL_EMPTY";
+
+/// Address for a secp256k1 pubkey derived from an xpub. SOL has no xpub path.
+pub fn address_from_pubkey(coin: Coin, network: ChainNetwork, pubkey: &bitcoin::secp256k1::PublicKey) -> Result<String, String> {
+    Ok(match params_for(coin, network).address_kind {
+        AddressKind::Bech32Segwit { hrp, .. } => bech32_p2wpkh_encode(hrp, &hash160(&compressed_bytes(pubkey))),
+        AddressKind::Base58Only { version } => base58check_encode(version, &hash160(&compressed_bytes(pubkey))),
+        AddressKind::CashAddr { prefix } => cashaddr_encode(prefix, &hash160(&compressed_bytes(pubkey))),
+        AddressKind::Evm => eip55_encode(&evm_address_from_uncompressed_pubkey(&uncompressed_xy_bytes(pubkey))),
+        AddressKind::ZcashTransparent { version } => crate::encoding::zcash_t1_encode(version, &hash160(&compressed_bytes(pubkey))),
+        AddressKind::Solana => return Err("SOL deposit addresses have no xpub derivation".into()),
+    })
+}
+
 pub fn hot_wallet_address(coin: Coin, network: ChainNetwork, wif: &str) -> Result<String, String> {
     let secret = parse_secret_key_bytes(wif)?;
     let secp = bitcoin::secp256k1::Secp256k1::new();

@@ -42,7 +42,9 @@ pub fn current_request_id() -> Option<String> {
 /// cardinality: 8–64 chars of `[A-Za-z0-9_-]`.
 fn sanitize_incoming(v: &HeaderValue) -> Option<String> {
     let s = v.to_str().ok()?.trim();
-    let ok = (8..=64).contains(&s.len()) && s.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_');
+    let ok = (8..=64).contains(&s.len())
+        && s.bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_');
     ok.then(|| s.to_string())
 }
 
@@ -58,7 +60,11 @@ fn route_label(req: &Request) -> String {
         .map(|m| m.as_str().to_string())
         .unwrap_or_else(|| {
             let p = req.uri().path();
-            if QUIET_PATHS.contains(&p) { p.to_string() } else { "<unmatched>".to_string() }
+            if QUIET_PATHS.contains(&p) {
+                p.to_string()
+            } else {
+                "<unmatched>".to_string()
+            }
         })
 }
 
@@ -75,15 +81,30 @@ pub async fn layer(mut request: Request, next: Next) -> Response {
     let method = request.method().clone();
     let route = route_label(&request);
     let quiet = QUIET_PATHS.contains(&route.as_str());
-    let span = tracing::info_span!("http", request_id = %request_id, method = %method, route = %route);
+    let span =
+        tracing::info_span!("http", request_id = %request_id, method = %method, route = %route);
     let started = Instant::now();
 
     let mut response = REQUEST_ID
-        .scope(request_id.clone(), next.run(request).instrument(span.clone()))
+        .scope(
+            request_id.clone(),
+            next.run(request).instrument(span.clone()),
+        )
         .await;
 
     let status = response.status().as_u16();
     let duration_ms = started.elapsed().as_millis();
+    if !quiet {
+        let module = route
+            .split('/')
+            .nth(2)
+            .filter(|s| !s.is_empty())
+            .unwrap_or("unknown");
+        static VERSION: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+        let version = VERSION
+            .get_or_init(|| std::env::var("APP_VERSION").unwrap_or_else(|_| "unknown".into()));
+        axum_prometheus::metrics::counter!("satspay_http_requests_total", "module" => module.to_owned(), "version" => version.clone(), "status_class" => format!("{}xx", status / 100)).increment(1);
+    }
     if let Ok(v) = HeaderValue::from_str(&request_id) {
         response.headers_mut().insert(REQUEST_ID_HEADER, v);
     }
@@ -112,7 +133,10 @@ mod tests {
 
     fn app() -> Router {
         Router::new()
-            .route("/v1/items/:id", get(|| async { current_request_id().unwrap_or_default() }))
+            .route(
+                "/v1/items/:id",
+                get(|| async { current_request_id().unwrap_or_default() }),
+            )
             .route(
                 "/boom",
                 get(|| async { crate::http_error::internal_error("db down") }),
@@ -132,7 +156,13 @@ mod tests {
     async fn generates_request_id_and_exposes_it_to_handlers() {
         let res = send("/v1/items/42?code=secret", None).await;
         assert_eq!(res.status(), StatusCode::OK);
-        let header = res.headers().get("x-request-id").unwrap().to_str().unwrap().to_string();
+        let header = res
+            .headers()
+            .get("x-request-id")
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_string();
         assert!(header.starts_with("req_"));
         let body = axum::body::to_bytes(res.into_body(), 1024).await.unwrap();
         assert_eq!(std::str::from_utf8(&body).unwrap(), header);

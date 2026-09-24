@@ -4,26 +4,34 @@
 //!
 //! TODO(fase 5+): balance_reconciliation, lend_accrual, worker_heartbeat.
 
+mod deposit_pool;
 mod deposit_watcher;
 mod dex_swap_runner;
 mod invoice_watcher;
+mod operational_monitor;
 mod withdrawal_reconciler;
 
 use chain::ChainRegistry;
+use changenow::ChangeNowClient;
 use events::EventProducer;
+use relay::RelayClient;
 use std::sync::Arc;
 use std::time::Duration;
 use swapkit::SwapKitClient;
-use relay::RelayClient;
-use changenow::ChangeNowClient;
 
 fn required_env_secs(name: &str) -> Duration {
-    let secs: u64 = std::env::var(name).unwrap_or_else(|_| panic!("{name} must be set")).parse().unwrap_or_else(|_| panic!("{name} must be a positive integer number of seconds"));
+    let secs: u64 = std::env::var(name)
+        .unwrap_or_else(|_| panic!("{name} must be set"))
+        .parse()
+        .unwrap_or_else(|_| panic!("{name} must be a positive integer number of seconds"));
     Duration::from_secs(secs)
 }
 
 fn required_env_millis(name: &str) -> Duration {
-    let ms: u64 = std::env::var(name).unwrap_or_else(|_| panic!("{name} must be set")).parse().unwrap_or_else(|_| panic!("{name} must be a positive integer number of milliseconds"));
+    let ms: u64 = std::env::var(name)
+        .unwrap_or_else(|_| panic!("{name} must be set"))
+        .parse()
+        .unwrap_or_else(|_| panic!("{name} must be a positive integer number of milliseconds"));
     Duration::from_millis(ms)
 }
 
@@ -33,31 +41,116 @@ async fn main() {
     // which silently drops the access log and job lifecycle lines.
     let filter = tracing_subscriber::EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
-    tracing_subscriber::fmt().json().with_env_filter(filter).init();
+    tracing_subscriber::fmt()
+        .json()
+        .with_env_filter(filter)
+        .init();
     db::telemetry::install_panic_hook("worker");
 
     let database_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
-    let pool = db::connect(&database_url).await.expect("failed to connect to Postgres");
-    db::run_migrations(&pool).await.expect("failed to run migrations");
-    db::house::ensure_house_inventory(&pool).await.expect("failed to ensure house inventory");
-    db::lend::ensure_lend_reserves(&pool).await.expect("failed to ensure lend reserves");
+    let pool = db::connect(&database_url)
+        .await
+        .expect("failed to connect to Postgres");
+    db::run_migrations(&pool)
+        .await
+        .expect("failed to run migrations");
+    // Fail closed during every signer restart. A fresh marker is written only
+    // after the encrypted keys and public custody configuration match.
+    db::custody::invalidate_signer_validation(&pool)
+        .await
+        .expect("failed to invalidate custody signer validation");
+    db::house::ensure_house_inventory(&pool)
+        .await
+        .expect("failed to ensure house inventory");
+    db::lend::ensure_lend_reserves(&pool)
+        .await
+        .expect("failed to ensure lend reserves");
 
-    let encryption_key = std::env::var("ENCRYPTION_KEY").expect("ENCRYPTION_KEY must be set (64 hex chars)");
+    let encryption_key = crypto::read_env_or_file("ENCRYPTION_KEY")
+        .unwrap_or_else(|e| panic!("{}: {e}", e.code()))
+        .expect("ENCRYPTION_KEY or ENCRYPTION_KEY_FILE must be set (64 hex chars)");
     let secrets = Arc::new(
-        crypto::SecretsService::from_hex(&encryption_key).expect("ENCRYPTION_KEY must be 64 hex chars"),
+        crypto::SecretsService::from_hex(&encryption_key)
+            .expect("ENCRYPTION_KEY must be 64 hex chars"),
     );
-    if let Some(m) = crypto::bootstrap_hot_mnemonic(&secrets).expect("hot mnemonic bootstrap failed") {
-        std::env::set_var("HOT_MNEMONIC", m);
-    }
 
-    let registry = std::sync::Arc::new(ChainRegistry::from_env(pool.clone()).expect("failed to build chain registry"));
+    // ADR 0012: the worker is the only signer. Wallet `*_ENC` values may be
+    // sealed with a key the api-server never sees (WALLET_ENCRYPTION_KEY);
+    // unset → ENCRYPTION_KEY, as before.
+    let wallet_secrets = match crypto::read_env_or_file("WALLET_ENCRYPTION_KEY")
+        .unwrap_or_else(|e| panic!("{}: {e}", e.code()))
+    {
+        Some(hex) => crypto::SecretsService::from_hex(&hex)
+            .expect("WALLET_ENCRYPTION_KEY must be 64 hex chars"),
+        None => crypto::SecretsService::from_hex(&encryption_key)
+            .expect("ENCRYPTION_KEY must be 64 hex chars"),
+    };
+    let signer = match crypto::bootstrap_signer_secrets(&wallet_secrets) {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::error!(code = e.code(), severity = "FATAL", "{e}");
+            panic!("{}: {e}", e.code());
+        }
+    };
+    let keys = chain::SignerKeys {
+        hot_mnemonic: signer.hot_mnemonic.as_ref().map(|v| v.expose().to_string()),
+        deposit_mnemonic: signer
+            .deposit_mnemonic
+            .as_ref()
+            .map(|v| v.expose().to_string()),
+        hot_wallet_key: signer
+            .hot_wallet_key
+            .as_ref()
+            .map(|v| v.expose().to_string()),
+    };
+    drop(signer);
+
+    let registry = match ChainRegistry::from_env_with_signer(pool.clone(), keys) {
+        Ok(r) => std::sync::Arc::new(r),
+        Err(e) => {
+            // Carries CHAIN_DEPOSIT_KEY_MISMATCH / HOT_ADDRESS_MISMATCH / CHAIN_CONFIG_* as prefix.
+            tracing::error!(severity = "FATAL", error = %e, "chain registry refused the wallet config");
+            panic!("failed to build chain registry: {e}");
+        }
+    };
+    let custody_fingerprint = registry.custody_validation_fingerprint().map(str::to_owned);
+    let app_version = std::env::var("APP_VERSION").unwrap_or_else(|_| "unknown".to_string());
+    if let Some(fingerprint) = custody_fingerprint.as_deref() {
+        db::custody::mark_signer_validated(&pool, fingerprint, &app_version)
+            .await
+            .expect("failed to publish custody signer validation");
+    }
     let swapkit = Arc::new(SwapKitClient::from_env());
     let relay = Arc::new(RelayClient::from_env());
     let changenow = Arc::new(ChangeNowClient::from_env());
-    let worker_id = std::env::var("HOSTNAME").unwrap_or_else(|_| format!("worker-{}", uuid::Uuid::new_v4()));
+    let worker_id =
+        std::env::var("HOSTNAME").unwrap_or_else(|_| format!("worker-{}", uuid::Uuid::new_v4()));
+
+    let custody_task = {
+        let pool = pool.clone();
+        let version = app_version.clone();
+        tokio::spawn(async move {
+            if let Some(fingerprint) = custody_fingerprint {
+                let mut interval = tokio::time::interval(Duration::from_secs(30));
+                loop {
+                    interval.tick().await;
+                    if let Err(e) =
+                        db::custody::mark_signer_validated(&pool, &fingerprint, &version).await
+                    {
+                        tracing::error!(error = %e, "failed to refresh custody signer validation");
+                    }
+                }
+            } else {
+                std::future::pending::<()>().await;
+            }
+        })
+    };
 
     let kafka_bootstrap = std::env::var("KAFKA_BOOTSTRAP_SERVERS").ok();
-    let outbox_batch_size: i64 = std::env::var("OUTBOX_RELAY_BATCH_SIZE").expect("OUTBOX_RELAY_BATCH_SIZE must be set").parse().expect("OUTBOX_RELAY_BATCH_SIZE must be a positive integer");
+    let outbox_batch_size: i64 = std::env::var("OUTBOX_RELAY_BATCH_SIZE")
+        .expect("OUTBOX_RELAY_BATCH_SIZE must be set")
+        .parse()
+        .expect("OUTBOX_RELAY_BATCH_SIZE must be a positive integer");
 
     match db::privacy::run_boot_privacy_jobs(&pool, &secrets).await {
         Ok(r) => tracing::info!(?r, "pii backfill complete"),
@@ -149,7 +242,8 @@ async fn main() {
                 &dex_worker_id,
             )
             .await;
-            dex_swap_runner::track_inflight(&dex_pool, &dex_swapkit, &dex_relay, &dex_changenow).await;
+            dex_swap_runner::track_inflight(&dex_pool, &dex_swapkit, &dex_relay, &dex_changenow)
+                .await;
         }
     });
 
@@ -160,16 +254,29 @@ async fn main() {
         let mut interval = tokio::time::interval(rewards_interval_dur);
         loop {
             interval.tick().await;
-            if let Err(e) = db::rewards::distribute_all_programs(&rewards_pool, price_max_stale).await {
+            if let Err(e) =
+                db::rewards::distribute_all_programs(&rewards_pool, price_max_stale).await
+            {
                 tracing::error!(error = %e, "rewards tick failed");
-                db::telemetry::record_worker_error(&rewards_pool, "ERROR", "rewards_distribute", &e.to_string(), None).await;
+                db::telemetry::record_worker_error(
+                    &rewards_pool,
+                    "ERROR",
+                    "rewards_distribute",
+                    &e.to_string(),
+                    None,
+                )
+                .await;
             }
         }
     });
 
     let price_refresh_interval_dur = required_env_secs("PRICE_REFRESH_INTERVAL_SECS");
-    let price_decimals: u32 = std::env::var("PRICE_DECIMALS").expect("PRICE_DECIMALS must be set").parse().expect("PRICE_DECIMALS must be a positive integer");
-    let coingecko_base_url = std::env::var("COINGECKO_API_BASE_URL").expect("COINGECKO_API_BASE_URL must be set");
+    let price_decimals: u32 = std::env::var("PRICE_DECIMALS")
+        .expect("PRICE_DECIMALS must be set")
+        .parse()
+        .expect("PRICE_DECIMALS must be a positive integer");
+    let coingecko_base_url =
+        std::env::var("COINGECKO_API_BASE_URL").expect("COINGECKO_API_BASE_URL must be set");
     let coingecko_timeout = required_env_secs("COINGECKO_TIMEOUT_SECS");
     let price_pool = pool.clone();
     let price_task = tokio::spawn(async move {
@@ -185,7 +292,14 @@ async fn main() {
             interval.tick().await;
             if let Err(e) = db::pricing::refresh_all(&price_pool, &oracle, price_decimals).await {
                 tracing::error!(error = %e, "price refresh tick failed");
-                db::telemetry::record_worker_error(&price_pool, "ERROR", "pricing_refresh", &e.to_string(), None).await;
+                db::telemetry::record_worker_error(
+                    &price_pool,
+                    "ERROR",
+                    "pricing_refresh",
+                    &e.to_string(),
+                    None,
+                )
+                .await;
             }
         }
     });
@@ -201,7 +315,14 @@ async fn main() {
             interval.tick().await;
             if let Err(e) = db::aave_sync::sync_live_aave_rates(&aave_pool, &http).await {
                 tracing::warn!(error = %e, "aave sync tick warning");
-                db::telemetry::record_worker_error(&aave_pool, "WARN", "aave_sync", &e.to_string(), None).await;
+                db::telemetry::record_worker_error(
+                    &aave_pool,
+                    "WARN",
+                    "aave_sync",
+                    &e.to_string(),
+                    None,
+                )
+                .await;
             }
         }
     });
@@ -233,6 +354,27 @@ async fn main() {
         })
     });
 
+    let pool_target: u32 = std::env::var("DEPOSIT_POOL_TARGET")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(50);
+    let pool_interval = Duration::from_secs(
+        std::env::var("DEPOSIT_POOL_INTERVAL_SECS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .filter(|s| *s > 0)
+            .unwrap_or(60),
+    );
+    let topup_pool = pool.clone();
+    let topup_registry = registry.clone();
+    let deposit_pool_task = tokio::spawn(async move {
+        let mut interval = tokio::time::interval(pool_interval);
+        loop {
+            interval.tick().await;
+            deposit_pool::run_once(&topup_pool, &topup_registry, pool_target).await;
+        }
+    });
+
     let metrics_pool = pool.clone();
     let metrics_task = tokio::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_secs(60));
@@ -240,7 +382,25 @@ async fn main() {
             interval.tick().await;
             if let Err(e) = db::telemetry::capture_metrics_snapshot(&metrics_pool).await {
                 tracing::warn!(error = %e, "telemetry metrics snapshot capture failed");
-                db::telemetry::record_worker_error(&metrics_pool, "WARN", "metrics_snapshot", &e.to_string(), None).await;
+                db::telemetry::record_worker_error(
+                    &metrics_pool,
+                    "WARN",
+                    "metrics_snapshot",
+                    &e.to_string(),
+                    None,
+                )
+                .await;
+            }
+            if let Err(e) = operational_monitor::run_once(&metrics_pool).await {
+                tracing::error!(error = %e, "operational checks failed");
+                db::telemetry::record_worker_error(
+                    &metrics_pool,
+                    "CRITICAL",
+                    "operational_checks",
+                    "operational checks failed",
+                    None,
+                )
+                .await;
             }
         }
     });
@@ -270,6 +430,8 @@ async fn main() {
         price_task,
         aave_task,
         metrics_task,
-        retain_task
+        retain_task,
+        deposit_pool_task,
+        custody_task
     );
 }

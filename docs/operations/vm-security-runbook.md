@@ -6,6 +6,29 @@ Ver também: [`threat-model-and-gaps.md`](../security/threat-model-and-gaps.md),
 
 ---
 
+## 0. Custódia — migrar `.env` para o ADR 0012 (antes do deploy do backend)
+
+As imagens novas **recusam subir** com a config antiga. Ordem:
+
+1. Auditoria (só leitura, não imprime valores): `python3 scripts/custody_audit.py`.
+   Se aparecer `SOL deposit addresses derive from public data`, os endereços SOL
+   já emitidos têm chave derivável por terceiros → pare e trate como incidente
+   (varrer saldos para a hot, aposentar os endereços) antes de seguir.
+2. Numa máquina confiável, gere a config (mnemonics por stdin):
+   `WALLET_ENCRYPTION_KEY_FILE=… cargo run -q -p worker --example custody_setup`
+   (sem `WALLET_ENCRYPTION_KEY`, usa `ENCRYPTION_KEY`).
+3. No `.env` da VM: cole `DEPOSIT_XPUB_*`, `HOT_ADDRESS_*`, `DEPOSIT_MNEMONIC_ENC`,
+   `HOT_MNEMONIC_ENC`; **apague** `DEPOSIT_MNEMONIC`, `HOT_MNEMONIC`,
+   `HOT_WALLET_WIF`, `HOT_WALLET_PRIVATE_KEY`, `POL_HOT_WALLET_KEY`, `CHAIN_DEPOSIT_XPUB`
+   (se ainda usar hot key única em vez de mnemonic, sele-a como `HOT_WALLET_WIF_ENC`).
+4. Deploy `--backend`. Confira: `docker exec bitcosats-api env | grep -E 'MNEMONIC|WIF|PRIVATE'`
+   vazio; logs do worker sem `CHAIN_DEPOSIT_KEY_MISMATCH` / `HOT_ADDRESS_MISMATCH`;
+   `SELECT count(*) FROM deposit_address_pool WHERE claimed_at IS NULL` ≈ 50.
+5. Na máquina de dev: seeds (`secrets/`, `SEED_BACKUP.*`) para cofre **offline**
+   (papel/metal ou gestor cifrado fora do disco) e `shred -u` dos arquivos.
+
+---
+
 ## 1. SSH: rotacionar senha, key-only
 
 A senha de root já esteve no git (`scripts/deploy_to_vm.py`). Trate-a como **vazada**.

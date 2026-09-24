@@ -1,6 +1,6 @@
 use crate::{
-    bootstrap_hot_mnemonic, ct_eq_str, encrypt_hot_mnemonic, hash_password, sha256_hex,
-    verify_password, HotMnemonicError, JwtService, SecretsService,
+    ct_eq_str, hash_password, sha256_hex,
+    verify_password, JwtService, SecretsService,
 };
 use serde::{Deserialize, Serialize};
 
@@ -215,43 +215,4 @@ fn ct_eq_str_matches_equal_only() {
     assert!(ct_eq_str("abc", "abc"));
     assert!(!ct_eq_str("abc", "abd"));
     assert!(!ct_eq_str("abc", "ab"));
-}
-
-#[test]
-fn hot_mnemonic_enc_round_trip_and_production_plaintext_forbidden() {
-    use std::sync::Mutex;
-    static LOCK: Mutex<()> = Mutex::new(());
-    let _g = LOCK.lock().unwrap();
-
-    let svc = SecretsService::from_hex(test_key()).unwrap();
-    let mnemonic =
-        "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
-    let enc = encrypt_hot_mnemonic(&svc, mnemonic);
-
-    std::env::remove_var("HOT_MNEMONIC");
-    std::env::remove_var("HOT_MNEMONIC_ENC");
-    std::env::set_var("NODE_ENV", "production");
-    assert!(matches!(
-        bootstrap_hot_mnemonic(&svc),
-        Ok(None)
-    ));
-
-    std::env::set_var("HOT_MNEMONIC", mnemonic);
-    assert!(matches!(
-        bootstrap_hot_mnemonic(&svc),
-        Err(HotMnemonicError::PlaintextForbiddenInProduction)
-    ));
-    std::env::remove_var("HOT_MNEMONIC");
-
-    std::env::set_var("HOT_MNEMONIC_ENC", &enc);
-    let loaded = bootstrap_hot_mnemonic(&svc).unwrap().unwrap();
-    assert_eq!(loaded, mnemonic);
-
-    std::env::remove_var("HOT_MNEMONIC_ENC");
-    std::env::set_var("NODE_ENV", "development");
-    std::env::set_var("HOT_MNEMONIC", mnemonic);
-    let loaded = bootstrap_hot_mnemonic(&svc).unwrap().unwrap();
-    assert_eq!(loaded, mnemonic);
-    std::env::remove_var("HOT_MNEMONIC");
-    std::env::remove_var("NODE_ENV");
 }

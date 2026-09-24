@@ -13,7 +13,10 @@ use serde::{Deserialize, Serialize};
 
 pub fn routes<R: AuthRepo + 'static>() -> Router<AppState<R>> {
     Router::new()
-        .route("/v1/deposits/address/:coin", get(get_or_create_address::<R>))
+        .route(
+            "/v1/deposits/address/:coin",
+            get(get_or_create_address::<R>),
+        )
         .route("/v1/deposits/history", get(list_deposits::<R>))
 }
 
@@ -46,12 +49,61 @@ struct DepositHistoryItemResp {
     credited_at: Option<String>,
 }
 
+pub(crate) fn custody_signer_unavailable() -> Response {
+    (
+        StatusCode::SERVICE_UNAVAILABLE,
+        Json(serde_json::json!({
+            "error": "deposit address issuance is unavailable until the custody signer is validated",
+            "code": "CUSTODY_SIGNER_NOT_VALIDATED"
+        })),
+    )
+        .into_response()
+}
+
+pub(crate) async fn require_validated_signer<R: AuthRepo>(
+    state: &AppState<R>,
+) -> Result<(), Response> {
+    match state.custody_signer_ready().await {
+        Ok(true) => Ok(()),
+        Ok(false) => Err(custody_signer_unavailable()),
+        Err(e) => {
+            tracing::error!(error = %e, "custody signer validation query failed");
+            Err(custody_signer_unavailable())
+        }
+    }
+}
+
+pub(crate) fn address_generation_error(message: &str) -> Response {
+    if message.starts_with(chain::DEPOSIT_ADDRESS_POOL_EMPTY) {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({
+                "error": "SOL deposit address pool is temporarily empty",
+                "code": chain::DEPOSIT_ADDRESS_POOL_EMPTY
+            })),
+        )
+            .into_response();
+    }
+    (
+        StatusCode::SERVICE_UNAVAILABLE,
+        Json(serde_json::json!({
+            "error": "could not generate a deposit address for this coin right now",
+            "code": "ADDRESS_UNAVAILABLE"
+        })),
+    )
+        .into_response()
+}
+
 async fn list_deposits<R: AuthRepo>(
     State(state): State<AppState<R>>,
     user: AuthUser,
     Query(q): Query<DepositHistoryQuery>,
 ) -> Response {
-    let coin_filter = q.coin.and_then(|c| shared::COINS.into_iter().find(|coin| coin.as_str().eq_ignore_ascii_case(&c)));
+    let coin_filter = q.coin.and_then(|c| {
+        shared::COINS
+            .into_iter()
+            .find(|coin| coin.as_str().eq_ignore_ascii_case(&c))
+    });
     let limit = q.limit.unwrap_or(50).clamp(1, 100);
 
     match db::deposits::list_user_deposits(&state.pool, user.id, coin_filter, limit).await {
@@ -77,9 +129,20 @@ async fn list_deposits<R: AuthRepo>(
     }
 }
 
-async fn get_or_create_address<R: AuthRepo>(State(state): State<AppState<R>>, user: AuthUser, Path(coin_str): Path<String>) -> Response {
-    let Some(coin) = shared::COINS.into_iter().find(|c| c.as_str().eq_ignore_ascii_case(&coin_str)) else {
-        return (StatusCode::BAD_REQUEST, Json(serde_json::json!({ "error": "unknown coin" }))).into_response();
+async fn get_or_create_address<R: AuthRepo>(
+    State(state): State<AppState<R>>,
+    user: AuthUser,
+    Path(coin_str): Path<String>,
+) -> Response {
+    let Some(coin) = shared::COINS
+        .into_iter()
+        .find(|c| c.as_str().eq_ignore_ascii_case(&coin_str))
+    else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": "unknown coin" })),
+        )
+            .into_response();
     };
     if shared::is_deposit_withdraw_paused(coin) {
         return (
@@ -92,9 +155,13 @@ async fn get_or_create_address<R: AuthRepo>(State(state): State<AppState<R>>, us
         )
             .into_response();
     }
+    if let Err(response) = require_validated_signer(&state).await {
+        return response;
+    }
     let client = state.chain_registry.get(coin);
     match db::deposits::get_or_create_address(&state.pool, user.id, coin, client.as_ref()).await {
         Ok(address) => Json(AddressResponse { address }).into_response(),
+        Err(db::deposits::DepositsError::Chain(message)) => address_generation_error(&message),
         Err(e) => crate::http_error::internal_error(&e),
     }
 }

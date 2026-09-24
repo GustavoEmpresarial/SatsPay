@@ -1,4 +1,4 @@
-//! DEX swap path via wiremock SwapKit + HOT_MNEMONIC for hot addresses.
+//! DEX swap path via wiremock SwapKit + public HOT_ADDRESS_* for hot addresses.
 
 mod common;
 
@@ -16,7 +16,7 @@ const HOT_MNEMONIC: &str =
 
 #[sqlx::test(migrations = "../db/migrations")]
 async fn swap_dex_quote_and_execute(pool: PgPool) {
-    std::env::set_var("HOT_MNEMONIC", HOT_MNEMONIC);
+    common::set_hot_addresses(HOT_MNEMONIC);
     std::env::set_var("CHAIN_NETWORK", "mainnet");
 
     let server = MockServer::start().await;
@@ -194,5 +194,5 @@ async fn swap_dex_quote_and_execute(pool: PgPool) {
         .unwrap();
     assert_eq!(bad.status(), axum::http::StatusCode::BAD_REQUEST);
 
-    std::env::remove_var("HOT_MNEMONIC");
+    common::clear_hot_addresses();
 }

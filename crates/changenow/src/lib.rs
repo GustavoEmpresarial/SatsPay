@@ -322,7 +322,7 @@ impl ChangeNowStatus {
             .and_then(|v| {
                 v.as_str()
                     .map(str::to_string)
-                    .or_else(|| v.as_f64().map(|f| format_float_trim(f)))
+                    .or_else(|| v.as_f64().map(format_float_trim))
             });
         let payout_hash = value
             .get("payoutHash")

@@ -52,12 +52,12 @@ impl JwtService {
     }
 
     pub fn with_config(secret: &str, config: JwtConfig) -> Result<Self, JwtError> {
-        if secret.as_bytes().len() < 32 {
+        if secret.len() < 32 {
             return Err(JwtError::WeakSecret);
         }
         let mut validation = Validation::new(Algorithm::HS256);
-        validation.set_issuer(&[config.issuer.clone()]);
-        validation.set_audience(&[config.audience.clone()]);
+        validation.set_issuer(std::slice::from_ref(&config.issuer));
+        validation.set_audience(std::slice::from_ref(&config.audience));
         validation.validate_exp = true;
         validation.required_spec_claims.insert("exp".to_string());
         validation.required_spec_claims.insert("iss".to_string());

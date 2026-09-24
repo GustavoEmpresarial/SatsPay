@@ -481,16 +481,15 @@ async fn create_deposit_handler<R: AuthRepo>(
     // reused the merchant's shared personal deposit address, which would let a
     // single payment confirm two different invoices — so a failure to derive a
     // fresh address now fails the request instead.
+    if let Err(response) = crate::deposits::require_validated_signer(&state).await {
+        return response;
+    }
     let client = state.chain_registry.get(coin);
     let (deposit_address, hd_index) = match client.generate_address(&auth.merchant_id.to_string()).await {
         Ok(addr) => (addr.address, addr.hd_index.map(|i| i as i64)),
         Err(e) => {
             tracing::error!(merchant_id = %auth.merchant_id, coin = %coin.as_str(), error = %e.message, "gateway: could not derive an invoice address");
-            return fail(
-                StatusCode::SERVICE_UNAVAILABLE,
-                "ADDRESS_UNAVAILABLE",
-                "could not generate a deposit address for this coin right now",
-            );
+            return crate::deposits::address_generation_error(&e.message);
         }
     };
 
@@ -741,16 +740,15 @@ async fn select_coin_handler<R: AuthRepo>(
                 );
             };
 
+            if let Err(response) = crate::deposits::require_validated_signer(&state).await {
+                return response;
+            }
             let client = state.chain_registry.get(coin);
             let generated = match client.generate_address(&inv.merchant_id.to_string()).await {
                 Ok(a) => a,
                 Err(e) => {
                     tracing::error!(invoice_id = %inv.id, coin = coin.as_str(), error = %e.message, "select-coin: address generation failed");
-                    return fail(
-                        StatusCode::SERVICE_UNAVAILABLE,
-                        "ADDRESS_UNAVAILABLE",
-                        "could not generate a deposit address for this coin right now",
-                    );
+                    return crate::deposits::address_generation_error(&e.message);
                 }
             };
 

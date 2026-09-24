@@ -34,9 +34,17 @@ Este documento cataloga todas as variáveis de ambiente utilizadas pelos serviç
 | `USE_REAL_CHAIN_CLIENTS` | `api-server`, `worker` | Não | `false` / `true` | Ativa clientes de blockchain reais (Bitcore/Polygon) |
 | `ALLOW_STUB_CHAIN` | `api-server`, `worker` | Não | `true` / `false` | Permite o uso de stubs de chain (proibido em produção) |
 | `CHAIN_NETWORK` | `api-server`, `worker` | Se real=true | `mainnet` / `testnet` | Rede blockchain alvo |
-| `BTC_XPUB`, `LTC_XPUB`, ... | `api-server` | Se real=true | `xpub6...` | Chaves públicas estendidas para geração de endereços |
-| `BTC_HOT_WIF`, `POL_PRIVATE_KEY` | `worker` | Se real=true | WIF / Hex Key | Chaves privadas para assinatura e broadcast de saques |
+| `DEPOSIT_XPUB_<COIN>` | `api-server`, `worker` | Prod (todas menos SOL) | `xpub6...` | Xpub de **conta** (`account_path`) da carteira de depósito; endereço = `…/0/{index}`. O worker exige `DEPOSIT_MNEMONIC_ENC` e publica heartbeat do fingerprint validado; a API bloqueia readiness e emissão se divergir ou expirar. Gerar com `custody_setup`. ADR 0012 |
+| `CHAIN_DEPOSIT_XPUB` | `api-server`, `worker` | Não | `xpub6...` | Xpub único para todas as moedas — **só fora de produção** |
+| `HOT_ADDRESS_<COIN>` | `api-server`, `worker` | Prod (swap/tesouraria) | `bc1...` | Endereço público da hot (origem/destino de swap, painel). O worker exige que bata com a hot key (`HOT_ADDRESS_MISMATCH`) |
+| `DEPOSIT_MNEMONIC_ENC`, `HOT_MNEMONIC_ENC` | **só** `worker` | Prod | base64 AES-GCM | Mnemonics selados (AAD por nome). Também `*_ENC_FILE`. Texto claro (`DEPOSIT_MNEMONIC`, `HOT_MNEMONIC`) só fora de produção |
+| `HOT_WALLET_WIF_ENC`, `HOT_WALLET_PRIVATE_KEY_ENC`, `POL_HOT_WALLET_KEY_ENC` | **só** `worker` | Legado | base64 AES-GCM | Hot key única (pré-mnemonic). Mesma regra: só `_ENC` em produção |
+| `WALLET_ENCRYPTION_KEY` / `_FILE` | **só** `worker` | Não | Hex 64 | Chave que sela os `*_ENC` de carteira; ausente → `ENCRYPTION_KEY` |
+| `ENCRYPTION_KEY_FILE` | `api-server`, `worker` | Não | `/run/secrets/encryption_key` | Alternativa a `ENCRYPTION_KEY` (arquivo tem prioridade) |
+| `DEPOSIT_POOL_TARGET` / `DEPOSIT_POOL_INTERVAL_SECS` | `worker` | Não | `50` / `60` | Endereços SOL pré-derivados livres que o worker mantém em `deposit_address_pool` |
 | `POL_RPC_URL` | `api-server`, `worker` | Se real=true | `https://polygon-rpc.com` | Endpoint JSON-RPC da rede Polygon |
+| `DOGE_BLOCKBOOK_API` | `worker` | Não | `https://dogecoin.atomicwallet.io` | Quarto provedor do histórico DOGE, depois de BlockCypher e Bitcore |
+| `DOGE_BLOCKBOOK_API_KEY` | **só** `worker` | Não | — | Chave opcional enviada apenas no header `api-key` quando o Blockbook configurado exigir credencial |
 | `DGB_RPC_URL` | `api-server`, `worker` | Não | `http://user:pass@host:14022` | Node DigiByte próprio (`scantxoutset` / `sendrawtransaction`). Sem valor, cai no Insight. |
 | `DGB_INSIGHT_API` | `api-server`, `worker` | Não | `https://digiexplorer.info/api` | Indexer DGB primário quando o node RPC (`DGB_RPC_URL`) falha. Depois dele a API tenta `explorer.digibyte.host` (Insight) e `digibyte.atomicwallet.io` (Blockbook) para UTXOs, taxa, saldo e broadcast — timeout 15 s cada |
 | `ZER_RPC_URL` | `api-server`, `worker` | Prod (saque) | `http://user:pass@host:23801` | Node `zerod` (`scantxoutset` / `createrawtransaction` / `signrawtransactionwithkey` / `sendrawtransaction`). Sem URL, depósito cai no explorer; saque falha fechado. |

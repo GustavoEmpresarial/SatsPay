@@ -30,6 +30,11 @@
 
 ## Critérios de aceite
 
+- [ ] Cinco 5xx em um minuto geram um grupo e um alerta Telegram; menos de cinco não geram spike.
+- [ ] Ocorrências simultâneas iguais incrementam um grupo; o aviso de recuperação sai quando a condição acaba.
+- [ ] `/metrics` mostra módulo, versão, 5xx/min, pool SOL e fila de saques sem labels de usuário ou endereço.
+- [ ] Resposta 500 contém `error`, `code`, `error_id` e `requestId`; nenhum detalhe interno ou segredo é exposto.
+
 - [ ] Rotas documentadas batem com `App.tsx`
 - [ ] APIs documentadas batem com chamadas `api()` / handlers Axum
 - [ ] Sem regressão de hooks (Rules of Hooks)

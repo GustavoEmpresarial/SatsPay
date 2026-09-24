@@ -336,12 +336,14 @@ export async function api<T = unknown>(path: string, opts: ApiOptions = {}): Pro
         ? `API error ${res.status} — backend may be down or misconfigured`
         : err.message;
     if (shouldReportApiStatus(res.status, path, message)) {
+      const errorId = err.details && typeof err.details === 'object' && 'error_id' in err.details
+        ? (err.details as { error_id?: unknown }).error_id : undefined;
       reportClientError({
         kind: path.includes('/auth/') ? 'auth' : path.includes('/oauth/') ? 'oauth' : 'api',
         message: `${res.status} ${path}: ${message}`,
         endpoint: path,
         statusCode: res.status,
-        context: { code: err.code },
+        context: { code: err.code, error_id: typeof errorId === 'string' ? errorId : undefined },
         level: res.status >= 500 ? 'CRITICAL' : 'ERROR',
       });
     }

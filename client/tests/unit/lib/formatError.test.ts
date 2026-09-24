@@ -3,6 +3,11 @@ import { ApiError } from '../../../src/lib/api.js';
 import { formatApiError } from '../../../src/lib/formatError.js';
 
 describe('formatApiError', () => {
+  it('shows the server error id for support without exposing internals', () => {
+    const msg = formatApiError(new ApiError(500, 'INTERNAL', 'internal error', { error_id: `err_${'a'.repeat(32)}` }));
+    expect(msg).toContain(`err_${'a'.repeat(32)}`);
+    expect(msg).not.toContain('internal error');
+  });
   it('translates captcha verification failure', () => {
     const err = new ApiError(400, 'ERROR', 'captcha verification failed');
     expect(formatApiError(err)).toContain('anti-bot');

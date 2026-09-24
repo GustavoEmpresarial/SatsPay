@@ -14,6 +14,8 @@ const repoRoot = path.resolve(clientRoot, '..');
 
 const docs = readFileSync(path.join(clientRoot, 'src/pages/ApiDocsPage.tsx'), 'utf8');
 const handler = readFileSync(path.join(repoRoot, 'crates/api-http/src/merchant_deposits.rs'), 'utf8');
+const depositHandler = readFileSync(path.join(repoRoot, 'crates/api-http/src/deposits.rs'), 'utf8');
+const chainClient = readFileSync(path.join(repoRoot, 'crates/chain/src/real_client.rs'), 'utf8');
 const webhook = readFileSync(path.join(repoRoot, 'crates/webhooks/src/lib.rs'), 'utf8');
 const invoiceModel = readFileSync(path.join(repoRoot, 'crates/db/src/merchant_deposits.rs'), 'utf8');
 const dashboard = readFileSync(path.join(clientRoot, 'src/pages/MerchantDepositsPage.tsx'), 'utf8');
@@ -136,7 +138,7 @@ describe('contract: error codes', () => {
   it('every code in the docs table is emitted by the backend', () => {
     const publicApi = readFileSync(path.join(repoRoot, 'crates/api-http/src/public_api.rs'), 'utf8');
     const rateLimit = readFileSync(path.join(repoRoot, 'crates/api-http/src/rate_limit.rs'), 'utf8');
-    const backend = handler + publicApi + rateLimit;
+    const backend = handler + depositHandler + chainClient + publicApi + rateLimit;
 
     const tableStart = docs.indexOf("['INVALID_API_KEY'");
     expect(tableStart).toBeGreaterThan(-1);

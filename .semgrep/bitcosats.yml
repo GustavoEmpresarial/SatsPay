@@ -109,6 +109,23 @@ rules:
         - "**/tests.rs"
     pattern-regex: '"error"\s*:\s*e\.to_string\(\)'
 
+  - id: bitcosats.rust.wallet-key-env-outside-bootstrap
+    message: "ADR 0012: wallet keys are read only by crypto::secret_bootstrap (worker). Take SignerKeys as a parameter instead of reading or setting the env."
+    languages: [rust]
+    severity: ERROR
+    metadata:
+      category: security
+      cwe: "CWE-522"
+    paths:
+      include:
+        - "**/crates/**"
+      exclude:
+        - "**/crates/crypto/src/secret_bootstrap.rs"
+        - "**/examples/**"
+        - "**/tests.rs"
+        - "**/tests/**"
+    pattern-regex: 'env::(var|var_os|set_var|remove_var)\(\s*"(HOT_MNEMONIC|DEPOSIT_MNEMONIC|HOT_WALLET_WIF|HOT_WALLET_PRIVATE_KEY|POL_HOT_WALLET_KEY)'
+
   - id: bitcosats.rust.aes-gcm-empty-aad-literal
     message: "AES-GCM Payload with empty aad (&[]) allows ciphertext swap across rows. Prefer encrypt_with_aad / decrypt_with_aad with context."
     languages: [rust]

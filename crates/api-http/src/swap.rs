@@ -43,8 +43,8 @@ fn reject_unsupported_pair(from: Coin, to: Coin) -> Option<Response> {
 /// Floor BNB on the EVM hot before PEPE→* Relay (approve + deposit on BSC).
 const MIN_BNB_WEI_FOR_PEPE_SWAP: u128 = 5_000_000_000_000_000; // 0.005 BNB
 
-async fn ensure_hot_bnb_for_pepe_swap(hot_mnemonic: Option<&str>) -> Result<(), String> {
-    let address = resolve_hot_address(Coin::Pepe, hot_mnemonic)?;
+async fn ensure_hot_bnb_for_pepe_swap(registry: &chain::ChainRegistry) -> Result<(), String> {
+    let address = registry.hot_address(Coin::Pepe)?;
     let rpc = std::env::var("BSC_RPC_URL")
         .ok()
         .filter(|s| !s.trim().is_empty())
@@ -72,35 +72,6 @@ pub fn routes<R: AuthRepo + 'static>() -> Router<AppState<R>> {
         .route("/v1/swap/telemetry", get(telemetry::<R>))
         .route("/v1/swap", post(execute::<R>))
         .route("/v1/swap/execute", post(execute::<R>)) // legacy client path
-}
-
-fn resolve_hot_address(coin: Coin, hot_mnemonic: Option<&str>) -> Result<String, String> {
-    let network = match std::env::var("CHAIN_NETWORK").unwrap_or_else(|_| "mainnet".into()).as_str() {
-        "testnet" => chain::ChainNetwork::Testnet,
-        _ => chain::ChainNetwork::Mainnet,
-    };
-    let mnemonic = hot_mnemonic
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .map(str::to_string)
-        .or_else(|| {
-            std::env::var("HOT_MNEMONIC")
-                .ok()
-                .map(|s| s.trim().to_string())
-                .filter(|s| !s.is_empty())
-        });
-    if let Some(m) = mnemonic {
-        return chain::hd_wallet::hot_address_from_mnemonic(&m, coin, network).map_err(|e| e.to_string());
-    }
-    // Prod may ship encrypted mnemonic empty and rely on HOT_WALLET_PRIVATE_KEY / POL_HOT_WALLET_KEY
-    // (same fallback as admin treasury). Required for PEPE BNB gas guard on BSC.
-    let key = std::env::var("HOT_WALLET_PRIVATE_KEY")
-        .ok()
-        .or_else(|| std::env::var("POL_HOT_WALLET_KEY").ok())
-        .or_else(|| std::env::var("HOT_WALLET_WIF").ok())
-        .filter(|s| !s.trim().is_empty())
-        .ok_or_else(|| format!("HOT_MNEMONIC not configured for {}", coin.as_str()))?;
-    chain::hot_wallet_address(coin, network, &key)
 }
 
 #[derive(Serialize)]
@@ -630,14 +601,14 @@ async fn build_quotes<R: AuthRepo>(state: &AppState<R>, from_coin: Coin, to_coin
 
     // PEPE origin spends BNB gas on BSC (approve + deposit). Fail closed before quoting.
     if from_coin == Coin::Pepe {
-        ensure_hot_bnb_for_pepe_swap(state.hot_mnemonic.as_deref()).await?;
+        ensure_hot_bnb_for_pepe_swap(&state.chain_registry).await?;
     }
 
     let mut routes: Vec<QuoteRouteResp> = Vec::new();
     let mut provider_errors: Option<Value> = None;
 
-    let src = resolve_hot_address(from_coin, state.hot_mnemonic.as_deref()).ok();
-    let dst = resolve_hot_address(to_coin, state.hot_mnemonic.as_deref()).ok();
+    let src = state.chain_registry.hot_address(from_coin).ok();
+    let dst = state.chain_registry.hot_address(to_coin).ok();
 
     // SwapKit: Polygon same-chain only (do not mix SOL bridge into SwapKit).
     if relay::is_polygon_l2(from_coin)
@@ -924,11 +895,11 @@ async fn execute<R: AuthRepo>(
     let bps = body.platform_fee_bps.unwrap_or(state.swapkit.fee_bps_cross());
     let platform_fee_amount = from_amount.saturating_mul(bps as u128) / 10_000;
 
-    let source_address = match resolve_hot_address(from_coin, state.hot_mnemonic.as_deref()) {
+    let source_address = match state.chain_registry.hot_address(from_coin) {
         Ok(a) => a,
         Err(e) => return (StatusCode::SERVICE_UNAVAILABLE, Json(json!({ "error": e }))).into_response(),
     };
-    let destination_address = match resolve_hot_address(to_coin, state.hot_mnemonic.as_deref()) {
+    let destination_address = match state.chain_registry.hot_address(to_coin) {
         Ok(a) => a,
         Err(e) => return (StatusCode::SERVICE_UNAVAILABLE, Json(json!({ "error": e }))).into_response(),
     };
@@ -1129,7 +1100,7 @@ async fn execute_relay<R: AuthRepo>(
     }
 
     if from_coin == Coin::Pepe {
-        if let Err(e) = ensure_hot_bnb_for_pepe_swap(state.hot_mnemonic.as_deref()).await {
+        if let Err(e) = ensure_hot_bnb_for_pepe_swap(&state.chain_registry).await {
             return (
                 StatusCode::BAD_REQUEST,
                 Json(json!({ "error": e, "code": "BNB_GAS_REQUIRED" })),
@@ -1143,11 +1114,11 @@ async fn execute_relay<R: AuthRepo>(
         _ => return (StatusCode::BAD_REQUEST, Json(json!({ "error": "routeId required for Relay swap" }))).into_response(),
     };
 
-    let source_address = match resolve_hot_address(from_coin, state.hot_mnemonic.as_deref()) {
+    let source_address = match state.chain_registry.hot_address(from_coin) {
         Ok(a) => a,
         Err(e) => return (StatusCode::SERVICE_UNAVAILABLE, Json(json!({ "error": e }))).into_response(),
     };
-    let destination_address = match resolve_hot_address(to_coin, state.hot_mnemonic.as_deref()) {
+    let destination_address = match state.chain_registry.hot_address(to_coin) {
         Ok(a) => a,
         Err(e) => return (StatusCode::SERVICE_UNAVAILABLE, Json(json!({ "error": e }))).into_response(),
     };
@@ -1280,11 +1251,11 @@ async fn execute_changenow<R: AuthRepo>(
             .into_response();
     }
 
-    let source_address = match resolve_hot_address(from_coin, state.hot_mnemonic.as_deref()) {
+    let source_address = match state.chain_registry.hot_address(from_coin) {
         Ok(a) => a,
         Err(e) => return (StatusCode::SERVICE_UNAVAILABLE, Json(json!({ "error": e }))).into_response(),
     };
-    let destination_address = match resolve_hot_address(to_coin, state.hot_mnemonic.as_deref()) {
+    let destination_address = match state.chain_registry.hot_address(to_coin) {
         Ok(a) => a,
         Err(e) => return (StatusCode::SERVICE_UNAVAILABLE, Json(json!({ "error": e }))).into_response(),
     };
@@ -1590,39 +1561,6 @@ mod tests {
         assert!(r.route_id.starts_with("house:"));
     }
 
-    #[test]
-    fn resolve_hot_address_from_mnemonic_and_missing() {
-        use std::sync::Mutex;
-        static LOCK: Mutex<()> = Mutex::new(());
-        let _g = LOCK.lock().unwrap();
-        std::env::remove_var("HOT_MNEMONIC");
-        std::env::remove_var("HOT_WALLET_PRIVATE_KEY");
-        std::env::remove_var("POL_HOT_WALLET_KEY");
-        std::env::remove_var("HOT_WALLET_WIF");
-        assert!(resolve_hot_address(Coin::Btc, None).is_err());
-
-        std::env::set_var(
-            "HOT_MNEMONIC",
-            "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
-        );
-        std::env::set_var("CHAIN_NETWORK", "mainnet");
-        assert!(resolve_hot_address(Coin::Btc, None).is_ok());
-        std::env::set_var("CHAIN_NETWORK", "testnet");
-        let _ = resolve_hot_address(Coin::Btc, None); // exercise testnet branch
-        std::env::remove_var("HOT_MNEMONIC");
-        std::env::remove_var("CHAIN_NETWORK");
-
-        // Private-key fallback (prod EVM hot) — same key derives POL/PEPE address.
-        std::env::set_var(
-            "HOT_WALLET_PRIVATE_KEY",
-            "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
-        );
-        std::env::set_var("CHAIN_NETWORK", "mainnet");
-        let pepe = resolve_hot_address(Coin::Pepe, None).expect("pepe from privkey");
-        assert!(pepe.starts_with("0x"));
-        std::env::remove_var("HOT_WALLET_PRIVATE_KEY");
-        std::env::remove_var("CHAIN_NETWORK");
-    }
 
     /// Execute re-quotes Relay/ChangeNOW and refuses when the fresh quote lands
     /// under `minToAmount`. If the quote hands the client `minReceive ==

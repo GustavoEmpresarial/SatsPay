@@ -44,6 +44,13 @@ export function formatApiError(err: unknown, fallback = 'Erro inesperado. Tente 
     return fallback;
   }
 
+  if (err.status >= 500 && err.details && typeof err.details === 'object') {
+    const errorId = (err.details as { error_id?: unknown }).error_id;
+    if (typeof errorId === 'string' && /^err_[a-f0-9]{32}$/.test(errorId)) {
+      return `Erro interno. Informe o código ${errorId} ao suporte.`;
+    }
+  }
+
   if (err.code === 'BNB_GAS_REQUIRED') {
     return BNB_GAS_MSG;
   }

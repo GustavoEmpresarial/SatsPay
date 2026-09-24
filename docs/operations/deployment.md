@@ -4,10 +4,18 @@
 
 O que está no ar (`satspay.pro`) **não é** o overlay k8s. É Docker Compose em `/root/bitcosats`, client em `127.0.0.1:4500`, API em `127.0.0.1:4501`, TLS na borda Cloudflare + Caddy. Segredos no `.env` do host (`0600`), não no Vault.
 
-- Deploy: `python3 scripts/deploy_to_vm.py` (`--backend` / `--all`) com `DEPLOY_SSH_KEY` (sem senha no repo).
+- Deploy: `python3 scripts/deploy_to_vm.py` (`--backend` / `--all`) com `DEPLOY_SSH_KEY` ou chave já carregada no agente SSH (sem senha no repo).
 - Ameaças e gaps da VM: [`docs/security/threat-model-and-gaps.md`](../security/threat-model-and-gaps.md).
 - SSH, LUKS, backup da `ENCRYPTION_KEY`, SMTP/admin: [`vm-security-runbook.md`](vm-security-runbook.md).
 - Compose: `deploy/docker/docker-compose.yml`.
+
+## Checklist de observabilidade e chain para a VM
+
+1. Configurar no `.env` da VM (modo 0600) `TELEGRAM_BOT_TOKEN` e `TELEGRAM_CHAT_ID`. Eles são entregues apenas ao worker. O `APP_VERSION` é definido pelo SHA durante `scripts/deploy_to_vm.py --backend`.
+2. Configurar `ZER_EXPLORER_API_KEY` para leitura ZeroChain e broadcast reserva em `rawtx` (a transação já sai assinada do worker). Para saque/sweep, configurar `ZER_RPC_URL` para o `zerod` próprio, acessível por IP privado, loopback ou nome de serviço local. Testar assinatura sem broadcast. A ZeroChain pública é REST, não JSON-RPC; `rawtxbuild` exige WIF na URL e não deve receber a chave da hot.
+3. O quarto provedor DOGE usa por padrão o Blockbook público `https://dogecoin.atomicwallet.io`, sem credencial. Validar `/api/v2` e `/api/v2/address/{address}?details=txs` a partir da VM com um endereço público de teste. Para outro host, definir `DOGE_BLOCKBOOK_API`; se ele exigir credencial, definir também `DOGE_BLOCKBOOK_API_KEY`, enviada apenas no header `api-key`. Conferir também DGB Insight/Blockbook e comparar altura de bloco antes de concluir que a detecção está saudável.
+4. Após deploy, consultar `/healthz` e `/metrics` pelo loopback, provocar o alerta de teste na telemetria admin, verificar Telegram, métricas por `version` e ausência de filas de saque paradas. Nunca usar chaves ou fundos reais em probes de carga/DAST.
+5. Se API/worker falharem, as imagens anteriores ficam com tag `:rollback`; retagá-las como `:dev` e executar `docker compose up -d --no-deps api-server worker`. Verificar `/healthz` e a fila novamente. O rollback do banco deve ser avaliado separadamente; a migration 0037 é aditiva.
 
 O restante deste arquivo descreve a **topologia k8s** (dev/staging/prod overlays). Trate-a como caminho futuro / cluster de lab, não como a prod de hoje.
 

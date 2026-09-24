@@ -81,33 +81,44 @@ export function shouldReportApiStatus(status: number, path = '', message = ''): 
 }
 
 export function isExternalNoise(stackOrUrl?: string, message?: string): boolean {
-  const combined = `${stackOrUrl || ''} ${message || ''}`.toLowerCase();
+  const stack = stackOrUrl || '';
+  const msg = (message || '').toLowerCase();
+  // Only the failing script's URL may identify an external source. Matching a
+  // domain anywhere in an error message can hide an application error whose
+  // text happens to mention that domain.
+  const candidate = stack.match(/(?:https?:\/\/|chrome-extension:\/\/|moz-extension:\/\/|safari-extension:\/\/)[^\s)]+/i)?.[0];
+  let external = false;
+  if (candidate) {
+    try {
+      const url = new URL(candidate);
+      const host = url.hostname.toLowerCase();
+      const registrableHost = host.split('.').slice(-2).join('.');
+      external = ['cloudflareinsights.com', 'googletagmanager.com', 'google-analytics.com', 'facebook.net', 'doubleclick.net']
+        .includes(registrableHost)
+        || ['chrome-extension:', 'moz-extension:', 'safari-extension:'].includes(url.protocol)
+        || (host === 'cdn.jsdelivr.net' && url.pathname.startsWith('/gh/atomiclabs/cryptocurrency-icons'))
+        || (host === 'raw.githubusercontent.com' && url.pathname.startsWith('/solana-labs/token-list'))
+        || (host === 'surfe.pro' && url.pathname.startsWith('/track'));
+    } catch {
+      external = false;
+    }
+  }
   return (
-    combined.includes('cloudflareinsights.com') ||
-    combined.includes('chrome-extension://') ||
-    combined.includes('moz-extension://') ||
-    combined.includes('safari-extension://') ||
-    combined.includes('googletagmanager.com') ||
-    combined.includes('google-analytics.com') ||
-    combined.includes('facebook.net') ||
-    combined.includes('doubleclick.net') ||
-    combined.includes('cdn.jsdelivr.net/gh/atomiclabs/cryptocurrency-icons') ||
-    combined.includes('raw.githubusercontent.com/solana-labs/token-list') ||
-    combined.includes('resizeobserver loop') ||
-    combined.includes('script error.') ||
-    combined.includes('unhandledrejection: abort') ||
-    combined.includes('surfe.pro/track') ||
+    external ||
+    msg.includes('resizeobserver loop') ||
+    msg.includes('script error.') ||
+    msg.includes('unhandledrejection: abort') ||
     // Expected product / auth noise — not actionable bugs
-    combined.includes('aguarde o cooldown') ||
-    combined.includes('next claim available') ||
-    combined.includes('invalid email or password') ||
-    combined.includes('too many requests') ||
-    combined.includes('captcha verification failed') ||
-    combined.includes('sessão expirada') ||
-    combined.includes('platform inventory') ||
-    combined.includes('insufficient for this operation') ||
-    combined.includes('removechild') ||
-    combined.includes('minified react error #311')
+    msg.includes('aguarde o cooldown') ||
+    msg.includes('next claim available') ||
+    msg.includes('invalid email or password') ||
+    msg.includes('too many requests') ||
+    msg.includes('captcha verification failed') ||
+    msg.includes('sessão expirada') ||
+    msg.includes('platform inventory') ||
+    msg.includes('insufficient for this operation') ||
+    msg.includes('removechild') ||
+    msg.includes('minified react error #311')
   );
 }
 

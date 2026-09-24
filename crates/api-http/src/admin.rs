@@ -79,33 +79,6 @@ fn explorer_base(coin: &str) -> &'static str {
     }
 }
 
-fn resolve_hot_address(coin: shared::Coin, hot_mnemonic: Option<&str>) -> Result<String, String> {
-    let network = match std::env::var("CHAIN_NETWORK").as_deref() {
-        Ok("testnet") => chain::ChainNetwork::Testnet,
-        _ => chain::ChainNetwork::Mainnet,
-    };
-    let mnemonic = hot_mnemonic
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .map(str::to_string)
-        .or_else(|| {
-            std::env::var("HOT_MNEMONIC")
-                .ok()
-                .map(|s| s.trim().to_string())
-                .filter(|s| !s.is_empty())
-        });
-    if let Some(m) = mnemonic {
-        return chain::hd_wallet::hot_address_from_mnemonic(&m, coin, network).map_err(|e| e.to_string());
-    }
-    let key = std::env::var("HOT_WALLET_PRIVATE_KEY")
-        .ok()
-        .or_else(|| std::env::var("POL_HOT_WALLET_KEY").ok())
-        .or_else(|| std::env::var("HOT_WALLET_WIF").ok())
-        .filter(|s| !s.trim().is_empty())
-        .ok_or_else(|| "hot key ausente".to_string())?;
-    chain::hot_wallet_address(coin, network, &key)
-}
-
 /// Must stay well under `REQUEST_TIMEOUT` (30s). ZER/DGB `scantxoutset` and
 /// explorer clients otherwise block up to 120s and the admin page gets 408.
 const ONCHAIN_LOOKUP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(8);
@@ -120,8 +93,8 @@ async fn onchain_balance(registry: &chain::ChainRegistry, coin: shared::Coin, ad
 }
 
 /// Native BNB (wei) on the EVM hot address. PEPE transfers pay gas in BNB, not in PEPE.
-async fn hot_bnb_gas(hot_mnemonic: Option<&str>) -> (Option<String>, Option<String>) {
-    let address = match resolve_hot_address(shared::Coin::Pepe, hot_mnemonic) {
+async fn hot_bnb_gas(registry: &chain::ChainRegistry) -> (Option<String>, Option<String>) {
+    let address = match registry.hot_address(shared::Coin::Pepe) {
         Ok(a) => a,
         Err(e) => return (None, Some(e)),
     };
@@ -171,9 +144,8 @@ async fn treasury_wallets<R: AuthRepo>(
     for coin in shared::COINS {
         let registry = state.chain_registry.clone();
         let ledger = ledgers.get(coin.as_str()).cloned().unwrap_or_else(|| "0".into());
-        let hot_mnemonic = state.hot_mnemonic.clone();
         hot_handles.push(tokio::spawn(async move {
-            match resolve_hot_address(coin, hot_mnemonic.as_deref()) {
+            match registry.hot_address(coin) {
                 Ok(address) => {
                     let (onchain, error) = onchain_balance(&registry, coin, &address).await;
                     TreasuryWalletRow {
@@ -262,7 +234,7 @@ async fn treasury_wallets<R: AuthRepo>(
             }
             rows
         },
-        hot_bnb_gas(state.hot_mnemonic.as_deref()),
+        hot_bnb_gas(&state.chain_registry),
     );
     let mut rows = hot_rows;
     rows.extend(dep_rows);
@@ -311,9 +283,8 @@ async fn treasury_health<R: AuthRepo>(State(state): State<AppState<R>>, user: Au
     let mut handles = Vec::new();
     for coin in shared::COINS {
         let registry = state.chain_registry.clone();
-        let hot_mnemonic = state.hot_mnemonic.clone();
         handles.push(tokio::spawn(async move {
-            let addr = resolve_hot_address(coin, hot_mnemonic.as_deref());
+            let addr = registry.hot_address(coin);
             match addr {
                 Ok(address) => {
                     let (onchain, error) = onchain_balance(&registry, coin, &address).await;
@@ -896,9 +867,6 @@ async fn record_client_errors_batch<R: AuthRepo>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Mutex;
-
-    static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
     fn explorer_base_covers_known_coins() {
@@ -907,31 +875,5 @@ mod tests {
         }
     }
 
-    #[test]
-    fn resolve_hot_address_mnemonic_and_missing() {
-        let _g = ENV_LOCK.lock().unwrap();
-        std::env::remove_var("HOT_MNEMONIC");
-        std::env::remove_var("HOT_WALLET_PRIVATE_KEY");
-        std::env::remove_var("POL_HOT_WALLET_KEY");
-        std::env::remove_var("HOT_WALLET_WIF");
-        assert!(resolve_hot_address(shared::Coin::Btc, None).is_err());
-
-        std::env::set_var(
-            "HOT_MNEMONIC",
-            "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
-        );
-        std::env::set_var("CHAIN_NETWORK", "mainnet");
-        assert!(resolve_hot_address(shared::Coin::Btc, None).is_ok());
-        std::env::set_var("CHAIN_NETWORK", "testnet");
-        let _ = resolve_hot_address(shared::Coin::Ltc, None);
-        // Explicit mnemonic argument wins even without env.
-        std::env::remove_var("HOT_MNEMONIC");
-        assert!(resolve_hot_address(
-            shared::Coin::Btc,
-            Some("abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"),
-        )
-        .is_ok());
-        std::env::remove_var("CHAIN_NETWORK");
-    }
 }
 

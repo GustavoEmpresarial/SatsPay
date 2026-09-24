@@ -5,6 +5,7 @@ import time
 import tarfile
 import tempfile
 import argparse
+import subprocess
 import paramiko
 
 
@@ -21,7 +22,9 @@ def load_ssh_config(env=os.environ):
 def require_ssh_creds(key, password):
     if key or password:
         return
-    print("[X] Set DEPLOY_SSH_KEY (preferred) or DEPLOY_SSH_PASSWORD. No password is stored in this script.")
+    if os.environ.get("SSH_AUTH_SOCK") and list(paramiko.Agent().get_keys()):
+        return
+    print("[X] Set DEPLOY_SSH_KEY, load a key in SSH_AUTH_SOCK, or set DEPLOY_SSH_PASSWORD. No password is stored in this script.")
     sys.exit(1)
 
 
@@ -35,12 +38,14 @@ def connect_kwargs(host, user, key, password):
 
 
 def deploy(deploy_backend=False):
+    version = subprocess.check_output(["git", "rev-parse", "--short=12", "HEAD"], text=True).strip()
     host, user, key, password = load_ssh_config()
     require_ssh_creds(key, password)
-    method = "key" if key else "password"
+    method = "key" if key else "password" if password else "SSH agent"
     print(f"[*] Conectando em {user}@{host} ({method})...")
     ssh = paramiko.SSHClient()
-    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    ssh.load_system_host_keys()
+    ssh.set_missing_host_key_policy(paramiko.RejectPolicy())
 
     connected = False
     kwargs = connect_kwargs(host, user, key, password)
@@ -67,18 +72,25 @@ def deploy(deploy_backend=False):
         tar_path = tmp.name
 
     with tarfile.open(tar_path, "w:gz") as tar:
+        def safe_source(member):
+            parts = member.name.split("/")
+            blocked = {"node_modules", "target", "dist", "coverage", "test-results", "playwright-report", ".git"}
+            if any(part in blocked or (part.startswith(".env") and part != ".env.example") for part in parts):
+                return None
+            return member
+
         # Frontend
         client_dir = os.path.join(root_dir, "client")
-        tar.add(client_dir, arcname="client", filter=lambda x: None if "node_modules" in x.name else x)
+        tar.add(client_dir, arcname="client", filter=safe_source)
 
         if deploy_backend:
             # Backend crates, configs and Dockerfiles
             crates_dir = os.path.join(root_dir, "crates")
-            tar.add(crates_dir, arcname="crates", filter=lambda x: None if "target" in x.name else x)
+            tar.add(crates_dir, arcname="crates", filter=safe_source)
             compose_path = os.path.join(root_dir, "deploy", "docker", "docker-compose.yml")
             if os.path.exists(compose_path):
                 tar.add(compose_path, arcname="docker-compose.yml")
-            for fname in ["Cargo.toml", "Cargo.lock", "Dockerfile.api-server", "Dockerfile.worker"]:
+            for fname in ["Cargo.toml", "Cargo.lock", "Dockerfile.api-server", "Dockerfile.worker", ".dockerignore"]:
                 fpath = os.path.join(root_dir, fname)
                 if os.path.exists(fpath):
                     tar.add(fpath, arcname=fname)
@@ -98,6 +110,8 @@ def deploy(deploy_backend=False):
     print("[*] Extraindo e reconstruindo containers na VM...")
     backend_build_script = """
 echo "=== Build da imagem api-server na VM ==="
+docker image inspect bitcosats/api-server:dev >/dev/null 2>&1 && docker tag bitcosats/api-server:dev bitcosats/api-server:rollback || true
+docker image inspect bitcosats/worker:dev >/dev/null 2>&1 && docker tag bitcosats/worker:dev bitcosats/worker:rollback || true
 docker build -f /root/bitcosats/Dockerfile.api-server -t bitcosats/api-server:dev /root/bitcosats/
 echo "=== Build da imagem worker na VM ==="
 docker build -f /root/bitcosats/Dockerfile.worker -t bitcosats/worker:dev /root/bitcosats/
@@ -107,6 +121,7 @@ docker compose up -d --no-deps api-server worker
 
     deploy_cmds = f"""
 set -e
+export APP_VERSION="{version}"
 mkdir -p /root/bitcosats
 tar -xzf /root/bitcosats_deploy.tar.gz -C /root/bitcosats/
 rm -f /root/bitcosats_deploy.tar.gz
@@ -148,7 +163,7 @@ if __name__ == "__main__":
     if args.check_auth:
         host, user, key, password = load_ssh_config()
         require_ssh_creds(key, password)
-        method = "key" if key else "password"
+        method = "key" if key else "password" if password else "SSH agent"
         print(f"[+] SSH auth configured: {user}@{host} via {method}")
         sys.exit(0)
     deploy(deploy_backend=args.backend or args.all)

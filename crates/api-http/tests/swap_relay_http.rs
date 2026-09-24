@@ -55,7 +55,7 @@ const RELAY_QUOTE_BODY: &str = r#"{
 
 #[sqlx::test(migrations = "../db/migrations")]
 async fn swap_relay_quote_and_execute(pool: PgPool) {
-    std::env::set_var("HOT_MNEMONIC", HOT_MNEMONIC);
+    common::set_hot_addresses(HOT_MNEMONIC);
     std::env::set_var("CHAIN_NETWORK", "mainnet");
     std::env::set_var("SWAPKIT_ENABLED", "false");
 
@@ -197,7 +197,7 @@ const RELAY_BRIDGE_SOL_BODY: &str = r#"{
 
 #[sqlx::test(migrations = "../db/migrations")]
 async fn swap_relay_bridge_sol_to_usdt(pool: PgPool) {
-    std::env::set_var("HOT_MNEMONIC", HOT_MNEMONIC);
+    common::set_hot_addresses(HOT_MNEMONIC);
     std::env::set_var("CHAIN_NETWORK", "mainnet");
     std::env::set_var("SWAPKIT_ENABLED", "false");
 

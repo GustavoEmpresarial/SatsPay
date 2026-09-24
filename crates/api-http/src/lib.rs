@@ -7,6 +7,7 @@ pub mod admin;
 pub mod airdrop;
 pub mod auth;
 pub mod client_ip;
+pub mod csrf;
 pub mod deposits;
 pub mod faucet;
 pub mod http_error;
@@ -15,7 +16,6 @@ pub mod merchant;
 pub mod merchant_deposits;
 pub mod middleware;
 pub mod notify_email;
-pub mod csrf;
 pub mod oauth;
 pub mod oauth_pkce;
 pub mod oauth_redirect;
@@ -46,14 +46,31 @@ use tower_http::timeout::TimeoutLayer;
 /// Matches `TimeoutLayer` below and the previous outer timeout.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
-const SKIP_ERROR_RECORD_PATHS: &[&str] = &["/healthz", "/metrics", "/v1/telemetry/client-error", "/v1/telemetry/client-errors"];
+const SKIP_ERROR_RECORD_PATHS: &[&str] = &[
+    "/healthz",
+    "/metrics",
+    "/v1/telemetry/client-error",
+    "/v1/telemetry/client-errors",
+];
 
 /// Production router (Prometheus + `/metrics`).
 pub fn app<R: AuthRepo + 'static>(state: AppState<R>) -> Router {
     let (prometheus_layer, metric_handle) = axum_prometheus::PrometheusMetricLayer::pair();
+    let metrics_pool = state.pool.clone();
     finish_router(
         route_tree::<R>()
-            .route("/metrics", get(move || async move { metric_handle.render() }))
+            .route(
+                "/metrics",
+                get(move || async move {
+                    let mut output = metric_handle.render();
+                    if let Ok(extra) =
+                        db::telemetry::render_operational_metrics(&metrics_pool).await
+                    {
+                        output.push_str(&extra);
+                    }
+                    output
+                }),
+            )
             .layer(prometheus_layer),
         state,
     )
@@ -69,7 +86,7 @@ pub fn app_without_metrics<R: AuthRepo + 'static>(state: AppState<R>) -> Router 
 
 fn route_tree<R: AuthRepo + 'static>() -> Router<AppState<R>> {
     Router::<AppState<R>>::new()
-        .route("/healthz", get(healthz))
+        .route("/healthz", get(healthz::<R>))
         .merge(auth::routes::<R>())
         .merge(wallet::routes::<R>())
         .merge(deposits::routes::<R>())
@@ -96,10 +113,16 @@ fn finish_router<R: AuthRepo + 'static>(router: Router<AppState<R>>, state: AppS
         // Innermost: normalize axum extractor rejections (bad JSON / wrong type)
         // into the stable `{ error, code }` contract before anything else sees them.
         .layer(axum::middleware::from_fn(normalize_extractor_rejections))
-        .layer(axum::middleware::from_fn_with_state(state.clone(), record_server_errors::<R>))
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            record_server_errors::<R>,
+        ))
         // Rate limiting sits outside the metrics layer on purpose: rejected
         // floods should not inflate the per-route histograms.
-        .layer(axum::middleware::from_fn_with_state(state.clone(), rate_limit::layer::<R>))
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            rate_limit::layer::<R>,
+        ))
         // Outermost: no request gets to hold a connection (and a Postgres
         // pool slot) indefinitely.
         .layer(TimeoutLayer::new(REQUEST_TIMEOUT))
@@ -119,7 +142,7 @@ async fn record_server_errors<R: AuthRepo + 'static>(
     // Path only: query strings carry OAuth `code`/`state`, e-mails, callback keys.
     let full_endpoint = path.clone();
     let request_id = access_log::current_request_id();
-    
+
     // Same trust model as `client_ip::resolve_client_ip` (do not trust CF-* from clients).
     let ip_address = request
         .headers()
@@ -128,9 +151,17 @@ async fn record_server_errors<R: AuthRepo + 'static>(
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
         .or_else(|| {
-            request.headers().get("x-forwarded-for").and_then(|v| v.to_str().ok()).and_then(|s| {
-                s.split(',').map(str::trim).filter(|h| !h.is_empty()).last().map(str::to_string)
-            })
+            request
+                .headers()
+                .get("x-forwarded-for")
+                .and_then(|v| v.to_str().ok())
+                .and_then(|s| {
+                    s.split(',')
+                        .map(str::trim)
+                        .filter(|h| !h.is_empty())
+                        .last()
+                        .map(str::to_string)
+                })
         });
 
     let user_agent = request
@@ -162,17 +193,51 @@ async fn record_server_errors<R: AuthRepo + 'static>(
                 status_code: Some(status_code),
                 user_id: None,
                 ip_address: ip_address.map(|ip| state.secrets.ip_fingerprint(&ip)),
-                request_payload: None,
+                request_payload: request_id
+                    .as_ref()
+                    .map(|id| serde_json::json!({"request_id": id})),
                 user_agent: user_agent.map(|ua| ua.chars().take(80).collect()),
             };
+            let module = path
+                .split('/')
+                .nth(2)
+                .filter(|s| !s.is_empty())
+                .unwrap_or("unknown");
+            let version = std::env::var("APP_VERSION").unwrap_or_else(|_| "unknown".into());
+            if let Err(e) =
+                db::telemetry::record_http_failure(&pool, module, &version, status_code).await
+            {
+                tracing::warn!(error = %e, "failed to record 5xx event");
+            }
             let _ = db::telemetry::record_error(&pool, payload).await;
         });
     }
     response
 }
 
-async fn healthz() -> &'static str {
-    "ok"
+async fn healthz<R: AuthRepo>(State(state): State<AppState<R>>) -> Response {
+    match state.custody_signer_ready().await {
+        Ok(true) => "ok".into_response(),
+        Ok(false) => (
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            axum::Json(serde_json::json!({
+                "error": "custody signer validation is missing or stale",
+                "code": "CUSTODY_SIGNER_NOT_VALIDATED"
+            })),
+        )
+            .into_response(),
+        Err(e) => {
+            tracing::error!(error = %e, "custody signer readiness check failed");
+            (
+                axum::http::StatusCode::SERVICE_UNAVAILABLE,
+                axum::Json(serde_json::json!({
+                    "error": "custody signer validation is unavailable",
+                    "code": "CUSTODY_VALIDATION_UNAVAILABLE"
+                })),
+            )
+                .into_response()
+        }
+    }
 }
 
 /// axum's built-in `Json`/`Path`/`Query` extractors reject malformed input with
