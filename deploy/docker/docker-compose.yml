@@ -180,7 +180,7 @@ services:
       # zerod próprio assina com WIF enquanto exploradores públicos leem/broadcastam.
       ZER_RPC_URL: ${ZER_RPC_URL:-}
       DOGE_BLOCKBOOK_API_KEY: ${DOGE_BLOCKBOOK_API_KEY:-}
-      DOGE_BLOCKBOOK_API: ${DOGE_BLOCKBOOK_API:-https://dogebook.nownodes.io}
+      DOGE_BLOCKBOOK_API: ${DOGE_BLOCKBOOK_API:-https://dogecoin.atomicwallet.io}
       DEPOSIT_MNEMONIC_ENC: ${DEPOSIT_MNEMONIC_ENC:-}
       HOT_MNEMONIC_ENC: ${HOT_MNEMONIC_ENC:-}
       HOT_WALLET_WIF_ENC: ${HOT_WALLET_WIF_ENC:-}

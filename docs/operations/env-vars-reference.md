@@ -43,6 +43,8 @@ Este documento cataloga todas as variáveis de ambiente utilizadas pelos serviç
 | `ENCRYPTION_KEY_FILE` | `api-server`, `worker` | Não | `/run/secrets/encryption_key` | Alternativa a `ENCRYPTION_KEY` (arquivo tem prioridade) |
 | `DEPOSIT_POOL_TARGET` / `DEPOSIT_POOL_INTERVAL_SECS` | `worker` | Não | `50` / `60` | Endereços SOL pré-derivados livres que o worker mantém em `deposit_address_pool` |
 | `POL_RPC_URL` | `api-server`, `worker` | Se real=true | `https://polygon-rpc.com` | Endpoint JSON-RPC da rede Polygon |
+| `DOGE_BLOCKBOOK_API` | `worker` | Não | `https://dogecoin.atomicwallet.io` | Quarto provedor do histórico DOGE, depois de BlockCypher e Bitcore |
+| `DOGE_BLOCKBOOK_API_KEY` | **só** `worker` | Não | — | Chave opcional enviada apenas no header `api-key` quando o Blockbook configurado exigir credencial |
 | `DGB_RPC_URL` | `api-server`, `worker` | Não | `http://user:pass@host:14022` | Node DigiByte próprio (`scantxoutset` / `sendrawtransaction`). Sem valor, cai no Insight. |
 | `DGB_INSIGHT_API` | `api-server`, `worker` | Não | `https://digiexplorer.info/api` | Indexer DGB primário quando o node RPC (`DGB_RPC_URL`) falha. Depois dele a API tenta `explorer.digibyte.host` (Insight) e `digibyte.atomicwallet.io` (Blockbook) para UTXOs, taxa, saldo e broadcast — timeout 15 s cada |
 | `ZER_RPC_URL` | `api-server`, `worker` | Prod (saque) | `http://user:pass@host:23801` | Node `zerod` (`scantxoutset` / `createrawtransaction` / `signrawtransactionwithkey` / `sendrawtransaction`). Sem URL, depósito cai no explorer; saque falha fechado. |

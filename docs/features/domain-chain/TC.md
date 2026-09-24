@@ -35,7 +35,7 @@
 - [ ] Produção recusa plaintext mesmo junto do `_ENC`, exige mnemonic de depósito no worker e bloqueia readiness/emissão se o heartbeat não corresponder ao fingerprint público atual.
 - [ ] Endereços hot Base58 são comparados com caixa exata; signer ausente não valida endereço configurado.
 - [ ] Pool SOL vazio retorna `503 {error, code: "DEPOSIT_ADDRESS_POOL_EMPTY"}`.
-- [ ] Blockbook DOGE credenciado detecta saída destinada ao endereço correto, sem repassar chave em URL/log.
+- [ ] Blockbook DOGE público detecta saída destinada ao endereço correto sem credencial; quando configurada, a chave opcional não aparece em URL/log.
 - [ ] ZER recusa RPC público de assinatura; `zerod` local assina enquanto leitura e broadcast usam provedor público.
 - [ ] ZeroChain `rawtx` recebe apenas hex já assinado; rejeição HTTP não vaza a chave de API e resposta sem txid não é sucesso.
 - [ ] Histórico ZeroChain usa `vout[].valueSat` e endereço da saída para depósitos; a busca de UTXOs percorre as páginas e exclui saídas gastas. Saldo sem campo válido falha em vez de somar depósitos históricos.

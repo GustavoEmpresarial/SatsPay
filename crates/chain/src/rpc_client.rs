@@ -178,19 +178,22 @@ impl MultiChainRpcClient {
             info!(coin = "DOGE", provider = "bitcore", "Fallback successful");
             return Ok(txs);
         }
-        warn!(coin = "DOGE", provider = "bitcore", "Secondary failed, trying Blockbook...");
+        warn!(
+            coin = "DOGE",
+            provider = "bitcore",
+            "Secondary failed, trying Blockbook..."
+        );
 
-        if let Ok(key) = std::env::var("DOGE_BLOCKBOOK_API_KEY") {
-            if !key.trim().is_empty() {
-                if let Ok(txs) = crate::provider_circuit::call("doge_blockbook", || {
-                    self.fetch_doge_blockbook(address, &key)
-                })
-                .await
-                {
-                    info!(coin = "DOGE", provider = "blockbook", "Fallback successful");
-                    return Ok(txs);
-                }
-            }
+        let key = std::env::var("DOGE_BLOCKBOOK_API_KEY")
+            .ok()
+            .filter(|value| !value.trim().is_empty());
+        if let Ok(txs) = crate::provider_circuit::call("doge_blockbook", || {
+            self.fetch_doge_blockbook(address, key.as_deref())
+        })
+        .await
+        {
+            info!(coin = "DOGE", provider = "blockbook", "Fallback successful");
+            return Ok(txs);
         }
 
         Err(ChainError {
@@ -198,28 +201,26 @@ impl MultiChainRpcClient {
         })
     }
 
-    /// NOWNodes Blockbook history fallback. The API key stays in a header and
-    /// errors never contain the URL or key. Empty/malformed JSON is not success.
+    /// Public Blockbook history fallback. A key is optional for providers that
+    /// require one, stays in a header, and is never included in errors.
     async fn fetch_doge_blockbook(
         &self,
         address: &str,
-        key: &str,
+        key: Option<&str>,
     ) -> Result<Vec<OnchainTx>, ChainError> {
         let base = std::env::var("DOGE_BLOCKBOOK_API")
-            .unwrap_or_else(|_| "https://dogebook.nownodes.io".into());
+            .unwrap_or_else(|_| "https://dogecoin.atomicwallet.io".into());
         let url = format!(
             "{}/api/v2/address/{address}?details=txs&pageSize=1000",
             base.trim_end_matches('/')
         );
-        let resp = self
-            .http
-            .get(url)
-            .header("api-key", key)
-            .send()
-            .await
-            .map_err(|_| ChainError {
-                message: "DOGE Blockbook request failed".into(),
-            })?;
+        let mut request = self.http.get(url);
+        if let Some(key) = key {
+            request = request.header("api-key", key);
+        }
+        let resp = request.send().await.map_err(|_| ChainError {
+            message: "DOGE Blockbook request failed".into(),
+        })?;
         if !resp.status().is_success() {
             return Err(ChainError {
                 message: format!("DOGE Blockbook HTTP {}", resp.status()),
