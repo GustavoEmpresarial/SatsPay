@@ -2447,6 +2447,8 @@ pub fn verify_webhook(raw_body: &[u8], signature_header: &str, webhook_secret: &
                         ['INVALID_ORDER_ID', '400', 'orderId vazio ou acima de 128 caracteres.', 'Use o identificador do pedido no seu sistema.', 'amber'],
                         ['INVALID_CALLBACK_URL', '400', 'callbackUrl não é https público (localhost/IP interno).', 'Aponte para uma URL https acessível pela internet.', 'amber'],
                         ['DUPLICATE_ORDER_ID', '409', 'orderId já usado para outra cobrança.', 'Use um orderId único por pedido (repetir o mesmo pedido devolve 200).', 'purple'],
+                        ['CUSTODY_SIGNER_NOT_VALIDATED', '503', 'O signer está iniciando, indisponível ou ainda não validou a configuração pública de custódia.', 'Tente novamente com backoff; se persistir, avise o suporte.', 'amber'],
+                        ['DEPOSIT_ADDRESS_POOL_EMPTY', '503', 'O pool de endereços SOL pré-gerados pelo signer está vazio.', 'Tente novamente mais tarde ou ofereça outra moeda ativa.', 'amber'],
                         ['ADDRESS_UNAVAILABLE', '503', 'Não foi possível derivar um endereço dedicado para a fatura.', 'Tente novamente; se persistir, avise o suporte (problema de nó/RPC).', 'amber'],
                         ['INVOICE_NOT_FOUND', '404', 'Fatura inexistente.', 'Confira o id retornado na criação.', 'amber'],
                         ['INVOICE_FORBIDDEN', '403', 'A fatura pertence a outro comerciante.', 'Use a chave do dono da fatura.', 'rose'],
